@@ -66,6 +66,8 @@ RACE_TO_PROTO = {
     "RANDOM": common_pb2.Random,
 }
 
+TOWNHALL_UNIT_TYPES = frozenset({18, 59, 86, 100, 101, 130, 132})
+
 
 @dataclass
 class BotCfg:
@@ -92,6 +94,7 @@ class PlayerOutcome:
     crashed_before_end: bool = False
     timed_out_before_end: bool = False
     error_detail: str = ""
+    start_xy: list[float] | None = None
 
     @property
     def avg_step_time(self) -> float | None:
@@ -378,8 +381,12 @@ async def run_match(args: argparse.Namespace) -> int:
                 log(f"SaveReplay attempt failed: {exc}")
 
     t0 = time.monotonic()
+    random_seed = int(getattr(args, "random_seed", 0) or 0)
     try:
-        log(f"Launching SC2_x64 x2 for {cfg1.name}({cfg1.race},{cfg1.bot_type}) vs {cfg2.name}({cfg2.race},{cfg2.bot_type}) on {map_rel}")
+        log(
+            f"Launching SC2_x64 x2 for {cfg1.name}({cfg1.race},{cfg1.bot_type}) vs "
+            f"{cfg2.name}({cfg2.race},{cfg2.bot_type}) on {map_rel} (random_seed={random_seed})"
+        )
         sc2_cwd = str(SC2_CWD if SC2_CWD.is_dir() else SC2_BASE_DIR)
         sc2_proc1 = subprocess.Popen(
             [str(SC2_BIN), "-listen", "127.0.0.1", "-port", str(SC2_PORT_1),
@@ -400,11 +407,14 @@ async def run_match(args: argparse.Namespace) -> int:
             sc2_sockets = {1: sc2_ws1, 2: sc2_ws2}
             log("Both SC2_x64 instances ready; sending RequestCreateGame...")
 
-            cg = sc2api_pb2.RequestCreateGame(
-                local_map=sc2api_pb2.LocalMap(map_path=map_rel),
-                realtime=args.realtime,
-                disable_fog=False,
-            )
+            cg_kwargs: dict[str, Any] = {
+                "local_map": sc2api_pb2.LocalMap(map_path=map_rel),
+                "realtime": args.realtime,
+                "disable_fog": False,
+            }
+            if random_seed > 0:
+                cg_kwargs["random_seed"] = random_seed
+            cg = sc2api_pb2.RequestCreateGame(**cg_kwargs)
             p1_setup = cg.player_setup.add()
             p1_setup.type = sc2api_pb2.Participant
             p2_setup = cg.player_setup.add()
@@ -415,7 +425,7 @@ async def run_match(args: argparse.Namespace) -> int:
                 raise RuntimeError(
                     f"RequestCreateGame failed: {cg_resp.create_game.error} ({cg_resp.create_game.error_details})"
                 )
-            log(f"Game created on {map_rel}")
+            log(f"Game created on {map_rel} (random_seed={random_seed})")
 
             def make_ws_handler(cfg: BotCfg, other_cfg: BotCfg):
                 async def ws_handler(http_req: web.Request) -> web.WebSocketResponse:
@@ -547,6 +557,16 @@ async def run_match(args: argparse.Namespace) -> int:
                                 gl = obs.observation.game_loop
                                 if gl > outcome.game_loops:
                                     outcome.game_loops = gl
+                                if outcome.start_xy is None:
+                                    raw_data = obs.observation.raw_data
+                                    for u in raw_data.units:
+                                        if u.alliance == 1 and u.unit_type in TOWNHALL_UNIT_TYPES:
+                                            outcome.start_xy = [round(float(u.pos.x), 2), round(float(u.pos.y), 2)]
+                                            break
+                                    if outcome.start_xy is None and raw_data.HasField("player"):
+                                        cam = raw_data.player.camera
+                                        if cam.x != 0.0 or cam.y != 0.0:
+                                            outcome.start_xy = [round(float(cam.x), 2), round(float(cam.y), 2)]
                                 pc = obs.observation.player_common
                                 live_stats[cfg.player_num] = {
                                     "food_used": int(pc.food_used),
@@ -750,6 +770,9 @@ async def run_match(args: argparse.Namespace) -> int:
                 "bot2_tags": p2.tags,
                 "type": final_result,
                 "game_steps": game_steps,
+                "random_seed": random_seed,
+                "p1_start_xy": p1.start_xy,
+                "p2_start_xy": p2.start_xy,
                 "p1_detail": p1.result or "",
                 "p2_detail": p2.result or "",
                 "p1_error": p1.error_detail,
@@ -787,6 +810,12 @@ def main() -> int:
     ap.add_argument("--realtime", action="store_true")
     ap.add_argument("--validate-race", action="store_true")
     ap.add_argument("--allow-debug", action="store_true")
+    ap.add_argument(
+        "--random-seed",
+        type=int,
+        default=0,
+        help="Optional SC2 RequestCreateGame random_seed (> 0 for deterministic spawn & RNG; 0 = unset/random)",
+    )
     args = ap.parse_args()
     args.disable_debug = not args.allow_debug
 

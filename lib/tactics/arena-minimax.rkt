@@ -573,6 +573,7 @@
  arena-direct-should-commit-through-splash?
  compute-anti-light-locust-splash-score
  army-has-strong-anti-light-locust-splash?
+ locust-wave-dominates-nearby-threat?
  evaluate-carrier-engagement-mode
  step-tactical-mirror-brain!)
 
@@ -2792,6 +2793,108 @@
 
 (define (army-has-strong-anti-light-locust-splash? ally-combat-units)
   (fl>= (compute-anti-light-locust-splash-score ally-combat-units) 1.0))
+
+(define (arena-entry-xy u)
+  (cond
+    [(tactical-sim-unit? u)
+     (values (exact->inexact (tactical-sim-unit-x u))
+             (exact->inexact (tactical-sim-unit-y u)))]
+    [(hash? u)
+     (define x (hash-ref u 'x #f))
+     (define y (hash-ref u 'y #f))
+     (if (and (real? x) (real? y))
+         (values (exact->inexact x) (exact->inexact y))
+         (values #f #f))]
+    [else (values #f #f)]))
+
+(define (arena-locust-sym? raw canon)
+  (or (memq raw '(locust locust-mp locustmp locust-flying locust-mp-flying))
+      (memq canon '(locust locust-mp locust-flying locust-mp-flying))))
+
+(define (arena-swarm-host-sym? raw canon)
+  (or (memq raw '(swarm-host swarm-host-mp swarm-host-burrowed swarm-host-burrowed-mp))
+      (memq canon '(swarm-host swarm-host-mp))))
+
+(define (arena-permanent-combat-enemy? u)
+  (and (arena-entry-alive? u)
+       (let* ([raw (arena-entry-raw-type u)]
+              [canon (sc2-canonical-unit-sym raw)])
+         (and (not (eq? raw 'unknown))
+              (not (arena-locust-sym? raw canon))
+              (not (arena-swarm-host-sym? raw canon))
+              (not (sc2-non-combat-or-summon-sym? raw))
+              (not (sc2-non-combat-or-summon-sym? canon))
+              (not (hash-ref *ARENA-SPLASH-EXCLUDED-HT* raw #f))
+              (not (hash-ref *ARENA-SPLASH-EXCLUDED-HT* canon #f))
+              (not (memq canon '(drone scv probe mule larva egg overlord overseer
+                                 observer warp-prism creep-tumor creep-tumor-burrowed
+                                 creep-tumor-queen templar-archive warp-gate
+                                 barracks-techlab barracks-reactor
+                                 factory-techlab factory-reactor
+                                 starport-techlab starport-reactor)))
+              (if (tactical-sim-unit? u)
+                  (or (fl> (tactical-sim-unit-ground-dps u) 0.0)
+                      (fl> (tactical-sim-unit-air-dps u) 0.0)
+                      (memq canon '(high-templar infestor viper disruptor raven medivac sentry)))
+                  (let ([sv (fast-unit-stat-vec canon)])
+                    (or (fl> (vector-ref sv 5) 0.0)
+                        (fl> (vector-ref sv 6) 0.0)
+                        (memq canon '(high-templar infestor viper disruptor raven medivac sentry)))))))))
+
+;; Loop 81: Pure Swarm-Host Locust-wave dominance check.
+;; Returns #t iff >= `min-locusts` (default 4) live enemy Locusts are within `radius`
+;; (default 16.0 tiles) of the ally combat centroid AND permanent non-Locust, non-Swarm-Host
+;; enemy combat units within `radius` are either `< max-perm-combat` (default 4) OR
+;; `< max-perm-ratio` (default 0.35) of `(nearby-locusts + nearby-perm-combat)`.
+(define (locust-wave-dominates-nearby-threat?
+         ally-combat-units
+         enemy-units
+         #:radius [radius 16.0]
+         #:min-locusts [min-locusts 4]
+         #:max-perm-combat [max-perm-combat 4]
+         #:max-perm-ratio [max-perm-ratio 0.35])
+  (define-values (ax-sum ay-sum ally-cnt)
+    (for/fold ([sx 0.0] [sy 0.0] [cnt 0]) ([a (in-list (or ally-combat-units '()))])
+      (if (not (arena-entry-alive? a))
+          (values sx sy cnt)
+          (let-values ([(ax ay) (arena-entry-xy a)])
+            (if (and ax ay)
+                (values (fl+ sx ax) (fl+ sy ay) (+ cnt 1))
+                (values sx sy cnt))))))
+  (if (= ally-cnt 0)
+      #f
+      (let* ([cx (fl/ ax-sum (exact->inexact ally-cnt))]
+             [cy (fl/ ay-sum (exact->inexact ally-cnt))]
+             [r (exact->inexact radius)]
+             [r2 (fl* r r)])
+        (define-values (near-locusts near-perm)
+          (for/fold ([lc 0] [pc 0]) ([e (in-list (or enemy-units '()))])
+            (if (not (arena-entry-alive? e))
+                (values lc pc)
+                (let-values ([(ex ey) (arena-entry-xy e)])
+                  (if (not (and ex ey))
+                      (values lc pc)
+                      (let* ([dx (fl- ex cx)]
+                             [dy (fl- ey cy)]
+                             [d2 (fl+ (fl* dx dx) (fl* dy dy))])
+                        (if (fl> d2 r2)
+                            (values lc pc)
+                            (let* ([raw (arena-entry-raw-type e)]
+                                   [canon (sc2-canonical-unit-sym raw)])
+                              (cond
+                                [(arena-locust-sym? raw canon)
+                                 (values (+ lc 1) pc)]
+                                [(arena-permanent-combat-enemy? e)
+                                 (values lc (+ pc 1))]
+                                [else
+                                 (values lc pc)])))))))))
+        (and (>= near-locusts min-locusts)
+             (let ([total-near (+ near-locusts near-perm)])
+               (or (< near-perm max-perm-combat)
+                   (and (> total-near 0)
+                        (fl< (fl/ (exact->inexact near-perm)
+                                  (exact->inexact total-near))
+                             (exact->inexact max-perm-ratio)))))))))
 
 ;; Strict binary Anti-Carrier commitment (`'carrier-snipe` | `'interceptor-burn` | `'none`).
 ;; Never mixes targeting: commits 100% to sniping Carriers when anti-armored burst is sufficient

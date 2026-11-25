@@ -863,6 +863,139 @@
                       m01-has-spatial? m01-marine-atks m01-lib-atks
                       st-bad-deadzone-or-air-atks st-15.5-allowed? st-17.5-dropped?)))
 
+;; -----------------------------------------------------------------------------
+;; Test 8: Loop 80 Post-Merge Micro Fixes (`sh-d01` 0-TH Fog-of-War Center Sweep
+;;         & `lib-m01` Combined Bio+Liberator Escort Hold + Queen/Drone Raid)
+;; -----------------------------------------------------------------------------
+(printf "\n[8] Loop 80: 0-TH Fog-of-War Center Sweep & Combined Bio+Liberator Escort\n")
+(let ()
+  ;; (a) 0-TH mid-map army (`3 archon + 8 stalker + 3 colossus`) at `(71, 88)` on `176x172`
+  ;;     with `0` visible enemies & mirrored spawn (`P1=BR`, `P2=TL (33.5, 138.5)`) MUST sweep
+  ;;     EAST across map center `(88, 86)` (`x >= 85`) instead of marching west toward `(33.5, 138.5)`!
+  (define rt-sh (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define sh-allies
+    (append
+     (for/list ([i (in-range 3)]) (mk-u (+ 81100 i) 'archon 72.2 (+ 86.0 i) #:hp 10.0 #:shield 350.0))
+     (for/list ([i (in-range 8)]) (mk-u (+ 81200 i) 'stalker 71.2 (+ 84.5 i) #:hp 80.0 #:shield 80.0))
+     (for/list ([i (in-range 3)]) (mk-u (+ 81300 i) 'colossus 70.2 (+ 86.0 i) #:hp 200.0 #:shield 150.0))))
+  (define obs-sh
+    (hash-set* (mk-live-obs 'Protoss 'Zerg 152
+                            #:ally-units sh-allies #:ally-buildings '()
+                            #:enemy-units '() #:enemy-buildings '()
+                            #:base-x 142.5 #:base-y 33.5 #:nat-x 135.0 #:nat-y 55.0
+                            #:enemy-x 33.5 #:enemy-y 138.5 #:enemy-exp-x 55.0 #:enemy-exp-y 135.0
+                            #:researched-upgrades '(extended-thermal-lance)
+                            #:supply-used 46 #:supply-cap 200)
+               'map-width 176 'map-height 172))
+  (define acts-sh (run-l34 rt-sh obs-sh))
+  (define sh-east-sweeps
+    (count (lambda (a)
+             (and (pair? a) (eq? (car a) 'attack-pos) (>= (length a) 4)
+                  (real? (third a)) (>= (third a) 85.0)))
+           acts-sh))
+  (define sh-west-stalls
+    (count (lambda (a)
+             (and (pair? a) (eq? (car a) 'attack-pos) (>= (length a) 4)
+                  (real? (third a)) (< (third a) 60.0)))
+           acts-sh))
+
+  ;; (b) Combined Bio+Liberator escort (`2 liberator + 8 marine + 1 medivac` at BR `(142.5, 33.5)`)
+  ;;     fighting `4 hydralisk + 2 queen + 16 drone + spore + hatch`: healthy Liberators supported
+  ;;     by `>= 3` Marines within `<= 12t` siege in place (`morph-liberator-ag`) with ZERO off-screen evade!
+  (define rt-lm1 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define lm-mps
+    (for/list ([i (in-range 8)])
+      (hasheq 'id (+ 81900 i) 'type 'mineral-field
+              'x (if (< i 4) 149.0 (+ 144.0 (* (- i 4) 1.5)))
+              'y (if (< i 4) (+ 30.0 (* i 1.5)) 27.5))))
+  (define lm-drones
+    (for/list ([i (in-range 16)])
+      (mk-u (+ 81400 i) 'drone (if (< i 8) 147.0 (+ 144.0 (* 0.5 (- i 8))))
+            (if (< i 8) (+ 29.5 (* 0.6 i)) 29.0) #:hp 40.0)))
+  (define lm-queens
+    (list (mk-u 81500 'queen 139.0 36.0 #:hp 175.0)
+          (mk-u 81501 'queen 139.5 35.0 #:hp 175.0)))
+  (define lm-hydras
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 81600 i) 'hydralisk (+ 137.5 (* 0.4 (modulo i 2))) (+ 35.5 (* 0.7 (quotient i 2))) #:hp 90.0)))
+  (define lm-spore (hash-set (mk-u 81700 'spore-crawler 145.5 34.0 #:hp 400.0) 'structure? #t))
+  (define lm-hatch (hash-set (mk-u 81701 'hatchery 142.5 33.5 #:hp 1500.0) 'structure? #t))
+  (define lm-allies1
+    (append
+     (list (mk-u 81800 'liberator 137.5 42.0 #:hp 180.0 #:flying #t)
+           (mk-u 81801 'liberator 138.5 42.0 #:hp 180.0 #:flying #t))
+     (for/list ([i (in-range 8)])
+       (mk-u (+ 81810 i) 'marine (+ 133.5 (* 0.4 (modulo i 4))) (+ 37.5 (* 0.4 (quotient i 4))) #:hp 55.0))
+     (list (mk-u 81890 'medivac 131.5 39.5 #:hp 150.0 #:energy 100.0 #:flying #t))))
+  (define obs-lm1
+    (hash-set* (mk-live-obs 'Terran 'Zerg 1956
+                            #:ally-units lm-allies1 #:ally-buildings '()
+                            #:enemy-units (append lm-drones lm-queens lm-hydras (list lm-spore lm-hatch))
+                            #:enemy-buildings (list lm-spore lm-hatch)
+                            #:mineral-patches lm-mps
+                            #:base-x 33.5 #:base-y 138.5 #:nat-x 55.0 #:nat-y 135.0
+                            #:enemy-x 142.5 #:enemy-y 33.5 #:enemy-exp-x 142.5 #:enemy-exp-y 60.0
+                            #:researched-upgrades '(stimpack combat-shield)
+                            #:supply-used 16 #:supply-cap 200)
+               'map-width 176 'map-height 172))
+  (define acts-lm1 (run-l34 rt-lm1 obs-lm1))
+  (define lm1-lib-sieges
+    (count (lambda (a)
+             (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3)
+                  (memv (second a) '(81800 81801))
+                  (eq? (third a) 'morph-liberator-ag)))
+           acts-lm1))
+  (define lm1-lib-evade-moves
+    (count (lambda (a)
+             (and (pair? a) (eq? (car a) 'move) (>= (length a) 4)
+                  (memv (second a) '(81800 81801))
+                  (real? (fourth a)) (> (fourth a) 45.0)))
+           acts-lm1))
+
+  ;; (c) Post-Hydralisk phase (`2 marine + 1 medivac` at `dx=8.5t`, `wcd=0.0` vs `2 queen + 16 drone`):
+  ;;     Marines MUST emit `(attack-unit ...)` cleanly with ZERO `(kite ...)` yo-yo and ZERO
+  ;;     Phase 7 `(attack-pos ... 28t-away)` hijack!
+  (define rt-lm2 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define obs-lm2
+    (hash-set* (mk-live-obs 'Terran 'Zerg 2140
+                            #:ally-units (list (mk-u 81810 'marine 130.5 37.5 #:hp 45.0 #:max-hp 55.0)
+                                               (mk-u 81811 'marine 130.8 37.5 #:hp 45.0 #:max-hp 55.0)
+                                               (mk-u 81890 'medivac 129.0 39.0 #:hp 150.0 #:energy 100.0 #:flying #t))
+                            #:ally-buildings '()
+                            #:enemy-units (append lm-drones lm-queens (list lm-spore lm-hatch))
+                            #:enemy-buildings (list lm-spore lm-hatch)
+                            #:mineral-patches lm-mps
+                            #:base-x 33.5 #:base-y 138.5 #:nat-x 55.0 #:nat-y 135.0
+                            #:enemy-x 142.5 #:enemy-y 33.5 #:enemy-exp-x 142.5 #:enemy-exp-y 60.0
+                            #:researched-upgrades '(stimpack combat-shield)
+                            #:supply-used 4 #:supply-cap 200)
+               'map-width 176 'map-height 172))
+  (define acts-lm2 (run-l34 rt-lm2 obs-lm2))
+  (define lm2-marine-atks
+    (count (lambda (a)
+             (and (pair? a) (eq? (car a) 'attack-unit)
+                  (memv (second a) '(81810 81811))))
+           acts-lm2))
+  (define lm2-marine-kites
+    (count (lambda (a)
+             (and (pair? a) (eq? (car a) 'kite)
+                  (memv (second a) '(81810 81811))))
+           acts-lm2))
+  (define lm2-marine-hijacks
+    (count (lambda (a)
+             (and (pair? a) (eq? (car a) 'attack-pos) (>= (length a) 4)
+                  (memv (second a) '(81810 81811))
+                  (real? (third a)) (< (third a) 126.0)))
+           acts-lm2))
+
+  (check-true "l80-sh-d01-fog-center-sweep-and-lib-m01-escort-queen-raid"
+              (and (>= sh-east-sweeps 3) (= sh-west-stalls 0)
+                   (>= lm1-lib-sieges 1) (= lm1-lib-evade-moves 0)
+                   (= lm2-marine-atks 2) (= lm2-marine-kites 0) (= lm2-marine-hijacks 0))
+              (format "shEast=~a shWest=~a libSiege=~a libEvade=~a m2Atk=~a m2Kite=~a m2Hijack=~a"
+                      sh-east-sweeps sh-west-stalls lm1-lib-sieges lm1-lib-evade-moves
+                      lm2-marine-atks lm2-marine-kites lm2-marine-hijacks)))
+
 (printf "\n=== Loop 79 Lane B Summary: ~a/~a passed (~a failed) ===\n"
         tests-passed tests-run tests-failed)
 (when (> tests-failed 0)

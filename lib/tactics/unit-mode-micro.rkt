@@ -178,6 +178,7 @@
  unit-mode-tracker-hellbat-dwell-elapsed
  unit-mode-tracker-viking-dwell-elapsed
  unit-mode-tracker-widow-mine-dwell-elapsed
+ unit-mode-tracker-siege-tank-dwell-elapsed
  unit-mode-tracker-liberator-dwell-elapsed
  unit-mode-tracker-cyclone-lock-state
  unit-mode-tracker-marauder-slow-until
@@ -195,6 +196,8 @@
  WIDOW-MINE-MODE-COOLDOWN-FRAMES
  UNIT-MODE-TRANSPORT-LOAD-COOLDOWN-FRAMES
  SIEGE-TANK-SPLASH-RADIUS
+ SIEGE-TANK-EMERGENCY-UNSIEGE-ABILITY-ID
+ SIEGE-TANK-EMERGENCY-UNSIEGE-COOLDOWN-FRAMES
  LIBERATOR-UNIT-TYPE-ID
  LIBERATOR-AG-UNIT-TYPE-ID
  MORPH-LIBERATOR-AG-ABILITY-ID
@@ -205,6 +208,8 @@
  select-widow-mine-cluster-target
  siege-tank-target-safe?
  plan-siege-tank-targets
+ evaluate-siege-tank-emergency-unsiege
+ plan-siege-tank-emergency-unsiege
  evaluate-liberator-mode
  plan-liberator-modes
 
@@ -229,6 +234,7 @@
   plan-viking-modes
   evaluate-cyclone-micro
   plan-cyclone-micro
+  compute-tether-kite-point
   plan-marauder-concussive-targets
 
   ;; Wave 1C Counter-Unit-Mode Micro (Cyclone Lock-On Break, Hellbat Kite, Viking/Thor Counter)
@@ -301,6 +307,12 @@
 
 (: SIEGE-TANK-SPLASH-RADIUS Float)
 (define SIEGE-TANK-SPLASH-RADIUS 1.25)
+
+(: SIEGE-TANK-EMERGENCY-UNSIEGE-ABILITY-ID Integer)
+(define SIEGE-TANK-EMERGENCY-UNSIEGE-ABILITY-ID 390)
+
+(: SIEGE-TANK-EMERGENCY-UNSIEGE-COOLDOWN-FRAMES Integer)
+(define SIEGE-TANK-EMERGENCY-UNSIEGE-COOLDOWN-FRAMES 112)
 
 (: LIBERATOR-UNIT-TYPE-ID Integer)
 (define LIBERATOR-UNIT-TYPE-ID 689)
@@ -556,6 +568,7 @@
    [remembered-enemy-air : (Mutable-HashTable Integer remembered-air-rec)]
    [widow-mine-modes : (Mutable-HashTable Integer mode-switch-rec)]
    [transport-last-load : (Mutable-HashTable Integer Integer)]
+   [siege-tank-modes : (Mutable-HashTable Integer mode-switch-rec)]
    [liberator-modes : (Mutable-HashTable Integer mode-switch-rec)]
    [liberator-empty-since : (Mutable-HashTable Integer Integer)]))
 
@@ -563,6 +576,7 @@
 (: make-unit-mode-tracker (-> unit-mode-tracker))
 (define (make-unit-mode-tracker)
   (unit-mode-tracker
+   (make-hasheqv)
    (make-hasheqv)
    (make-hasheqv)
    (make-hasheqv)
@@ -585,6 +599,11 @@
 (: unit-mode-tracker-widow-mine-dwell-elapsed (-> unit-mode-tracker Integer Integer Integer))
 (define (unit-mode-tracker-widow-mine-dwell-elapsed tr tag current-frame)
   (mode-dwell-elapsed (unit-mode-tracker-widow-mine-modes tr) tag current-frame))
+
+;; Returns elapsed frames since `tag` last switched SiegeTank mode.
+(: unit-mode-tracker-siege-tank-dwell-elapsed (-> unit-mode-tracker Integer Integer Integer))
+(define (unit-mode-tracker-siege-tank-dwell-elapsed tr tag current-frame)
+  (mode-dwell-elapsed (unit-mode-tracker-siege-tank-modes tr) tag current-frame))
 
 ;; Returns elapsed frames since `tag` last switched Liberator Fighter/Defender mode.
 (: unit-mode-tracker-liberator-dwell-elapsed (-> unit-mode-tracker Integer Integer Integer))
@@ -663,6 +682,7 @@
   (define slow-tbl (unit-mode-tracker-marauder-slow-table tr))
   (define wm-tbl (unit-mode-tracker-widow-mine-modes tr))
   (define tr-load-tbl (unit-mode-tracker-transport-last-load tr))
+  (define tk-tbl (unit-mode-tracker-siege-tank-modes tr))
   (define lib-tbl (unit-mode-tracker-liberator-modes tr))
   (define lib-emp-tbl (unit-mode-tracker-liberator-empty-since tr))
   (for ([dtag (in-list dead-tags)])
@@ -670,6 +690,7 @@
     (hash-remove! slow-tbl dtag)
     (hash-remove! wm-tbl dtag)
     (hash-remove! tr-load-tbl dtag)
+    (hash-remove! tk-tbl dtag)
     (hash-remove! lib-tbl dtag)
     (hash-remove! lib-emp-tbl dtag)))
 
@@ -1075,7 +1096,8 @@
   (for ([a (in-list ally-units)])
     (define ut (exact-unit-type a))
     (when (and (memq ut '(thor thor-ap hellion hellbat viking-fighter viking viking-assault
-                          widow-mine widow-mine-burrowed liberator liberator-ag))
+                          widow-mine widow-mine-burrowed siege-tank siege-tank-sieged
+                          liberator liberator-ag))
                (u-alive? a))
       (define tag (u-tag a))
       (when (> tag 0)
@@ -1087,6 +1109,8 @@
           [(viking-fighter viking)
                             (sync-unit-mode-entry! (unit-mode-tracker-viking-modes tr) tag current-frame 'fighter)]
           [(viking-assault) (sync-unit-mode-entry! (unit-mode-tracker-viking-modes tr) tag current-frame 'assault)]
+          [(siege-tank)        (sync-unit-mode-entry! (unit-mode-tracker-siege-tank-modes tr) tag current-frame 'mobile)]
+          [(siege-tank-sieged) (sync-unit-mode-entry! (unit-mode-tracker-siege-tank-modes tr) tag current-frame 'sieged)]
           [(liberator)      (sync-unit-mode-entry! (unit-mode-tracker-liberator-modes tr) tag current-frame 'fighter)]
           [(liberator-ag)   (sync-unit-mode-entry! (unit-mode-tracker-liberator-modes tr) tag current-frame 'defender)]
           [(widow-mine widow-mine-burrowed)
@@ -2003,8 +2027,13 @@
       [else 150.0]))
   (+ base (* -0.05 ehp) (* -1.5 dist)))
 
-(: compute-tether-orbit-point (-> Float Float Float Float Float Float point2d))
-(define (compute-tether-orbit-point cx cy tx ty home-x home-y)
+(: compute-tether-orbit-point
+   (->* (Float Float Float Float Float Float)
+        (#:map-w Float #:map-h Float)
+        point2d))
+(define (compute-tether-orbit-point cx cy tx ty home-x home-y
+                                    #:map-w [map-w 160.0]
+                                    #:map-h [map-h 160.0])
   (define rx (- cx tx))
   (define ry (- cy ty))
   (define r (dist-2d cx cy tx ty))
@@ -2012,19 +2041,34 @@
     (if (> r 1e-4)
         (values (/ rx r) (/ ry r))
         (values 1.0 0.0)))
-  ;; Blend tangent orbit with slight home-base bias to stay away from enemy army core
+  ;; Blend tangent orbit with wall-clearance preference (avoid corner-trapping!) and home-base bias
   (define tang1-x (+ tx (* CYCLONE-TETHER-TARGET-KITE (- (* 0.85 ux) (* 0.52 uy)))))
   (define tang1-y (+ ty (* CYCLONE-TETHER-TARGET-KITE (+ (* 0.52 ux) (* 0.85 uy)))))
   (define tang2-x (+ tx (* CYCLONE-TETHER-TARGET-KITE (+ (* 0.85 ux) (* 0.52 uy)))))
   (define tang2-y (+ ty (* CYCLONE-TETHER-TARGET-KITE (- (* 0.85 uy) (* 0.52 ux)))))
+  (define clr1 (min (min tang1-x (- map-w tang1-x)) (min tang1-y (- map-h tang1-y))))
+  (define clr2 (min (min tang2-x (- map-w tang2-x)) (min tang2-y (- map-h tang2-y))))
   (define d1 (dist-2d tang1-x tang1-y home-x home-y))
   (define d2 (dist-2d tang2-x tang2-y home-x home-y))
-  (if (<= d1 d2)
-      (clamp-playable-pt tang1-x tang1-y)
-      (clamp-playable-pt tang2-x tang2-y)))
+  (cond
+    [(and (< clr1 12.0) (> clr2 (+ clr1 1.0)))
+     (clamp-playable-pt tang2-x tang2-y)]
+    [(and (< clr2 12.0) (> clr1 (+ clr2 1.0)))
+     (clamp-playable-pt tang1-x tang1-y)]
+    [(<= d1 d2)
+     (clamp-playable-pt tang1-x tang1-y)]
+    [else
+     (clamp-playable-pt tang2-x tang2-y)]))
 
-(: compute-tether-kite-point (-> Float Float Float Float Float Float Float point2d))
-(define (compute-tether-kite-point cx cy tx ty home-x home-y desired-radius)
+;; Loop 76 P3: Wall-proximity and tether-max tangential orbit blending so Cyclones/Hellions
+;; never back into map corners or snap Lock-On past 15.0t while kiting!
+(: compute-tether-kite-point
+   (->* (Float Float Float Float Float Float Float)
+        (#:map-w Float #:map-h Float)
+        point2d))
+(define (compute-tether-kite-point cx cy tx ty home-x home-y desired-radius
+                                   #:map-w [map-w 160.0]
+                                   #:map-h [map-h 160.0])
   (define away-x (- cx tx))
   (define away-y (- cy ty))
   (define d (dist-2d cx cy tx ty))
@@ -2033,18 +2077,72 @@
         (values (/ away-x d) (/ away-y d))
         (let ([hd (max 1e-4 (dist-2d tx ty home-x home-y))])
           (values (/ (- home-x tx) hd) (/ (- home-y ty) hd)))))
-  (define hx (- home-x cx))
-  (define hy (- home-y cy))
-  (define hd (dist-2d cx cy home-x home-y))
-  (define-values (bx by)
-    (if (> hd 1e-4)
-        (values (+ (* 0.70 ax) (* 0.30 (/ hx hd)))
-                (+ (* 0.70 ay) (* 0.30 (/ hy hd))))
-        (values ax ay)))
-  (define blen (max 1e-4 (dist-2d 0.0 0.0 bx by)))
-  (define step (max 2.5 (- desired-radius d)))
-  (clamp-playable-pt (+ cx (* step (/ bx blen)))
-                     (+ cy (* step (/ by blen)))))
+  (define near-wall?
+    (or (< cx 14.0) (> cx (- map-w 14.0))
+        (< cy 14.0) (> cy (- map-h 14.0))))
+  (define near-tether-max?
+    (and (<= desired-radius 12.5)
+         (>= d (- CYCLONE-TETHER-ORBIT-MAX 1.0))))
+  (cond
+    [(or near-wall? near-tether-max?)
+     (define mcx (* 0.5 map-w))
+     (define mcy (* 0.5 map-h))
+     (define to-cx (- mcx cx))
+     (define to-cy (- mcy cy))
+     (define t1x (- ay))
+     (define t1y ax)
+     (define t2x ay)
+     (define t2y (- ax))
+     (define dot1 (+ (* t1x to-cx) (* t1y to-cy)))
+     (define dot2 (+ (* t2x to-cx) (* t2y to-cy)))
+     (define-values (px py)
+       (if (>= dot1 dot2)
+           (values t1x t1y)
+           (values t2x t2y)))
+     (cond
+       [(and (<= desired-radius 12.5) (>= d 12.5))
+        ;; Pure tangential orbit projected onto target-r <= 12.5t so Lock-On never breaks past 15.0t!
+        (define step 3.0)
+        (define raw-x (+ cx (* step px)))
+        (define raw-y (+ cy (* step py)))
+        (define new-d (dist-2d raw-x raw-y tx ty))
+        (define target-r (min 12.5 (max 10.0 (min d desired-radius))))
+        (define-values (fx fy)
+          (if (> new-d target-r)
+              (let ([scale (/ target-r (max 1e-4 new-d))])
+                (values (+ tx (* (- raw-x tx) scale))
+                        (+ ty (* (- raw-y ty) scale))))
+              (values raw-x raw-y)))
+        (clamp-playable-pt fx fy)]
+       [else
+        ;; Blend 0.30 radial-away + 0.70 tangent-toward-center to slide smoothly along arena borders
+        (define bx (+ (* 0.30 ax) (* 0.70 px)))
+        (define by (+ (* 0.30 ay) (* 0.70 py)))
+        (define blen (max 1e-4 (dist-2d 0.0 0.0 bx by)))
+        (define step (max 2.5 (- desired-radius d)))
+        (define raw-x (+ cx (* step (/ bx blen))))
+        (define raw-y (+ cy (* step (/ by blen))))
+        (define new-d (dist-2d raw-x raw-y tx ty))
+        (define-values (fx fy)
+          (if (and (<= desired-radius 12.5) (> new-d 13.5))
+              (let ([scale (/ 13.5 (max 1e-4 new-d))])
+                (values (+ tx (* (- raw-x tx) scale))
+                        (+ ty (* (- raw-y ty) scale))))
+              (values raw-x raw-y)))
+        (clamp-playable-pt fx fy)])]
+    [else
+     (define hx (- home-x cx))
+     (define hy (- home-y cy))
+     (define hd (dist-2d cx cy home-x home-y))
+     (define-values (bx by)
+       (if (> hd 1e-4)
+           (values (+ (* 0.70 ax) (* 0.30 (/ hx hd)))
+                   (+ (* 0.70 ay) (* 0.30 (/ hy hd))))
+           (values ax ay)))
+     (define blen (max 1e-4 (dist-2d 0.0 0.0 bx by)))
+     (define step (max 2.5 (- desired-radius d)))
+     (clamp-playable-pt (+ cx (* step (/ bx blen)))
+                        (+ cy (* step (/ by blen))))]))
 
 ;; Evaluates a Cyclone (`'cyclone` 692) for Lock On (`2350`) or [8.5..13.5]-tile tether kiting.
 ;; Never issues a manual Lock-On cancel (`0%` cancel rate per `#115`).
@@ -2104,8 +2202,12 @@
             (if (< ed bd) (values e ed) (values best bd))))
         (cond
           [(> d CYCLONE-TETHER-ORBIT-MAX)
-           (define step-pt (step-toward-2d cx cy-y lx ly (max 0.5 (- d CYCLONE-TETHER-MAX-RECLOSE))))
-           (define cpt (clamp-playable-pt (point2d-x step-pt) (point2d-y step-pt)))
+           (define near-wall-rc? (or (< cx 14.0) (> cx 146.0) (< cy-y 14.0) (> cy-y 146.0)))
+           (define cpt
+             (if near-wall-rc?
+                 (compute-tether-kite-point cx cy-y lx ly fhx fhy CYCLONE-TETHER-TARGET-KITE)
+                 (let ([step-pt (step-toward-2d cx cy-y lx ly (max 0.5 (- d CYCLONE-TETHER-MAX-RECLOSE)))])
+                   (clamp-playable-pt (point2d-x step-pt) (point2d-y step-pt)))))
            (unit-mode-directive tag ut 'move #f 0 locked-tag
                                 (point2d-x cpt) (point2d-y cpt)
                                 'cyclone-tether-reclose)]
@@ -3174,6 +3276,119 @@
     [(eq? ut 'bunker) 6.75]
     [else 0.0]))
 
+;; =============================================================================
+;; 6c. Loop 74 C2: Abandoned Sieged-Tank Emergency Unsiege-Retreat (`390`)
+;; =============================================================================
+
+(: evaluate-siege-tank-emergency-unsiege
+   (->* (Any (Listof Any) (Listof Any))
+        (#:tracker (Option unit-mode-tracker)
+         #:current-frame Integer)
+        (Option unit-mode-directive)))
+(define (evaluate-siege-tank-emergency-unsiege tank-u ally-units enemy-units
+                                               #:tracker [tr #f]
+                                               #:current-frame [current-frame 0])
+  (define ut (exact-unit-type tank-u))
+  (define ttag (u-tag tank-u))
+  (cond
+    [(or (not (u-alive? tank-u))
+         (<= ttag 0)
+         (not (eq? ut 'siege-tank-sieged)))
+     #f]
+    [else
+     (define dwell
+       (if tr
+           (unit-mode-tracker-siege-tank-dwell-elapsed tr ttag current-frame)
+           10000))
+     (cond
+       [(< dwell SIEGE-TANK-EMERGENCY-UNSIEGE-COOLDOWN-FRAMES) #f]
+       [else
+        (define tx (u-x tank-u))
+        (define ty (u-y tank-u))
+        ;; Never emergency-unsiege if:
+        ;;  1. Defending an owned base (CC / OC / PF) within 14.0t, OR
+        ;;  2. Covered by another live sieged Siege Tank within 8.0t, OR
+        ;;  3. Screened within 8.0t by a friendly Bunker or ground non-tank combat unit.
+        (define protected? : Boolean
+          (for/or : Boolean
+                  ([a (in-list ally-units)]
+                   #:when (and (u-alive? a)
+                               (not (= (u-tag a) ttag))))
+            (define aut (exact-unit-type a))
+            (define d (dist-2d tx ty (u-x a) (u-y a)))
+            (cond
+              [(and (memq aut '(command-center orbital-command planetary-fortress))
+                    (<= d 14.0))
+               #t]
+              [(and (eq? aut 'siege-tank-sieged)
+                    (<= d 8.0))
+               #t]
+              [(and (<= d 8.0)
+                    (or (eq? aut 'bunker)
+                        (and (not (u-flying? a))
+                             (not (u-structure? a))
+                             (not (eq? aut 'siege-tank))
+                             (not (u-mode-noncombat-sym? aut)))))
+               #t]
+              [else #f])))
+        (cond
+          [protected? #f]
+          [else
+           (define-values (deadzone-cnt close-5t-cnt active-siege-cnt)
+             (for/fold ([dz : Integer 0]
+                        [c5 : Integer 0]
+                        [act : Integer 0])
+                       ([e (in-list enemy-units)]
+                        #:when (and (u-mode-enemy-targetable? e)
+                                    (not (u-flying? e))
+                                    (not (u-structure? e))
+                                    (not (u-mode-noncombat-sym? (exact-unit-type e)))))
+               (define d (dist-2d tx ty (u-x e) (u-y e)))
+               (values (if (<= d 3.0) (add1 dz) dz)
+                       (if (< d 5.0) (add1 c5) c5)
+                       (if (and (>= d 4.5) (<= d 12.5)) (add1 act) act))))
+           ;; Unsiege ONLY when not actively shelling a target in [4.5, 12.5]t AND either:
+           ;;  - an enemy is inside the minimum-range deadzone (<= 3.0t), OR
+           ;;  - >= 2 close ground threats (< 5.0t) while Tank HP < 65%.
+           (if (and (= active-siege-cnt 0)
+                    (or (>= deadzone-cnt 1)
+                        (and (>= close-5t-cnt 2)
+                             (< (u-hp-ratio tank-u) 0.65))))
+               (begin
+                 (when tr
+                   (record-mode-switch! (unit-mode-tracker-siege-tank-modes tr)
+                                        ttag current-frame 'mobile))
+                 (unit-mode-directive ttag 'siege-tank-sieged 'cast-spell 'unsiege-mode
+                                      SIEGE-TANK-EMERGENCY-UNSIEGE-ABILITY-ID
+                                      ttag tx ty 'siege-tank-abandoned-unsiege))
+               #f)])])]))
+
+(: plan-siege-tank-emergency-unsiege/list
+   (-> (Listof Any) (Listof Any) (Listof Any) (Option unit-mode-tracker) Integer
+       (Listof unit-mode-directive)))
+(define (plan-siege-tank-emergency-unsiege/list tanks ally-units enemy-units tr current-frame)
+  (for/fold ([acc : (Listof unit-mode-directive) '()] #:result (reverse acc))
+            ([t (in-list tanks)])
+    (define d (evaluate-siege-tank-emergency-unsiege t ally-units enemy-units
+                                                     #:tracker tr
+                                                     #:current-frame current-frame))
+    (if d (cons d acc) acc)))
+
+(: plan-siege-tank-emergency-unsiege
+   (->* ((Listof Any) (Listof Any))
+        (#:tracker (Option unit-mode-tracker)
+         #:current-frame Integer)
+        (Listof unit-mode-directive)))
+(define (plan-siege-tank-emergency-unsiege ally-units enemy-units
+                                           #:tracker [tr #f]
+                                           #:current-frame [current-frame 0])
+  (define tanks
+    (for/fold ([rev : (Listof Any) '()] #:result (reverse rev))
+              ([a (in-list ally-units)]
+               #:when (and (u-alive? a) (eq? (exact-unit-type a) 'siege-tank-sieged)))
+      (cons a rev)))
+  (plan-siege-tank-emergency-unsiege/list tanks ally-units enemy-units tr current-frame))
+
 (: liberator-hv-ground-sym? (-> Symbol Boolean))
 (define (liberator-hv-ground-sym? ut)
   (not (not (memq ut '(siege-tank-sieged siege-tank immortal colossus
@@ -3614,6 +3829,7 @@
   (define hellion-tbl (unit-mode-tracker-hellion-modes tr))
   (define viking-tbl (unit-mode-tracker-viking-modes tr))
   (define wm-tbl (unit-mode-tracker-widow-mine-modes tr))
+  (define tk-tbl (unit-mode-tracker-siege-tank-modes tr))
   (define lib-tbl (unit-mode-tracker-liberator-modes tr))
   (define auto-armory-init? (not (eq? armory-arg 'auto)))
   (define-values (thors-rev hellions-rev vikings-rev cyclones-rev marauders-rev widow-mines-rev siege-tanks-rev liberators-rev armory-ok?)
@@ -3663,7 +3879,13 @@
                                      'burrowed
                                      'mobile)))
          (values ts hs vs cs ms (cons a wms) tks libs arm?)]
+        [(siege-tank)
+         (define tag (u-tag a))
+         (when (> tag 0) (sync-unit-mode-entry! tk-tbl tag current-frame 'mobile))
+         (values ts hs vs cs ms wms tks libs arm?)]
         [(siege-tank-sieged)
+         (define tag (u-tag a))
+         (when (> tag 0) (sync-unit-mode-entry! tk-tbl tag current-frame 'sieged))
          (values ts hs vs cs ms wms (cons a tks) libs arm?)]
         [(liberator)
          (define tag (u-tag a))
@@ -3729,7 +3951,9 @@
         '()
         (plan-widow-mine-modes/list (reverse widow-mines-rev) ally-units enemy-units
                                     tr current-frame '())))
-  (define siege-tank-dirs
+  ;; Loop 80B: Keep `plan-siege-tank-emergency-unsiege` exported as a pure helper, but do NOT
+  ;; auto-unsiege sieged tanks inside `step-unit-mode-micro!` (prevents dropping 26% of sieges in ladder fights!).
+  (define siege-tank-target-dirs
     (if (null? siege-tanks-rev)
         '()
         (plan-siege-tank-targets/list (reverse siege-tanks-rev) ally-units enemy-units #t)))
@@ -3744,7 +3968,7 @@
            (null? cyclone-dirs)
            (null? marauder-orders)
            (null? widow-mine-dirs)
-           (null? siege-tank-dirs)
+           (null? siege-tank-target-dirs)
            (null? liberator-dirs))
       '()
       (append
@@ -3754,5 +3978,5 @@
        (if (null? cyclone-dirs) '() (map unit-mode-directive->sexp cyclone-dirs))
        (if (null? marauder-orders) '() (map marauder-order->sexp marauder-orders))
        (if (null? widow-mine-dirs) '() (map unit-mode-directive->sexp widow-mine-dirs))
-       (if (null? siege-tank-dirs) '() (map unit-mode-directive->sexp siege-tank-dirs))
+       (if (null? siege-tank-target-dirs) '() (map unit-mode-directive->sexp siege-tank-target-dirs))
        (if (null? liberator-dirs) '() (map unit-mode-directive->sexp liberator-dirs)))))

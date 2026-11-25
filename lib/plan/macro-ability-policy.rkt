@@ -381,8 +381,9 @@
        ;; Loop 64 A5 (`#1755`): `cloak_seen` (DT/DarkShrine/Banshee/Ghost/Lurker/WidowMine)
        ;; holds 100.0e (>= 1 Scan) on top-2 OCs (lifting `cloak_seen` Scan share toward Pro 50.7%).
        (if (>= (length ready-ocs) 2) 2 1)]
-      [(and (>= cur-loop 5376)
-            (memq eff-enemy-race '(Protoss Random)))
+      [(and (memq eff-enemy-race '(Protoss Random))
+            (or (>= cur-loop 6720)
+                (and (>= cur-loop 5376) (>= (length ready-ocs) 2))))
        (if (>= (length ready-ocs) 3) 2 1)]
       [(and isolated-arena-skirmish?
             (>= friendly-combat-cnt 6))
@@ -565,15 +566,19 @@
     (if (terran-mule-policy-result? mule-policy)
         (terran-mule-policy-result-proactive-scan-oc-tags mule-policy)
         '()))
-  ;; Loop 65 (`#1831`/`#1833`): Relax `under-pressure?` requirement on `4:00-12:00`
-  ;; real supply blocks (`supply-left <= 0`, `< 192` cap) while skipping if a Depot is
-  ;; already nearly done (`> 75%`) peacefully and keeping `100e` scan reserve on `cloak-seen?`!
+  ;; Loop 65 + Loop 74 A2: Broaden Supply Drop window to 3:00-15:00 (4032..20160f) on real
+  ;; supply blocks (`supply-left <= 0`, `< 192` cap), allowing >= 2-OC non-cloak severe-block
+  ;; (`supply-left <= -2`) rescue even when a Depot is nearly done while keeping `100e` cloak reserve!
   (cond
-    [(or (< cur-loop 5376)
-         (> cur-loop 16128)
+    [(or (< cur-loop 4032)
+         (> cur-loop 20160)
          (> supply-left 0)
          (>= supply-cap 192)
-         (and depot-nearly-done? (not under-pressure?))
+         (and depot-nearly-done?
+              (not under-pressure?)
+              (not (and (>= (length ready-ocs) 2)
+                        (not cloak-seen?)
+                        (<= supply-left -2))))
          hard-blocked?
          (null? ready-ocs)
          (null? depots))
@@ -904,6 +909,7 @@
          #:nexus-energy [nexus-energy 50.0]
          #:has-busy-tech-or-robo? [has-busy-tech-or-robo? #f]
          #:dry-caster-near? [dry-caster-near? #f]
+         #:has-ally-caster? [has-ally-caster? #f]
          #:early-ling-or-worker-rush? [early-ling-or-worker-rush? #f]
          #:early-gate-defenders [early-gate-defenders 0]
          #:under-pressure? [under-pressure? #f]
@@ -984,6 +990,7 @@
          #:nexus-energy [nexus-energy 50.0]
          #:has-busy-tech-or-robo? [has-busy-tech-or-robo? 'auto]
          #:dry-caster-near? [dry-caster-near? #f]
+         #:has-ally-caster? [has-ally-caster? #f]
          #:early-ling-or-worker-rush? [early-ling-or-worker-rush? #f]
          #:early-gate-defenders [early-gate-defenders 0]
          #:under-pressure? [under-pressure? #f]
@@ -1013,6 +1020,7 @@
             #:nexus-energy nexus-energy
             #:has-busy-tech-or-robo? eff-busy-tech-or-robo?
             #:dry-caster-near? dry-caster-near?
+            #:has-ally-caster? has-ally-caster?
             #:early-ling-or-worker-rush? early-ling-or-worker-rush?
             #:early-gate-defenders early-gate-defenders
             #:under-pressure? under-pressure?

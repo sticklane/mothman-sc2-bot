@@ -287,10 +287,10 @@
     (list (mk-u 12 'supply-depot 38.0 30.0 #:hp 400.0)
           (mk-u 13 'barracks 41.0 32.0 #:hp 1000.0)))
 
-  ;; T2a-1: Frame 5400 (>= 4:00, L55-T6 / L56 R2) vs Protoss, 0 Ravens, 0 ready Turrets, 1 OC at 65e -> MUST HOLD 50e (no MULE)!
+  ;; T2a-1: Loop 74 Lane A: Frame 6800 (>= 5:00, 6720f) vs Protoss, 0 Ravens, 0 ready Turrets, 1 OC at 65e -> MUST HOLD 50e (no MULE)!
   (define rt-oc1 (make-live-bot-runtime #:race 'Terran))
   (define obs-oc1
-    (mk-live-obs 'Terran 'Protoss 5400
+    (mk-live-obs 'Terran 'Protoss 6800
                  #:minerals 100 #:gas 40 #:supply-used 34 #:supply-cap 54
                  #:ally-units scvs
                  #:ally-buildings (cons (mk-u 10 'orbital-command 32.5 32.5 #:hp 1500.0 #:energy 65.0) base-t-bldgs)
@@ -298,12 +298,12 @@
   (define acts-oc1 (step-layer2-economy! rt-oc1 obs-oc1))
   (check-true "L32-T2a-oc-past-330-vs-protoss-reserves-50e-scan"
               (null? (mule-caster-ids acts-oc1))
-              (format "Expected OC at 65e past 4:00 vs Protoss to hold 50e for Scan; mules=~a" (mule-caster-ids acts-oc1)))
+              (format "Expected 1-OC at 65e past 5:00 vs Protoss to hold 50e for Scan; mules=~a" (mule-caster-ids acts-oc1)))
 
   ;; T2a-2: Same state at 105e -> DOES drop MULE (still retains 55e >= 50e for Scan!)
   (define rt-oc2 (make-live-bot-runtime #:race 'Terran))
   (define obs-oc2
-    (mk-live-obs 'Terran 'Protoss 5400
+    (mk-live-obs 'Terran 'Protoss 6800
                  #:minerals 100 #:gas 40 #:supply-used 34 #:supply-cap 54
                  #:ally-units scvs
                  #:ally-buildings (cons (mk-u 10 'orbital-command 32.5 32.5 #:hp 1500.0 #:energy 105.0) base-t-bldgs)

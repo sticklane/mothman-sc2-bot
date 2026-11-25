@@ -467,7 +467,7 @@
           (mk-u 4106 'roach 53.0 32.5 #:hp 145.0)))
   (step-layer2-economy!
    rt-zl
-   (mk-live-obs 'Zerg 'Terran 5600 #:minerals 600 #:gas 300 #:supply-used 60 #:supply-cap 112
+   (mk-live-obs 'Zerg 'Terran 5600 #:minerals 1000 #:gas 300 #:supply-used 60 #:supply-cap 112
                 #:mineral-harvesters 48 #:vespene-harvesters 6
                 #:researched-upgrades '(metabolic-boost zerg-missile-weapons-1 zerg-ground-armors-1
                                         muscular-augments grooved-spines glial-reconstitution)

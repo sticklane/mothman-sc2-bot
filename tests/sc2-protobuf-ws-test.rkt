@@ -11291,9 +11291,9 @@
     (l55-mule-tags (saturate-workers-and-gas-commands
                     (make-test-obs 5720 200 100 (list l55-oc1-75 l55-oc2-60 l55-min1 l55-min2))
                     #:game-info l55-gi-t)))
-  ;; (a2) TvP at 4:15 (5732 >= 5376), 0 Ravens, 0 Turrets -> HOLD MULE (reserves Scan!)
+  ;; (a2) Loop 74 Lane A: 1-OC TvP at 4:15 (5732 < 6720) clean -> releases MULE!
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
-  (define m-hold-1
+  (define m-tvp-1oc-415
     (l55-mule-tags (saturate-workers-and-gas-commands
                     (make-test-obs 5732 200 100 (list l55-oc1-75 l55-min1))
                     #:game-info l55-gi-p)))
@@ -11310,43 +11310,49 @@
     (l55-mule-tags (saturate-workers-and-gas-commands
                     (make-test-obs 5850 200 100 (list l55-oc1-90 l55-oc2-75 l55-oc3-60 l55-min1 l55-min2 l55-min3))
                     #:game-info l55-gi-p)))
-  ;; (c) OC1 at 100e -> drops MULE cleanly (50e Scan remains banked!)
+  ;; (b3) Loop 74 Lane A: 1-OC TvP at >= 5:00 (6732 >= 6720), 0 Ravens, 0 Turrets -> HOLD MULE (reserves Scan!)
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-hold-1
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 6732 200 100 (list l55-oc1-75 l55-min1))
+                    #:game-info l55-gi-p)))
+  ;; (c) OC1 at 100e (>= 5:00) -> drops MULE cleanly (50e Scan remains banked!)
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-100e
     (l55-mule-tags (saturate-workers-and-gas-commands
-                    (make-test-obs 5860 200 100 (list l55-oc1-100 l55-min1))
+                    (make-test-obs 6750 200 100 (list l55-oc1-100 l55-min1))
                     #:game-info l55-gi-p)))
-  ;; (d) With a ready Missile Turret OR Raven OR vs Zerg -> OC1 at 75e drops MULE!
+  ;; (d) With a ready Missile Turret OR Raven OR vs Zerg (>= 5:00) -> OC1 at 75e drops MULE!
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-with-turret
     (l55-mule-tags (saturate-workers-and-gas-commands
-                    (make-test-obs 5880 200 100 (list l55-oc1-75 l55-turret l55-min1))
+                    (make-test-obs 6770 200 100 (list l55-oc1-75 l55-turret l55-min1))
                     #:game-info l55-gi-p)))
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-with-raven
     (l55-mule-tags (saturate-workers-and-gas-commands
-                    (make-test-obs 5900 200 100 (list l55-oc1-75 l55-raven l55-min1))
+                    (make-test-obs 6790 200 100 (list l55-oc1-75 l55-raven l55-min1))
                     #:game-info l55-gi-p)))
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-vs-zerg
     (l55-mule-tags (saturate-workers-and-gas-commands
-                    (make-test-obs 5920 200 100 (list l55-oc1-75 l55-min1))
+                    (make-test-obs 6810 200 100 (list l55-oc1-75 l55-min1))
                     #:game-info l55-gi-z)))
   ;; (e) TvT WITH scouted enemy StarportTechLab (41) OR Banshee (55) -> holds 100e on top-1 OC only (2nd OC still MULEs)!
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-tvt-stl
     (l55-mule-tags (saturate-workers-and-gas-commands
-                    (make-test-obs 5940 200 100 (list l55-oc1-75 l55-min1 l55-enemy-stl))
+                    (make-test-obs 6830 200 100 (list l55-oc1-75 l55-min1 l55-enemy-stl))
                     #:game-info l55-gi-t)))
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-tvt-stl-two-oc
     (l55-mule-tags (saturate-workers-and-gas-commands
-                    (make-test-obs 5950 200 100 (list l55-oc1-75 l55-oc2-60 l55-min1 l55-min2 l55-enemy-stl))
+                    (make-test-obs 6840 200 100 (list l55-oc1-75 l55-oc2-60 l55-min1 l55-min2 l55-enemy-stl))
                     #:game-info l55-gi-t)))
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-tvt-ban
     (l55-mule-tags (saturate-workers-and-gas-commands
-                    (make-test-obs 5960 200 100 (list l55-oc1-75 l55-min1 l55-enemy-ban))
+                    (make-test-obs 6850 200 100 (list l55-oc1-75 l55-min1 l55-enemy-ban))
                     #:game-info l55-gi-t)))
   ;; Clean rewind reset for subsequent checks
   (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l55-min1))))
@@ -11356,6 +11362,7 @@
                    (equal? (sort m-tvt-405-two-oc <) '(99973 99974))
                    (equal? m-tvt-415-clean '(99973))
                    (equal? (sort m-tvt-415-two-oc <) '(99973 99974))
+                   (equal? m-tvp-1oc-415 '(99973))
                    (null? m-hold-1)
                    (equal? m-two-oc '(99974))
                    (equal? m-three-oc '(99979))

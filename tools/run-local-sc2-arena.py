@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -45,6 +46,9 @@ from typing import Any
 DEFAULT_IMAGE = "docker.io/aiarena/arenaclient-combined:v0.8.0"
 DEFAULT_ARENA_DIR = Path(os.environ.get("SC2_LOCAL_ARENA_DIR", "/home/sjaconette/sc2-local-arena"))
 REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_BENCH_SEED = "mothman-v1"
+MAP_HASH_SALT = "map-171"
+RANDOM_BENCH_SEEDS = frozenset({"", "0", "none", "random", "off", "false"})
 
 MOTHMAN_VARIANTS: dict[str, dict[str, str]] = {
     "Mothman-P": {"race": "P", "race_full": "Protoss", "bot_path": "bots/Mothman-P.rkt"},
@@ -111,6 +115,47 @@ class MatchTask:
     slug: str
     cohort: str = "core"  # core | unseen | selfplay | custom
     est_wall_sec: float | None = None
+    random_seed: int = 0
+
+
+def normalize_bench_seed(raw: str | None) -> str:
+    s = (raw or "").strip()
+    if s.lower() in RANDOM_BENCH_SEEDS:
+        return "random"
+    return s
+
+
+def deterministic_map_and_seed(
+    bench_seed: str | None,
+    bot1_name: str,
+    bot2_name: str,
+    rep: int,
+    maps: list[str],
+) -> tuple[str, int]:
+    """Deterministically assign (map_name, sc2_random_seed) from canonical matchup key.
+
+    Uses SHA-256 of (bench_seed, bot1_name, bot2_name, rep) against sorted(maps)
+    BEFORE any scheduling sort (LPT/interleaved/sequential) so map and SC2 RNG seed
+    are 100% invariant to historical wall-time drift, schedule order, and opponent subsetting.
+    When bench_seed is 'random' / '0' / '', returns random_seed=0 (SC2 random) while keeping
+    deterministic map selection under DEFAULT_BENCH_SEED.
+    """
+    if not maps:
+        raise ValueError("maps list must be non-empty")
+    canonical_maps = sorted(maps)
+    norm_seed = normalize_bench_seed(bench_seed)
+    map_seed_key = DEFAULT_BENCH_SEED if norm_seed == "random" else norm_seed
+    map_digest = hashlib.sha256(
+        f"{map_seed_key}|{MAP_HASH_SALT}|{bot1_name}|{bot2_name}|{int(rep)}".encode("utf-8")
+    ).digest()
+    map_name = canonical_maps[int.from_bytes(map_digest[:8], "big") % len(canonical_maps)]
+    if norm_seed == "random":
+        return map_name, 0
+    rng_digest = hashlib.sha256(
+        f"{norm_seed}|rng|{bot1_name}|{bot2_name}|{int(rep)}".encode("utf-8")
+    ).digest()
+    sc2_seed = (int.from_bytes(rng_digest[:4], "big") % 2147483647) + 1
+    return map_name, sc2_seed
 
 
 ACTIVE_CONTAINERS: set[str] = set()
@@ -875,6 +920,8 @@ def run_single_match(
         "--max-game-time", str(max_game_time),
         "--wall-timeout-sec", str(max(30, timeout_sec - 25)),
     ])
+    if task.random_seed > 0:
+        cmd.extend(["--random-seed", str(task.random_seed)])
     if realtime:
         cmd.append("--realtime")
 
@@ -940,6 +987,8 @@ def run_single_match(
     game_steps = 0
     bot1_avg_step_ms: float | None = None
     bot2_avg_step_ms: float | None = None
+    p1_start_xy: list[float] | None = None
+    p2_start_xy: list[float] | None = None
     if results_path.is_file():
         txt = results_path.read_text(encoding="utf-8", errors="replace").strip()
         if txt:
@@ -954,6 +1003,10 @@ def run_single_match(
                         bot1_avg_step_ms = round(float(r0["bot1_avg_step_time"]) * 1000.0, 2)
                     if r0.get("bot2_avg_step_time") is not None:
                         bot2_avg_step_ms = round(float(r0["bot2_avg_step_time"]) * 1000.0, 2)
+                    if isinstance(r0.get("p1_start_xy"), list) and len(r0["p1_start_xy"]) == 2:
+                        p1_start_xy = [float(r0["p1_start_xy"][0]), float(r0["p1_start_xy"][1])]
+                    if isinstance(r0.get("p2_start_xy"), list) and len(r0["p2_start_xy"]) == 2:
+                        p2_start_xy = [float(r0["p2_start_xy"][0]), float(r0["p2_start_xy"][1])]
             except Exception:
                 pass
 
@@ -995,6 +1048,9 @@ def run_single_match(
         "bot2_type": task.bot2.bot_type,
         "bot2_elo": task.bot2.elo,
         "map": task.map_name,
+        "random_seed": task.random_seed,
+        "p1_start_xy": p1_start_xy,
+        "p2_start_xy": p2_start_xy,
         "raw_result": raw_result,
         "outcome": outcome,
         "exit_code": exit_code,
@@ -1057,6 +1113,47 @@ def aggregate_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def aggregate_spawn_balance(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compute North/South and quadrant spawn balance from (p1_start_xy, p2_start_xy).
+
+    Uses relative placement (p1_y >= p2_y -> North, p1_x >= p2_x -> East) so it works
+    cleanly on any map size without needing map dimensions.
+    """
+    def _bucket(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        north = south = 0
+        quads = {"NE": 0, "NW": 0, "SE": 0, "SW": 0}
+        for r in rows:
+            p1 = r.get("p1_start_xy")
+            p2 = r.get("p2_start_xy")
+            if not (isinstance(p1, list) and len(p1) == 2 and isinstance(p2, list) and len(p2) == 2):
+                continue
+            is_n = float(p1[1]) >= float(p2[1])
+            is_e = float(p1[0]) >= float(p2[0])
+            if is_n:
+                north += 1
+            else:
+                south += 1
+            q = ("N" if is_n else "S") + ("E" if is_e else "W")
+            quads[q] += 1
+        n = north + south
+        return {
+            "observed": n,
+            "north": north,
+            "south": south,
+            "north_pct": round(100.0 * north / n, 1) if n > 0 else 0.0,
+            "south_pct": round(100.0 * south / n, 1) if n > 0 else 0.0,
+            "quadrants": quads,
+        }
+
+    by_bot: dict[str, Any] = {}
+    for b in sorted({str(r.get("bot1") or "") for r in records if r.get("bot1")}):
+        by_bot[b] = _bucket([r for r in records if r.get("bot1") == b])
+    return {
+        "overall": _bucket(records),
+        "by_bot": by_bot,
+    }
+
+
 def format_summary_text(summary: dict[str, Any]) -> str:
     t = summary["totals"]
     lines = [
@@ -1090,6 +1187,22 @@ def format_summary_text(summary: dict[str, Any]) -> str:
             f"P0={bt.get('P0', 0)} P1={bt.get('P1', 0)} P2={bt.get('P2', 0)} "
             f"P3={bt.get('P3', 0)} P4={bt.get('P4', 0)} | top={top_str}{worst_str}"
         )
+    sb = summary.get("spawn_balance")
+    if isinstance(sb, dict):
+        ov = sb.get("overall") or {}
+        if ov.get("observed", 0) > 0:
+            q = ov.get("quadrants") or {}
+            per_bot_parts = []
+            for bname, bv in sorted((sb.get("by_bot") or {}).items()):
+                if bv.get("observed", 0) > 0:
+                    short = bname.replace("Mothman-", "")
+                    per_bot_parts.append(f"{short}:{bv['north']}N/{bv['south']}S({bv['north_pct']:.0f}%N)")
+            per_bot_str = (" | " + " ".join(per_bot_parts)) if per_bot_parts else ""
+            lines.append(
+                f"Spawn balance: {ov['north']}N/{ov['south']}S ({ov['north_pct']:.1f}%N) "
+                f"[NE={q.get('NE', 0)} NW={q.get('NW', 0)} SE={q.get('SE', 0)} SW={q.get('SW', 0)}]"
+                f"{per_bot_str}"
+            )
     lines.extend([
         "",
         "--- Per Our Bot ---",
@@ -1370,11 +1483,13 @@ def build_match_tasks(
 ) -> list[MatchTask]:
     mothman_cache: dict[tuple[str, str], Path] = {}
     tasks: list[MatchTask] = []
+    bench_seed = normalize_bench_seed(getattr(args, "bench_seed", DEFAULT_BENCH_SEED))
 
     if args.match_file:
         mf = Path(args.match_file)
         raw = json.loads(mf.read_text(encoding="utf-8"))
         entries = raw["matches"] if isinstance(raw, dict) and "matches" in raw else raw
+        pair_reps: dict[tuple[str, str], int] = {}
         for idx, item in enumerate(entries, start=1):
             b1 = resolve_bot_spec(
                 item["bot"], roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
@@ -1384,11 +1499,16 @@ def build_match_tasks(
                 item["opponent"], roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
                 stage_mothman=stage_mothman,
             )
-            mp = item.get("map") or maps[(idx - 1) % len(maps)]
+            rep_k = (b1.name, b2.name)
+            rep_i = pair_reps.get(rep_k, 0)
+            pair_reps[rep_k] = rep_i + 1
+            det_mp, det_seed = deterministic_map_and_seed(bench_seed, b1.name, b2.name, rep_i, maps)
+            mp = item.get("map") or det_mp
             mp = mp[:-7] if mp.lower().endswith(".sc2map") else mp
+            rseed = int(item["random_seed"]) if item.get("random_seed") is not None else det_seed
             coh = str(item.get("cohort") or _infer_cohort(b2))
             slug = f"{idx:03d}_{sanitize_slug(b1.name)}_vs_{sanitize_slug(b2.name)}_{sanitize_slug(mp)}"
-            tasks.append(MatchTask(idx, b1, b2, mp, slug, cohort=coh))
+            tasks.append(MatchTask(idx, b1, b2, mp, slug, cohort=coh, random_seed=rseed))
         return tasks
 
     if args.bots.strip().lower() == "all":
@@ -1427,7 +1547,7 @@ def build_match_tasks(
 
     if schedule_order == "lpt":
         pair_est, opp_est = load_historical_wall_estimates(arena_dir)
-        raw_entries: list[tuple[BotSpec, BotSpec, int, str, float]] = []
+        raw_entries: list[tuple[BotSpec, BotSpec, int, str, float, str, int]] = []
 
         if opp_names:
             bot_specs = [
@@ -1448,7 +1568,8 @@ def build_match_tasks(
                 for b2 in opp_specs:
                     for b1 in bot_specs:
                         est = estimate_match_wall_sec(b1.name, b2.name, pair_est, opp_est)
-                        raw_entries.append((b1, b2, rep, _infer_cohort(b2), est))
+                        mp, rseed = deterministic_map_and_seed(bench_seed, b1.name, b2.name, rep, maps)
+                        raw_entries.append((b1, b2, rep, _infer_cohort(b2), est, mp, rseed))
 
         if want_selfplay:
             sp_n = int(getattr(args, "selfplay_matches", 6) or 6)
@@ -1474,10 +1595,12 @@ def build_match_tasks(
                     stage_mothman=stage_mothman,
                 )
                 est = estimate_match_wall_sec(b1.name, b2.name, pair_est, opp_est)
-                raw_entries.append((b1, b2, sp_i, "selfplay", est))
+                mp, rseed = deterministic_map_and_seed(bench_seed, b1.name, b2.name, sp_i, maps)
+                raw_entries.append((b1, b2, sp_i, "selfplay", est, mp, rseed))
 
         # Longest-Processing-Time-First: schedule slowest expected matches in Wave 1
         # so 640s stragglers never sit at the tail of parallel runs.
+        # Map and random_seed were already assigned deterministically BEFORE sorting!
         raw_entries.sort(
             key=lambda item: (
                 -item[4],
@@ -1487,10 +1610,9 @@ def build_match_tasks(
                 item[2],
             )
         )
-        for idx, (b1, b2, _rep, coh, est) in enumerate(raw_entries, start=1):
-            mp = maps[(idx - 1) % len(maps)]
+        for idx, (b1, b2, _rep, coh, est, mp, rseed) in enumerate(raw_entries, start=1):
             slug = f"{idx:03d}_{sanitize_slug(b1.name)}_vs_{sanitize_slug(b2.name)}_{sanitize_slug(mp)}"
-            tasks.append(MatchTask(idx, b1, b2, mp, slug, cohort=coh, est_wall_sec=round(est, 1)))
+            tasks.append(MatchTask(idx, b1, b2, mp, slug, cohort=coh, est_wall_sec=round(est, 1), random_seed=rseed))
         return tasks
 
     if opp_names:
@@ -1527,11 +1649,11 @@ def build_match_tasks(
                 for rep in range(args.matches_per_pair)
             ]
 
-        for b1, b2, _rep in pairs:
+        for b1, b2, rep in pairs:
             idx = len(tasks) + 1
-            mp = maps[(idx - 1) % len(maps)]
+            mp, rseed = deterministic_map_and_seed(bench_seed, b1.name, b2.name, rep, maps)
             slug = f"{idx:03d}_{sanitize_slug(b1.name)}_vs_{sanitize_slug(b2.name)}_{sanitize_slug(mp)}"
-            tasks.append(MatchTask(idx, b1, b2, mp, slug, cohort=_infer_cohort(b2)))
+            tasks.append(MatchTask(idx, b1, b2, mp, slug, cohort=_infer_cohort(b2), random_seed=rseed))
 
     if want_selfplay:
         sp_n = int(getattr(args, "selfplay_matches", 6) or 6)
@@ -1557,9 +1679,9 @@ def build_match_tasks(
                 alias_name=f"{p2_var}{p2_suffix}",
                 stage_mothman=stage_mothman,
             )
-            mp = maps[(len(tasks)) % len(maps)]
+            mp, rseed = deterministic_map_and_seed(bench_seed, b1.name, b2.name, sp_i, maps)
             slug = f"{idx:03d}_{sanitize_slug(b1.name)}_vs_{sanitize_slug(b2.name)}_{sanitize_slug(mp)}"
-            tasks.append(MatchTask(idx, b1, b2, mp, slug, cohort="selfplay"))
+            tasks.append(MatchTask(idx, b1, b2, mp, slug, cohort="selfplay", random_seed=rseed))
 
     return tasks
 
@@ -1590,6 +1712,8 @@ def main() -> int:
                         help="Number of concurrent real SC2 matches (default: 14; empirically tuned for 16C/32T 125GiB host)")
     parser.add_argument("--schedule-order", choices=["lpt", "interleaved", "sequential"], default="lpt",
                         help="Match queue order: 'lpt' schedules longest expected matches first from historical wall_sec (default: lpt); 'interleaved' spreads Z/T/P; 'sequential' runs in bot-major order")
+    parser.add_argument("--bench-seed", default=DEFAULT_BENCH_SEED,
+                        help=f"Deterministic seed string for LPT-invariant map + SC2 random_seed assignment (default: '{DEFAULT_BENCH_SEED}'; pass 'random' or '0' to disable deterministic SC2 RNG seeding)")
     parser.add_argument("--timeout-sec", type=int, default=480,
                         help="Per-match wall-clock timeout in seconds (default: 480)")
     # Temporary local-loop 25m cap (33600 = 25 * 60 * 22.4 loops) paired with end-of-game
@@ -1649,11 +1773,12 @@ def main() -> int:
             canary_tag = " [CANARY]" if name.lower() in canary_set else ""
             print(f"  - {name:<22} race={spec.race} type={spec.bot_type:<10} elo={str(spec.elo):<5} id={str(spec.aiarena_id):<5}{core_tag}{canary_tag} {spec.archetype}")
         tasks = build_match_tasks(args, roster, maps, arena_dir, repo_dir, stage_mothman=False)
-        print(f"Planned matches ({len(tasks)}): schedule_order={args.schedule_order} | bots={args.bots} | opponents={args.opponents}")
+        bench_seed_norm = normalize_bench_seed(args.bench_seed)
+        print(f"Planned matches ({len(tasks)}): schedule_order={args.schedule_order} | bench_seed={bench_seed_norm} | bots={args.bots} | opponents={args.opponents}")
         for t in tasks:
             est_s = f" | est={t.est_wall_sec:.0f}s" if t.est_wall_sec is not None else ""
             print(f"  [{t.index:03d}] [{t.cohort:<8}] {t.bot1.name}({t.bot1.race},{t.bot1.bot_mode or t.bot1.bot_type}) vs "
-                  f"{t.bot2.name}({t.bot2.race},{t.bot2.bot_mode or t.bot2.bot_type}) on {t.map_name}{est_s}")
+                  f"{t.bot2.name}({t.bot2.race},{t.bot2.bot_mode or t.bot2.bot_type}) on {t.map_name} | seed={t.random_seed}{est_s}")
         return 0
 
     if args.dry_run:
@@ -1662,11 +1787,12 @@ def main() -> int:
         except RuntimeError:
             runtime = "unavailable"
         tasks = build_match_tasks(args, roster, maps, arena_dir, repo_dir, stage_mothman=False)
-        print(f"Dry run: {len(tasks)} matches | mode={args.mothman_mode} | schedule_order={args.schedule_order} | j={args.concurrency} | max_game_time={args.max_game_time} | runtime={runtime}")
+        bench_seed_norm = normalize_bench_seed(args.bench_seed)
+        print(f"Dry run: {len(tasks)} matches | mode={args.mothman_mode} | schedule_order={args.schedule_order} | bench_seed={bench_seed_norm} | j={args.concurrency} | max_game_time={args.max_game_time} | runtime={runtime}")
         for t in tasks:
             est_s = f" | est={t.est_wall_sec:.0f}s" if t.est_wall_sec is not None else ""
             print(f"  [{t.index:03d}] [{t.cohort:<8}] {t.bot1.name}({t.bot1.race},{t.bot1.bot_mode or t.bot1.bot_type}) vs "
-                  f"{t.bot2.name}({t.bot2.race},{t.bot2.bot_mode or t.bot2.bot_type}) on {t.map_name}{est_s}")
+                  f"{t.bot2.name}({t.bot2.race},{t.bot2.bot_mode or t.bot2.bot_type}) on {t.map_name} | seed={t.random_seed}{est_s}")
         return 0
 
     runtime = detect_container_runtime(args.container_runtime)
@@ -1694,11 +1820,12 @@ def main() -> int:
     signal.signal(signal.SIGTERM, handle_signal)
 
     commit = get_repo_commit(repo_dir)
+    bench_seed_norm = normalize_bench_seed(args.bench_seed)
     concurrency = max(1, min(args.concurrency, len(tasks)))
     log(
         f"[SC2-ARENA] Starting {len(tasks)} real SC2 matches (concurrency={concurrency}, "
-        f"mode={args.mothman_mode}, schedule_order={args.schedule_order}, commit={commit}, "
-        f"max_game_time={args.max_game_time}, timeout={args.timeout_sec}s)\n"
+        f"mode={args.mothman_mode}, schedule_order={args.schedule_order}, bench_seed={bench_seed_norm}, "
+        f"commit={commit}, max_game_time={args.max_game_time}, timeout={args.timeout_sec}s)\n"
         f"[SC2-ARENA] Run directory: {run_dir}"
     )
 
@@ -1788,6 +1915,7 @@ def main() -> int:
         "repo_commit": commit,
         "mothman_mode": args.mothman_mode,
         "schedule_order": args.schedule_order,
+        "bench_seed": bench_seed_norm,
         "image": args.image,
         "concurrency": concurrency,
         "max_game_time": args.max_game_time,
@@ -1797,6 +1925,7 @@ def main() -> int:
         "totals": aggregate_records(results),
         "totals_external": aggregate_records(ext_results) if ext_results else None,
         "apm_cap_drops": aggregate_apm_cap_drops(results),
+        "spawn_balance": aggregate_spawn_balance(results),
         "by_cohort": by_cohort,
         "by_bot": by_bot,
         "by_opponent": by_opponent,

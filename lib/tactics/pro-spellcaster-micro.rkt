@@ -2627,12 +2627,13 @@
                      (or
                       (let-values ([(ok? tgt _w)
                                     (best-unit-target
-                                     ux uy (if (>= current-frame 5376) 11.5 9.5) all-allies
+                                     ux uy (if (>= current-frame 5376) 13.5 9.5) all-allies
                                      (lambda ([a : Any])
                                        (and (not (= (uh-tag a) tag))
                                             (not (uh-hallucination? a))
                                             (> (queen-transfuse-priority (uh-type a)) 0.0)
-                                            (>= (uh-missing-hp a) 50.0)
+                                            (>= (uh-missing-hp a)
+                                                (if (memq (uh-type a) '(hydralisk hydralisk-burrowed)) 35.0 50.0))
                                             (< (uh-hp-ratio a) 0.72)
                                             (< (spell-unit-claim-count claims 'transfusion (uh-tag a) current-frame)
                                                (unit-claim-effective-cap 'transfusion 0.0 (uh-missing-hp a) #f #t))))
@@ -3078,6 +3079,22 @@
                  #f]
                 [else
                  (or
+                  ;; 0. Loop 74 C1: Safe Consume FIRST when `energy < 75.0` (freshly spawned at 50e
+                  ;;    or post-cast with no castable offensive spell) and no targetable enemy <= 10.0t.
+                  (and (< en 75.0)
+                       (not (any-unit-within? all-enemies ux uy 10.0 sc2-enemy-unit-targetable?))
+                       (let-values ([(ok? bldg _w)
+                                     (best-unit-target
+                                      ux uy 32.0 (append ally-buildings ally-units)
+                                      (lambda ([b : Any]) (> (zerg-consume-structure-weight b) 0.0))
+                                      (lambda ([b : Any])
+                                        (- (zerg-consume-structure-weight b)
+                                           (* 1.5 (dist2 ux uy (uh-x b) (uh-y b))))))])
+                         (and ok?
+                              (spell-claim-unit?! claims 'viper-consume (uh-tag bldg) current-frame UNIT-SPELL-CLAIM-TTL
+                                                  #:caster-tag tag)
+                              (spell-directive tag 'viper 'viper-consume 'unit (uh-tag bldg)
+                                               (uh-x bldg) (uh-y bldg) 'viper-safe-consume))))
                   ;; 1. Blinding Cloud on >= 2 ground ranged clumps, prioritizing 'armored/'mechanical lines
                   (let ([bc-rng (sc2-spell-cast-range 'blinding-cloud 11.0)]
                         [bc-rad (sc2-spell-effect-radius 'blinding-cloud 2.0)]
@@ -3179,53 +3196,40 @@
                                          (not (spell-point-claimed? claims 'blinding-cloud (uh-x e) (uh-y e)
                                                                     (sc2-spell-claim-radius 'blinding-cloud BLINDING-CLOUD-CLAIM-RADIUS)
                                                                     current-frame))))))])
-                       (and (not pbomb-clump-in-13t?)
-                            (not bcloud-clump-in-15t?)
-                            (>= en (sc2-spell-energy 'abduct 75.0))
-                            (>= (count-units-within ally-units ux uy 9.0
-                                                    (lambda ([a : Any]) (and (not (= (uh-tag a) tag)) (unit-combat-relevant? a))))
-                                4)
-                            (let ([abduct-rng (sc2-spell-cast-range 'abduct 9.0)])
-                              (let-values ([(ok? tgt _w)
-                                            (best-unit-target
-                                             ux uy (+ abduct-rng 4.0) enemy-units
-                                             (lambda ([e : Any])
-                                               (define et (uh-type e))
-                                               (define d-e (dist2 ux uy (uh-x e) (uh-y e)))
-                                               (and (not (unit-attr-has-any? et SC2-UNIT-ATTR-HEROIC))
-                                                    (> (viper-abduct-weight et) 0.0)
-                                                    ;; Keep `abduct-rng + 4.0` Abduct approach for capital targets (Colossus/Carrier/
-                                                    ;; Tempest/BC/BroodLord/Thor), while keeping Sieged Tank Abduct at
-                                                    ;; native `<= abduct-rng` cast range (never stealing `100e` from Blinding Cloud
-                                                    ;; at `9..13t`, and never abducting an already-blinded unit!).
-                                                    (or (<= d-e abduct-rng)
-                                                        (not (memq et '(siege-tank siege-tank-sieged))))
-                                                    (not (uh-has-buff? e 'blinding-cloud))
-                                                    (= (spell-unit-claim-count claims 'abduct (uh-tag e) current-frame) 0)))
-                                             (lambda ([e : Any]) (viper-abduct-weight (uh-type e))))])
-                                (and ok?
-                                     (spell-claim-unit?! claims 'abduct (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
-                                                         #:caster-tag tag)
-                                     (begin
-                                       (hash-set! (spell-claims-viper-abduct-lock-frame claims)
-                                                  tag (+ current-frame (sc2-spell-lockout-frames 'abduct VIPER-ABDUCT-LOCK-FRAMES)))
-                                       (spell-directive tag 'viper 'abduct 'unit (uh-tag tgt)
-                                                        (uh-x tgt) (uh-y tgt) 'viper-abduct)))))))))
-                  ;; 4. Safe Consume (`energy < 60`, `0` enemies within `12.0`, Zerg building `hp > 450`)
-                  (and (< en 60.0)
-                       (not (any-unit-within? all-enemies ux uy 12.0 sc2-enemy-unit-targetable?))
-                       (let-values ([(ok? bldg _w)
-                                     (best-unit-target
-                                      ux uy 25.0 (append ally-buildings ally-units)
-                                      (lambda ([b : Any]) (> (zerg-consume-structure-weight b) 0.0))
-                                      (lambda ([b : Any])
-                                        (- (zerg-consume-structure-weight b)
-                                           (* 1.5 (dist2 ux uy (uh-x b) (uh-y b))))))])
-                         (and ok?
-                              (spell-claim-unit?! claims 'viper-consume (uh-tag bldg) current-frame UNIT-SPELL-CLAIM-TTL
-                                                  #:caster-tag tag)
-                              (spell-directive tag 'viper 'viper-consume 'unit (uh-tag bldg)
-                                               (uh-x bldg) (uh-y bldg) 'viper-safe-consume)))))])]
+                       (let* ([en-below-100? (< en 100.0)]
+                              [ally-r (if en-below-100? 11.0 9.0)]
+                              [ally-min (if en-below-100? 2 4)])
+                         (and (not pbomb-clump-in-13t?)
+                              (not bcloud-clump-in-15t?)
+                              (>= en (sc2-spell-energy 'abduct 75.0))
+                              (>= (count-units-within ally-units ux uy ally-r
+                                                      (lambda ([a : Any]) (and (not (= (uh-tag a) tag)) (unit-combat-relevant? a))))
+                                  ally-min)
+                              (let ([abduct-rng (sc2-spell-cast-range 'abduct 9.0)])
+                                (let-values ([(ok? tgt _w)
+                                              (best-unit-target
+                                               ux uy (+ abduct-rng 4.0) enemy-units
+                                               (lambda ([e : Any])
+                                                 (define et (uh-type e))
+                                                 (define d-e (dist2 ux uy (uh-x e) (uh-y e)))
+                                                 (and (not (unit-attr-has-any? et SC2-UNIT-ATTR-HEROIC))
+                                                      (> (viper-abduct-weight et) 0.0)
+                                                      ;; Keep `abduct-rng + 4.0` Abduct approach for capital targets, and allow
+                                                      ;; `abduct-rng + 2.5` Sieged Tank approach when `75 <= en < 100` (cannot cast
+                                                      ;; Blinding Cloud yet), keeping `<= abduct-rng` at `>= 100e` so Blinding Cloud wins!
+                                                      (or (<= d-e (if en-below-100? (+ abduct-rng 2.5) abduct-rng))
+                                                          (not (memq et '(siege-tank siege-tank-sieged))))
+                                                      (not (uh-has-buff? e 'blinding-cloud))
+                                                      (= (spell-unit-claim-count claims 'abduct (uh-tag e) current-frame) 0)))
+                                               (lambda ([e : Any]) (viper-abduct-weight (uh-type e))))])
+                                  (and ok?
+                                       (spell-claim-unit?! claims 'abduct (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
+                                                           #:caster-tag tag)
+                                       (begin
+                                         (hash-set! (spell-claims-viper-abduct-lock-frame claims)
+                                                    tag (+ current-frame (sc2-spell-lockout-frames 'abduct VIPER-ABDUCT-LOCK-FRAMES)))
+                                         (spell-directive tag 'viper 'abduct 'unit (uh-tag tgt)
+                                                          (uh-x tgt) (uh-y tgt) 'viper-abduct)))))))))))])]
 
              ;; --- CORRUPTOR ---
              [(corruptor)
@@ -6447,20 +6451,38 @@
             (when (and (>= n-strike 5)
                        (<= local-enemy-cnt (* n-strike 2))
                        tank-overlap-safe?)
-              ;; Land inside Tank `1.25t` dead-zone (`<= 2.0t` min range!) or `1.75t` arc under Colossus,
-              ;; blinking straight along each Stalker's own near-side ray so wing Stalkers never cross paths!
-              (define land-r
+              ;; Loop 76 P2: Fan forward-blinking Stalkers across a [-0.65, +0.65] rad surround arc
+              ;; around the centroid ray (sorted laterally to prevent path crossings and branch-cut
+              ;; inversions), landing at 1.25t Tank deadzone or 2.6t wide anti-splash arc on Colossus!
+              (define land-r : Float
                 (cond [(eq? hv-type 'siege-tank-sieged) 1.25]
-                      [(eq? hv-type 'colossus) 1.75]
+                      [(eq? hv-type 'colossus) 2.6]
                       [else 2.8]))
-              (for ([s (in-list strike-stalkers)]
+              (define base-ray-th : Float
+                (real->double-flonum (atan (- scy hv-y) (- scx hv-x))))
+              (define ray-ux : Float (flcos base-ray-th))
+              (define ray-uy : Float (flsin base-ray-th))
+              (define ray-px : Float (- ray-uy))
+              (define ray-py : Float ray-ux)
+              (define sorted-blinkers : (Listof Any)
+                (sort strike-stalkers
+                      (lambda ([a : Any] [b : Any])
+                        (define la : Float (+ (* (- (uh-x a) hv-x) ray-px) (* (- (uh-y a) hv-y) ray-py)))
+                        (define lb : Float (+ (* (- (uh-x b) hv-x) ray-px) (* (- (uh-y b) hv-y) ray-py)))
+                        (or (< la lb) (and (= la lb) (< (uh-tag a) (uh-tag b)))))))
+              (define fan-half-ang : Float
+                (if (eq? hv-type 'siege-tank-sieged) 0.38 0.65))
+              (define n-blinkers-denom : Float (exact->inexact (max 1 (sub1 n-strike))))
+              (for ([s (in-list sorted-blinkers)]
                     [idx (in-naturals)])
                 (define tag (uh-tag s))
                 (define ux (uh-x s))
                 (define uy (uh-y s))
-                (define ray-th (real->double-flonum (atan (- uy hv-y) (- ux hv-x))))
-                (define jitter (* (exact->inexact (- (modulo idx 3) 1)) 0.08))
-                (define ang (+ ray-th jitter))
+                (define angle-off : Float
+                  (if (> n-strike 1)
+                      (+ (- fan-half-ang) (* (* 2.0 fan-half-ang) (/ (exact->inexact idx) n-blinkers-denom)))
+                      0.0))
+                (define ang : Float (+ base-ray-th angle-off))
                 (define goal-x (clamp-coord (+ hv-x (* land-r (flcos ang)))))
                 (define goal-y (clamp-coord (+ hv-y (* land-r (flsin ang)))))
                 (define d-goal (dist2 ux uy goal-x goal-y))

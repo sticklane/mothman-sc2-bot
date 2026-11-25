@@ -2765,7 +2765,8 @@
                    #:mineral-harvesters 20 #:vespene-harvesters 4
                    #:ally-units scvs-24 #:ally-buildings bldgs-2oc #:mineral-patches mps-55
                    #:enemy-buildings (list (mk-u 55991 'factory-techlab 140.0 140.0 #:hp 400.0))))))
-  ;; (e) TvP at 3:30 (`4704 < 5376`) -> MULEs; TvP at 4:15 (`5712 >= 5376`) -> holds!
+  ;; (e) Loop 74 Lane A: 1-OC TvP at 3:30 (`4704`) & 4:15 (`5712`) clean -> MULEs freely;
+  ;;     2-OC TvP at 4:15 (`5712`) holds 1 OC & MULEs 1 OC; 1-OC TvP at 5:00 (`6720`) holds!
   (define tvp-330
     (mule-ids
      (step-layer2-economy!
@@ -2782,15 +2783,33 @@
                    #:mineral-harvesters 20 #:vespene-harvesters 4
                    #:ally-units scvs-24 #:ally-buildings bldgs-1oc #:mineral-patches mps-55
                    #:enemy-buildings (list (mk-u 55993 'nexus 140.0 140.0 #:hp 1000.0))))))
+  (define tvp-2oc-415
+    (mule-ids
+     (step-layer2-economy!
+      (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+      (mk-live-obs 'Terran 'Protoss 5712 #:minerals 100 #:gas 50 #:supply-used 34 #:supply-cap 54
+                   #:mineral-harvesters 20 #:vespene-harvesters 4
+                   #:ally-units scvs-24 #:ally-buildings bldgs-2oc #:mineral-patches mps-55
+                   #:enemy-buildings (list (mk-u 55993 'nexus 140.0 140.0 #:hp 1000.0))))))
+  (define tvp-1oc-500
+    (mule-ids
+     (step-layer2-economy!
+      (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+      (mk-live-obs 'Terran 'Protoss 6720 #:minerals 100 #:gas 50 #:supply-used 34 #:supply-cap 54
+                   #:mineral-harvesters 20 #:vespene-harvesters 4
+                   #:ally-units scvs-24 #:ally-buildings bldgs-1oc #:mineral-patches mps-55
+                   #:enemy-buildings (list (mk-u 55993 'nexus 140.0 140.0 #:hp 1000.0))))))
   (check-true "L56-W2-2-runtime-mule-tvt-clean-1oc-and-2oc-drop-scouted-holds-tvp-4m-reserves"
               (and (equal? tvt-1oc-415 '(55001))
                    (null? tvt-1oc-sptl)
                    (= (length tvt-2oc-pre415) 2)
                    (= (length tvt-2oc-post415) 2)
                    (equal? tvp-330 '(55001))
-                   (null? tvp-415))
-              (format "1oc-415=~a sptl=~a 2oc-pre=~a 2oc-post=~a tvp330=~a tvp415=~a"
-                      tvt-1oc-415 tvt-1oc-sptl tvt-2oc-pre415 tvt-2oc-post415 tvp-330 tvp-415)))
+                   (equal? tvp-415 '(55001))
+                   (= (length tvp-2oc-415) 1)
+                   (null? tvp-1oc-500))
+              (format "1oc-415=~a sptl=~a 2oc-pre=~a 2oc-post=~a tvp330=~a tvp415=~a tvp2oc415=~a tvp500=~a"
+                      tvt-1oc-415 tvt-1oc-sptl tvt-2oc-pre415 tvt-2oc-post415 tvp-330 tvp-415 tvp-2oc-415 tvp-1oc-500)))
 
 ;; -----------------------------------------------------------------------------
 ;; 49. K13 (`L55-T7`): ZvZ Ravager Morph Holds Gas When Brain Escrows `lair` (`gas < 175`)
