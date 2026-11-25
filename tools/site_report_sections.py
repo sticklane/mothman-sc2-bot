@@ -2707,9 +2707,10 @@ def render_tactics_explorer_section(
     <h2 class="section-kicker">Isolated Micro &amp; Spell Drills</h2>
     <p class="section-intro">
       Short combat, harassment, and spell-casting drills run inside StarCraft II to verify unit control directly
-      (latest core drill pass: <strong>{html.escape(a3['dummy_rec'])}</strong> at <strong>{a3['dummy_trade']:.2f}×</strong>
+      (latest full core drill pass: <strong>{html.escape(a3['dummy_rec'])}</strong> at <strong>{a3['dummy_trade']:.2f}×</strong>
       trade vs. scripted AI, <strong>{html.escape(a3['sp_rec'])}</strong> at <strong>{a3['sp_trade']:.2f}×</strong> vs. self).
-      Videos stay unloaded until you press play.
+      The drill harness now logs live battle-geometry telemetry per clip: concave arc width, melee-ranged role inversion,
+      anti-splash spacing, and active firing share. Videos stay unloaded until you press play.
     </p>
   </div>
 
@@ -3723,9 +3724,9 @@ def render_matchup_evaluation_section(
     <div class="release-highlights">
       <div class="rh-kicker">What Changed in {html.escape(rh_title)}</div>
       <ul class="rh-list">
-        <li><strong>Supply blocks cut in half across all three races:</strong> Earlier Pylon, Depot, and Overlord preemption plus post-4:30 mineral worker transfers dropped overall supply-blocked time from 4.2% to 2.2%, with Protoss falling from 6.1% to a record 1.8%.</li>
-        <li><strong>Cleaner command pacing &amp; faster Zerg spending:</strong> A command-rate governor and batched Zerg larva spending eliminated worker and rally command drops completely and cut larva budget conflicts by 70%.</li>
-        <li><strong>Record win rates &amp; first positive overall trade:</strong> Full 84-match local play hit new highs at 39–40–5 (46.4% wins, 1.03× trade), and held-out Unseen-12 jumped to 13–21–2 (36.1%). Zerg posted a record 14–9–3 external slate (1.43× trade), and Protoss climbed to 12–14.</li>
+        <li><strong>Supply blocks cut in half across all three races:</strong> Earlier Pylon, Depot, and Overlord preemption plus automatic mineral worker transfers dropped overall supply-blocked time from 4.2% to 2.2%, and Protoss fell from 6.1% to 1.8%.</li>
+        <li><strong>Cleaner command pacing &amp; live ladder verification:</strong> A command-rate governor and batched Zerg larva spending eliminated worker and rally command drops and cut live AI Arena larva drops by 99.7% (10,407 down to 4), with zero crashes or rejected wire commands.</li>
+        <li><strong>First positive overall trade &amp; live ladder surge:</strong> Full 84-match local play hit a campaign high at 1.03× trade (led by Zerg at 1.43×), and the latest post-deploy AI Arena check went 40–19–1 (66.7% wins, 79.5% in Division 9).</li>
       </ul>
     </div>"""
         elif "iter68c_" in run_id_low:

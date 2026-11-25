@@ -1179,7 +1179,7 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": false
+      "fast_core": true
     },
     {
       "id": "sc2-real-t03-outnumbered-bio-vs-lings",
@@ -10609,7 +10609,7 @@
       "enemy_race": "Protoss",
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": false,
+      "fast_core": true,
       "source": "pattern-coverage",
       "terrain": "open",
       "patterns": [
@@ -10656,7 +10656,7 @@
       "enemy_race": "Zerg",
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": false,
+      "fast_core": true,
       "source": "pattern-coverage",
       "terrain": "open",
       "patterns": [
@@ -10709,7 +10709,7 @@
       "enemy_race": "Protoss",
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": false,
+      "fast_core": true,
       "source": "pattern-coverage",
       "terrain": "open",
       "patterns": [
@@ -10767,7 +10767,7 @@
       "enemy_race": "Protoss",
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": false,
+      "fast_core": true,
       "source": "pattern-coverage",
       "terrain": "open",
       "patterns": [
@@ -10839,7 +10839,7 @@
       "enemy_race": "Zerg",
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": false,
+      "fast_core": true,
       "source": "pattern-coverage",
       "terrain": "open",
       "patterns": [
@@ -11217,6 +11217,137 @@
           3,
           0.0,
           1.8
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-flk-f05-zvt-single-spawn-ling-roach-wrap-vs-bio-tank",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "flank-surround",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "single-spawn-flank-wrap",
+        "zergling-wing-surround",
+        "anti-tank-splash-spread"
+      ],
+      "p1_upgrades": [
+        "MetabolicBoost",
+        "GlialReconstitution"
+      ],
+      "p2_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "description": "Single-Spawn Ling/Roach Wrap (ZvT): 24 Speedlings + 10 Speed Roaches starting in ONE cohesive clump dynamically wrapping 2 Sieged Tanks + 14 Marines + 4 Marauders",
+      "p1_units": [
+        [
+          "zergling",
+          24,
+          -5.5,
+          0.0
+        ],
+        [
+          "roach",
+          10,
+          -6.6,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "marauder",
+          4,
+          4.2,
+          0.0
+        ],
+        [
+          "marine",
+          14,
+          4.8,
+          0.0
+        ],
+        [
+          "siege-tank-sieged",
+          2,
+          6.2,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-flk-f06-tvz-single-spawn-bio-split-arc-vs-tank-bane",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "flank-surround",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "single-spawn-bio-split-arc",
+        "anti-baneling-concave",
+        "front-to-back-marauder-screen"
+      ],
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield",
+        "ConcussiveShells"
+      ],
+      "p2_upgrades": [
+        "MetabolicBoost",
+        "CentrifugalHooks"
+      ],
+      "description": "Single-Spawn Bio Split-Arc (TvZ): 16 Stim Marines + 6 Marauders + 2 Medivacs starting in ONE clump dynamically fanning into an anti-splash arc vs 8 Speed Banelings + 18 Speedlings + 6 Roaches + 3 Ravagers",
+      "p1_units": [
+        [
+          "marauder",
+          6,
+          -4.2,
+          0.0
+        ],
+        [
+          "marine",
+          16,
+          -5.0,
+          0.0
+        ],
+        [
+          "medivac",
+          2,
+          -6.4,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "baneling",
+          8,
+          4.2,
+          0.0
+        ],
+        [
+          "zergling",
+          18,
+          4.8,
+          0.0
+        ],
+        [
+          "roach",
+          6,
+          5.6,
+          0.0
+        ],
+        [
+          "ravager",
+          3,
+          6.4,
+          0.0
         ]
       ],
       "max_loops": 960

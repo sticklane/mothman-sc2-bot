@@ -571,6 +571,238 @@ def side_can_damage_other(atk_units: list[Any], def_units: list[Any], is_dummy: 
                     return True
     return False
 
+
+# -----------------------------------------------------------------------------
+# Per-Duel Concave, Role-Layering, Anti-Splash & DPS-Uptime Telemetry (Loop 76 P4)
+# -----------------------------------------------------------------------------
+POS_RANGED_COMBAT_IDS: set[int] = {
+    # Terran ranged combat
+    48, 49, 51, 33, 32, 53, 50, 52, 691, 35, 34, 55, 689, 734, 692, 57,
+    # Protoss ranged combat
+    74, 77, 311, 83, 4, 75, 141, 78, 495, 80, 79, 496, 10,
+    # Zerg ranged combat
+    110, 688, 107, 108, 112, 126, 114, 502, 503,
+}
+POS_FRONTLINE_IDS: set[int] = {
+    48,   # marine
+    51,   # marauder
+    73,   # zealot
+    105,  # zergling
+    110,  # roach
+    484,  # hellbat
+    109,  # ultralisk
+}
+POS_BACKLINE_IDS: set[int] = {
+    33,   # siege-tank
+    32,   # siege-tank-sieged
+    4,    # colossus
+    75,   # high-templar
+    111,  # infestor
+    127,  # infestor-burrowed
+    499,  # viper
+    694,  # disruptor
+}
+POS_ENEMY_SPLASH_IDS: set[int] = {
+    4,    # colossus
+    32,   # siege-tank-sieged
+    694,  # disruptor
+    9,    # baneling
+    141,  # archon
+    75,   # high-templar
+    503,  # lurker-mp-burrowed
+    500,  # widow-mine-burrowed
+}
+POS_PURE_CASTER_NO_AUTO_IDS: set[int] = {111, 127, 499, 694, 56}  # infestor, viper, disruptor, raven
+POS_WEAPON_RANGES: dict[int, float] = {
+    # Melee / short-range
+    73: 1.0, 76: 1.0, 105: 1.0, 9: 1.0, 109: 1.0, 484: 2.0,
+    141: 3.0, 108: 3.0,
+    110: 4.0, 311: 4.0, 495: 4.0,
+    # Mid-range
+    48: 5.0, 49: 5.0, 53: 5.0, 77: 5.0, 78: 5.0, 126: 5.0,
+    51: 6.0, 50: 6.0, 692: 6.0, 34: 6.0, 55: 6.0, 57: 6.0,
+    74: 6.0, 83: 6.0, 80: 6.0, 107: 6.0, 688: 6.0, 112: 6.0,
+    # Long-range / siege
+    33: 7.0, 52: 7.0, 734: 7.0, 75: 6.0, 10: 7.0,
+    79: 8.0, 502: 8.0, 503: 8.0,
+    4: 9.0, 35: 9.0, 114: 9.0, 689: 5.0,
+    691: 10.0, 496: 10.0,
+    32: 13.0,
+}
+
+
+def _extract_pos_unit_tuple(u: Any) -> tuple[int, float, float, float, bool] | None:
+    """Extract `(unit_type_id, x, y, weapon_cooldown, has_attack_order)` from a protobuf Unit or dict."""
+    if isinstance(u, dict):
+        raw_ut = u.get("unit_type", u.get("type", 0))
+        if isinstance(raw_ut, str):
+            uid = int(UNIT_IDS.get(raw_ut.strip().lower(), 0))
+        else:
+            uid = int(raw_ut or 0)
+        x = float(u.get("x", 0.0))
+        y = float(u.get("y", 0.0))
+        wcd = float(u.get("weapon_cooldown", 0.0) or 0.0)
+        orders = u.get("orders") or ()
+        atk_ord = bool(u.get("attacking", False)) or any(
+            (int(o.get("ability_id", 0)) == 23 if isinstance(o, dict) else int(o) == 23)
+            for o in orders
+        )
+        return (uid, x, y, wcd, atk_ord)
+    pos = getattr(u, "pos", None)
+    if pos is None:
+        return None
+    uid = int(getattr(u, "unit_type", 0) or 0)
+    x = float(getattr(pos, "x", 0.0))
+    y = float(getattr(pos, "y", 0.0))
+    wcd = float(getattr(u, "weapon_cooldown", 0.0) or 0.0)
+    orders = getattr(u, "orders", ()) or ()
+    atk_ord = any(int(getattr(o, "ability_id", 0) or 0) == 23 for o in orders)
+    return (uid, x, y, wcd, atk_ord)
+
+
+def _is_positioning_combat_uid(uid: int) -> bool:
+    if uid <= 0 or uid in STRUCTURE_IDS or uid in WORKER_IDS or uid in STATIC_TRAP_IDS:
+        return False
+    if uid in PURE_UNARMED_IDS:
+        return False
+    return True
+
+
+def compute_positioning_frame_metrics(p1_units: list[Any], p2_units: list[Any]) -> dict[str, Any]:
+    """Compute per-frame concave arc width, role inversion, anti-splash clump, and DPS activity."""
+    p1_c: list[tuple[int, float, float, float, bool]] = []
+    for u in (p1_units or ()):
+        tup = _extract_pos_unit_tuple(u)
+        if tup is not None and _is_positioning_combat_uid(tup[0]):
+            p1_c.append(tup)
+    p2_c: list[tuple[int, float, float, float, bool]] = []
+    for u in (p2_units or ()):
+        tup = _extract_pos_unit_tuple(u)
+        if tup is not None and _is_positioning_combat_uid(tup[0]):
+            p2_c.append(tup)
+    if not p1_c or not p2_c:
+        return {
+            "valid": False,
+            "concave_arc_width": None,
+            "role_check_valid": False,
+            "role_inverted": False,
+            "splash_check_valid": False,
+            "anti_splash_clump": None,
+            "dps_active": 0,
+            "dps_eligible": 0,
+        }
+
+    p1x = sum(t[1] for t in p1_c) / len(p1_c)
+    p1y = sum(t[2] for t in p1_c) / len(p1_c)
+    p2x = sum(t[1] for t in p2_c) / len(p2_c)
+    p2y = sum(t[2] for t in p2_c) / len(p2_c)
+    dx_f = p2x - p1x
+    dy_f = p2y - p1y
+    fn = math.hypot(dx_f, dy_f)
+    if fn > 1e-6:
+        fwd_x, fwd_y = dx_f / fn, dy_f / fn
+    else:
+        fwd_x, fwd_y = 1.0, 0.0
+    perp_x, perp_y = -fwd_y, fwd_x
+
+    # 1. Concave arc width: lateral spread (max - min) of P1 ranged combat units perpendicular to enemy axis
+    ranged_p1 = [t for t in p1_c if t[0] in POS_RANGED_COMBAT_IDS]
+    arc_pool = ranged_p1 if len(ranged_p1) >= 2 else (p1_c if len(p1_c) >= 2 else [])
+    if len(arc_pool) >= 2:
+        lats = [(t[1] - p1x) * perp_x + (t[2] - p1y) * perp_y for t in arc_pool]
+        arc_width: float | None = max(lats) - min(lats)
+    else:
+        arc_width = None
+
+    # 2. Role inversion: fragile backline/siege/caster forward projection > frontline screen projection
+    front_p1 = [t for t in p1_c if t[0] in POS_FRONTLINE_IDS]
+    back_p1 = [t for t in p1_c if t[0] in POS_BACKLINE_IDS]
+    if front_p1 and back_p1:
+        front_proj = sum((t[1] - p1x) * fwd_x + (t[2] - p1y) * fwd_y for t in front_p1) / len(front_p1)
+        back_proj = sum((t[1] - p1x) * fwd_x + (t[2] - p1y) * fwd_y for t in back_p1) / len(back_p1)
+        role_check_valid = True
+        role_inverted = bool(back_proj > front_proj)
+    else:
+        role_check_valid = False
+        role_inverted = False
+
+    # 3. Anti-splash clump score: mean count of other P1 combat units within 2.2t when enemy splash is alive
+    enemy_splash_alive = any(t[0] in POS_ENEMY_SPLASH_IDS for t in p2_c)
+    if enemy_splash_alive and len(p1_c) >= 2:
+        r2_lim = 2.2 * 2.2
+        tot_nbrs = 0
+        n1 = len(p1_c)
+        for i in range(n1):
+            xi, yi = p1_c[i][1], p1_c[i][2]
+            for j in range(n1):
+                if i == j:
+                    continue
+                ddx = xi - p1_c[j][1]
+                ddy = yi - p1_c[j][2]
+                if ddx * ddx + ddy * ddy <= r2_lim:
+                    tot_nbrs += 1
+        splash_check_valid = True
+        anti_splash_clump: float | None = tot_nbrs / n1
+    else:
+        splash_check_valid = False
+        anti_splash_clump = None
+
+    # 4. DPS active %: P1 combat units with wcd > 0 or attack order while enemy <= weapon_range + 2.0t
+    dps_active = 0
+    dps_eligible = 0
+    for uid, ux, uy, wcd, atk_ord in p1_c:
+        if uid in POS_PURE_CASTER_NO_AUTO_IDS:
+            continue
+        wr_lim = POS_WEAPON_RANGES.get(uid, 5.0) + 2.0
+        wr_lim2 = wr_lim * wr_lim
+        in_rng = any(((ux - ex) * (ux - ex) + (uy - ey) * (uy - ey)) <= wr_lim2 for _, ex, ey, _, _ in p2_c)
+        if in_rng:
+            dps_eligible += 1
+            if wcd > 0.0 or atk_ord:
+                dps_active += 1
+
+    return {
+        "valid": True,
+        "concave_arc_width": arc_width,
+        "role_check_valid": role_check_valid,
+        "role_inverted": role_inverted,
+        "splash_check_valid": splash_check_valid,
+        "anti_splash_clump": anti_splash_clump,
+        "dps_active": dps_active,
+        "dps_eligible": dps_eligible,
+    }
+
+
+def aggregate_positioning_metrics(samples: list[dict[str, Any]]) -> dict[str, float]:
+    """Aggregate per-frame positioning samples across a duel into 4 summary telemetry fields."""
+    arc_vals = [float(s["concave_arc_width"]) for s in samples if s.get("concave_arc_width") is not None]
+    role_valid = [s for s in samples if s.get("role_check_valid")]
+    role_inv = sum(1 for s in role_valid if s.get("role_inverted"))
+    clump_vals = [float(s["anti_splash_clump"]) for s in samples if s.get("splash_check_valid") and s.get("anti_splash_clump") is not None]
+    dps_act = sum(int(s.get("dps_active", 0) or 0) for s in samples)
+    dps_elig = sum(int(s.get("dps_eligible", 0) or 0) for s in samples)
+    return {
+        "concave_arc_width": round(sum(arc_vals) / len(arc_vals), 2) if arc_vals else 0.0,
+        "role_inversion_pct": round(100.0 * role_inv / len(role_valid), 1) if role_valid else 0.0,
+        "anti_splash_clump_score": round(sum(clump_vals) / len(clump_vals), 2) if clump_vals else 0.0,
+        "dps_active_pct": round(100.0 * dps_act / dps_elig, 1) if dps_elig > 0 else 0.0,
+    }
+
+
+def format_positioning_markdown_table(scenarios: list[dict[str, Any]]) -> str:
+    """Format a compact Markdown table of per-duel positioning telemetry for reports."""
+    lines = [
+        "| Scenario | Winner | Trade | Arc Width | Role Inv% | Splash Clump | DPS Active% |",
+        "| :--- | :--- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for s in scenarios:
+        lines.append(
+            f"| `{s.get('id', '?')}` | {s.get('winner', '?')} | {float(s.get('trade_ratio', 0.0)):.2f}x | "
+            f"{float(s.get('concave_arc_width', 0.0)):.2f}t | {float(s.get('role_inversion_pct', 0.0)):.1f}% | "
+            f"{float(s.get('anti_splash_clump_score', 0.0)):.2f} | {float(s.get('dps_active_pct', 0.0)):.1f}% |"
+        )
+    return "\n".join(lines)
+
 BURROWED_UNIT_MAP: dict[str, str] = {
     "zergling": "zergling-burrowed",
     "baneling": "baneling-burrowed",
@@ -1897,6 +2129,12 @@ def _build_aggregate_report(
             c_entry["non_combat_passes"] = sum(1 for s in c_nc_rows if s.get("win_type") == "non_combat_pass")
             c_entry["non_combat_fails"] = sum(1 for s in c_nc_rows if s.get("win_type") != "non_combat_pass")
             c_entry["avg_non_combat_score"] = round(sum(float(s.get("non_combat_score", 0.0)) for s in c_nc_rows) / len(c_nc_rows), 1)
+        c_pos_rows = [s for s in cs if "concave_arc_width" in s]
+        if c_pos_rows:
+            c_entry["avg_concave_arc_width"] = round(sum(float(s.get("concave_arc_width", 0.0)) for s in c_pos_rows) / len(c_pos_rows), 2)
+            c_entry["avg_role_inversion_pct"] = round(sum(float(s.get("role_inversion_pct", 0.0)) for s in c_pos_rows) / len(c_pos_rows), 1)
+            c_entry["avg_anti_splash_clump_score"] = round(sum(float(s.get("anti_splash_clump_score", 0.0)) for s in c_pos_rows) / len(c_pos_rows), 2)
+            c_entry["avg_dps_active_pct"] = round(sum(float(s.get("dps_active_pct", 0.0)) for s in c_pos_rows) / len(c_pos_rows), 1)
         by_category[cname] = c_entry
 
     spell_rows = [s for s in all_scens if s.get("expected_abilities")]
@@ -1910,6 +2148,7 @@ def _build_aggregate_report(
         2,
     ) if trades_sorted else 1.0
 
+    pos_all = [s for s in all_scens if "concave_arc_width" in s]
     summary: dict[str, Any] = {
         "total": len(all_scens),
         **tot_t,
@@ -1931,6 +2170,11 @@ def _build_aggregate_report(
         "by_tier": by_tier,
         "by_category": by_category,
     }
+    if pos_all:
+        summary["avg_concave_arc_width"] = round(sum(float(s.get("concave_arc_width", 0.0)) for s in pos_all) / len(pos_all), 2)
+        summary["avg_role_inversion_pct"] = round(sum(float(s.get("role_inversion_pct", 0.0)) for s in pos_all) / len(pos_all), 1)
+        summary["avg_anti_splash_clump_score"] = round(sum(float(s.get("anti_splash_clump_score", 0.0)) for s in pos_all) / len(pos_all), 2)
+        summary["avg_dps_active_pct"] = round(sum(float(s.get("dps_active_pct", 0.0)) for s in pos_all) / len(pos_all), 1)
     nc_all = [s for s in all_scens if s.get("scoring_mode") == "non-combat"]
     if nc_all:
         summary["non_combat_total"] = len(nc_all)
@@ -2438,6 +2682,14 @@ def run_host_driver(args: argparse.Namespace) -> int:
             f"A:M={rsum.get('am_ratio')}{sp_str} | wall={report.get('total_wall_ms')}ms",
             file=sys.stderr,
         )
+        if "avg_concave_arc_width" in rsum:
+            print(
+                f"[ARENA 3.1 pos] arc={rsum.get('avg_concave_arc_width')}t | "
+                f"role_inv={rsum.get('avg_role_inversion_pct')}% | "
+                f"splash_clump={rsum.get('avg_anti_splash_clump_score')} | "
+                f"dps_active={rsum.get('avg_dps_active_pct')}%",
+                file=sys.stderr,
+            )
         bt = rsum.get("by_tier") or {}
         if bt:
             parts = []
@@ -3791,6 +4043,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         "p2_rem_val": 0.0,
                         "last_combat_event_loop": 0,
                         "prev_unit_hp_map": {},
+                        "pos_samples": [],
                         "results": [],
                         "errors": [],
                         "sc2_ended_reason": None,
@@ -4849,12 +5102,17 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             f" | Spell={'OK' if spell_ver else 'MISS'}({exp_acc_map})"
                             if exp_ab_ids else ""
                         )
+                        pos_agg = aggregate_positioning_metrics(dstate.get("pos_samples") or [])
+                        pos_ctx = (
+                            f" | Pos(arc={pos_agg['concave_arc_width']:.2f}t, inv={pos_agg['role_inversion_pct']:.1f}%, "
+                            f"clump={pos_agg['anti_splash_clump_score']:.2f}, dps={pos_agg['dps_active_pct']:.1f}%)"
+                        )
                         context = (
                             f"{scen.description} [{scen.terrain}] | {bname1} ({p1_lbl}) vs {p2_label} ({p2_lbl}) -> "
                             f"{winner} ({win_type}/{end_reason}, {trade:.2f}x trade; alive {dstate['p1_alive_cnt']}/{dstate['p1_start_cnt']} "
                             f"[combat {dstate['p1_combat_alive_cnt']}] vs {dstate['p2_alive_cnt']}/{dstate['p2_start_cnt']} "
                             f"[combat {dstate['p2_combat_alive_cnt']}]; "
-                            f"ATK={dstate['attack_cmds']}, MOV={dstate['move_cmds']}, Spells={dstate['spell_cmds']}{spell_ctx}{econ_ctx}{p2_ctx_extra})."
+                            f"ATK={dstate['attack_cmds']}, MOV={dstate['move_cmds']}, Spells={dstate['spell_cmds']}{spell_ctx}{pos_ctx}{econ_ctx}{p2_ctx_extra})."
                         )
                         rec: dict[str, Any] = {
                             "id": scen.id,
@@ -4911,6 +5169,10 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             "mothman_ability_breakdown": spell_ab_breakdown,
                             "p1_ability_accepted": acc_ab_breakdown,
                             "p1_ability_rejected": rej_ab_breakdown,
+                            "concave_arc_width": pos_agg["concave_arc_width"],
+                            "role_inversion_pct": pos_agg["role_inversion_pct"],
+                            "anti_splash_clump_score": pos_agg["anti_splash_clump_score"],
+                            "dps_active_pct": pos_agg["dps_active_pct"],
                             "first_action_loop_offset": dstate.get("first_action_loop_offset", -1),
                             "loops_simulated": cur_loop - dstate["phase_start_loop"],
                             "wall_ms": round((time.monotonic() - dstate["round_t0"]) * 1000.0, 1),
@@ -6148,6 +6410,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         dstate["econ_worker_mining_ticks"] = 0
                                         dstate["econ_worker_total_ticks"] = 0
                                         dstate["nc"] = {}
+                                        dstate["pos_samples"] = []
 
                                     elif dstate["phase"] == "carrier_fill" and gl >= dstate["phase_start_loop"] + 2:
                                         # Top off debug-spawned Carriers from SC2's default 4/8 -> full 8/8 Interceptors (`1042`)!
@@ -6462,6 +6725,10 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             dstate["p2_pf_alive_cnt"] = count_matching_unit_ids(p2u, {130})
                                             dstate["p2_det_alive_cnt"] = count_matching_unit_ids(p2u, DETECTOR_IDS)
                                             dstate["p2_w_alive_cnt"] = count_matching_unit_ids(p2u, WORKER_IDS)
+                                            if p1u and p2u:
+                                                pos_f = compute_positioning_frame_metrics(p1u, p2u)
+                                                if pos_f.get("valid"):
+                                                    dstate["pos_samples"].append(pos_f)
 
                                             if scen.scoring_mode == "mineral-defense":
                                                 if obs.HasField("score"):
