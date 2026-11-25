@@ -13903,6 +13903,15 @@
          [(and (eq? race 'Protoss) (>= supply-cap 31))
           (min (if (>= supply-cap 100) 18 14)
                (max base-buf (+ 4 (* 2 (max 1 (length prod-facilities))))))]
+         [(and (eq? race 'Protoss)
+               (>= supply-cap 23)
+               (not (and (< supply-cap 31)
+                         (l2-enemy-early-pool-detected? ctx)
+                         (= (length ally-combat-units) 0))))
+          (max base-buf 4)]
+         [(and (eq? race 'Zerg) (>= supply-cap 28))
+          (min (if (>= supply-cap 100) 18 14)
+               (max base-buf (+ base-buf (if (>= supply-cap 52) 3 2))))]
          [(l2-ctx-early-survival-crisis? ctx)
           (max base-buf 4)]
          [else base-buf])]
@@ -14573,6 +14582,8 @@
        (set! eff-pending-supply (add1 eff-pending-supply))
        (set-l2-ctx-eff-pending-supply! ctx eff-pending-supply)]
       [else (void)]))
+  ;; Loop 73 B2: Align runtime opener lockout & supply-floor holds with 13/14 Zerg (13-Overlord)
+  ;; and 13/15 Protoss (14-Pylon) while keeping worker-rush overrides & Terran 13/15 intact!
   (define hard-supply-lockout?
     (and (< supply-cap SC2-MAX-SUPPLY)
          (<= eff-pending-supply 0)
@@ -14581,7 +14592,12 @@
              (and (<= (l2-ctx-supply-left ctx) 1)
                   (<= supply-cap (* 15 (max 1 active-bases)))
                   (or (and (eq? race 'Protoss) (= real-pylon-count 0) (>= supply-used 14))
-                      (and (eq? race 'Terran) (= real-depot-count 0) (>= supply-used 14)))))))
+                      (and (eq? race 'Terran) (= real-depot-count 0) (>= supply-used 14))))
+             (and (eq? race 'Protoss)
+                  (= real-pylon-count 0)
+                  (= supply-cap 15)
+                  (>= supply-used 13)
+                  (>= (l2-ctx-minerals ctx) (sc2-min-cost 'pylon))))))
   (set-l2-ctx-hard-supply-lockout?! ctx hard-supply-lockout?)
   (define hard-supply-lockout-reserve-min
     (if hard-supply-lockout?
@@ -14603,7 +14619,7 @@
          (eq? race 'Zerg)
          (not zerg-emergency-rush-lings?)
          (< supply-cap SC2-MAX-SUPPLY)
-         (>= supply-used 14)
+         (>= supply-used 13)
          supply-hold-tight?
          (or (and (<= eff-pending-supply 0)
                   (or supply-at-risk?
@@ -14616,10 +14632,15 @@
     (and (not zerg-emergency-rush-lings?)
          (< supply-cap SC2-MAX-SUPPLY)
          (<= eff-pending-supply 0)
-         (or (not live-game-obs?) (>= supply-used 14))
+         (or (not live-game-obs?)
+             (>= supply-used (if (memq race '(Zerg Protoss)) 13 14)))
          supply-hold-tight?
          (or supply-at-risk?
-             (<= (l2-ctx-supply-left ctx) (if (and live-game-obs? (< supply-cap 20)) 1 SC2-CRITICAL-LOW-SUPPLY)))
+             (<= (l2-ctx-supply-left ctx)
+                 (cond
+                   [(and live-game-obs? (eq? race 'Protoss) (= supply-cap 15) (= real-pylon-count 0)) 2]
+                   [(and live-game-obs? (< supply-cap 20)) 1]
+                   [else SC2-CRITICAL-LOW-SUPPLY])))
          (< (l2-ctx-minerals ctx) (+ (sc2-min-cost supply-provider-sym) (sc2-min-cost 'drone)))))
   (set-l2-ctx-reserve-supply-floor?! ctx reserve-supply-floor?)
   (set-l2-ctx-effective-free-supply! ctx
@@ -19118,6 +19139,15 @@
                   (>= (- (l2-ctx-minerals ctx) zerg-spire-res-min) (sc2-min-cost 'roach))
                   (>= (- (l2-ctx-gas ctx) zerg-spire-res-gas) (sc2-gas-cost 'roach)))
          (l2-try-train-unit! ctx 'roach 'larva 4 #:respect-bo-reserve? #f))
+       ;; Loop 73 B3: Effective-gas (after Spire/Ultra reserves) Larva mineral-overflow predicate
+       ;; so active Spire/AA/Ultra gas reservations at >= 500M never freeze Larva spend into Zerglings
+       ;; while keeping reserved gas and Spire minerals 100% untouched!
+       (define (zerg-gas-deficit-ling-overflow?)
+         (and live-game?
+              (>= (l2-ctx-minerals ctx) 500)
+              (< (- (l2-ctx-gas ctx) (+ zerg-ultra-res-gas zerg-spire-res-gas)) 25)
+              (memq 'spawning-pool ready-bldg-types)
+              (>= (hash-ref (l2-ctx-open-prod-slots ctx) 'larva 0) 2)))
        (cond
          [(and (or (memq 'spire ready-bldg-types) (memq 'greater-spire ready-bldg-types))
                (or (and (>= (l2-ctx-minerals ctx) (sc2-min-cost 'corruptor))
@@ -19221,31 +19251,38 @@
                (or (and (not zerg-p3-air-suppress-ground-gas?)
                         (>= (- (l2-ctx-gas ctx) (+ (if (< (l2-unit-count ctx 'roach) 4) 0 zerg-ultra-res-gas) zerg-spire-res-gas))
                             (sc2-gas-cost 'roach)))
-                   ;; Loop 67B Phase D: Enter gas-deficit `#:alternatives` cascade (`roach` -> `'zergling`)
-                   ;; ONLY at `>= 500M`, `< 25G`, and `>= 2` larvae while keeping gas 100% untouched!
-                   (and live-game?
-                        (>= (l2-ctx-minerals ctx) 500)
-                        (< (l2-ctx-gas ctx) 25)
-                        (memq 'spawning-pool ready-bldg-types)
-                        (>= (hash-ref (l2-ctx-open-prod-slots ctx) 'larva 0) 2))))
+                   ;; Loop 67B Phase D + Loop 73 B3: Enter gas-deficit `#:alternatives` cascade (`roach` -> `'zergling`)
+                   ;; at `>= 500M`, `< 25` effective gas (after Spire/Ultra reserves), and `>= 2` larvae so Spire/AA gas
+                   ;; reservation never freezes Larva spend while keeping reserved gas 100% untouched!
+                   (zerg-gas-deficit-ling-overflow?)))
+          (define roach-eff-gas-ok?
+            (and (not zerg-p3-air-suppress-ground-gas?)
+                 (>= (- (l2-ctx-gas ctx) (+ (if (< (l2-unit-count ctx 'roach) 4) 0 zerg-ultra-res-gas) zerg-spire-res-gas))
+                     (sc2-gas-cost 'roach))))
           (define peaceful-roach-max-batch
             (if zerg-early-peaceful-drone-tempo?
                 (max 0 (- 2 (l2-unit-count ctx 'roach)))
                 #f))
-          (l2-try-train-unit! ctx 'roach 'larva 4
-                           #:max-batch peaceful-roach-max-batch
-                           #:respect-bo-reserve?
-                           (or zerg-early-peaceful-drone-tempo?
-                               zerg-saving-for-tech-or-aa?
-                               (and (>= (l2-unit-count ctx 'roach) 4)
-                                    (not under-base-attack?)
-                                    (< (l2-ctx-gas ctx) 100))))
+          (when (or roach-eff-gas-ok?
+                    (< (l2-ctx-gas ctx) (sc2-gas-cost 'roach)))
+            (l2-try-train-unit! ctx 'roach 'larva 4
+                             #:max-batch peaceful-roach-max-batch
+                             #:respect-bo-reserve?
+                             (or zerg-early-peaceful-drone-tempo?
+                                 zerg-saving-for-tech-or-aa?
+                                 (and (>= (l2-unit-count ctx 'roach) 4)
+                                      (not under-base-attack?)
+                                      (< (l2-ctx-gas ctx) 100)))))
           (when (and (memq 'spawning-pool ready-bldg-types)
                      (zergling-under-cap?)
                      (not (zerg-hold-ling-for-gas-core?))
                      (not zerg-needs-queen-or-warren-minerals?)
-                     (or (< (l2-ctx-gas ctx) (sc2-gas-cost 'roach)) (>= (l2-ctx-minerals ctx) 200))
-                     (or zerg-mineral-dump? (l2-can-spend-by-priority? ctx 'zergling 'combat-unit)))
+                     (or (not roach-eff-gas-ok?)
+                         (< (l2-ctx-gas ctx) (sc2-gas-cost 'roach))
+                         (>= (l2-ctx-minerals ctx) 200))
+                     (or zerg-mineral-dump?
+                         (not roach-eff-gas-ok?)
+                         (l2-can-spend-by-priority? ctx 'zergling 'combat-unit)))
             (define peaceful-ling-batch-rw
               (if zerg-early-peaceful-drone-tempo?
                   (min 2 (max 0 (quotient (add1 (max 0 (- zerg-peaceful-safety-ling-cap (l2-unit-count ctx 'zergling)))) 2)))
@@ -19265,7 +19302,9 @@
                          (< (l2-ctx-minerals ctx) (+ (sc2-min-cost 'spine-crawler) (sc2-min-cost 'zergling)))))
                (or (not zerg-needs-queen-or-warren-minerals?)
                    (>= (l2-ctx-minerals ctx) (+ (sc2-min-cost 'queen) (sc2-min-cost 'zergling))))
-               (or zerg-mineral-dump? (l2-can-spend-by-priority? ctx 'zergling 'combat-unit))
+               (or zerg-mineral-dump?
+                   (zerg-gas-deficit-ling-overflow?)
+                   (l2-can-spend-by-priority? ctx 'zergling 'combat-unit))
                (>= (l2-ctx-minerals ctx) (sc2-min-cost 'zergling))
                (or under-early-cheese?
                    urgent-combat-or-intel-need?
@@ -26252,10 +26291,11 @@
                       enemy-units)))
          (define desired-ghost-cap
            (if enemy-high-value-ghost-tgts? 10 6))
-         ;; L59-P2 (`#5143662 Vesper` GhostAcademy @ 6:28 with 0 Ghosts vs Archons/HTs):
-         ;; Once `ghost-academy` completes against `>= 2` Archons/HTs (live OR OWM!), bypass
-         ;; `crisis-tech-upgrade-deferral?` and BO escrow until `>= 4` Ghosts are trained!
+         ;; Loop 73 B4: Require an open TechLab Barracks slot (`rax-tl-open-now > 0`) in live games
+         ;; and clamp Ghost batch to `min(rax-tl-open-now, remaining cap)` so busy TechLab + idle
+         ;; Reactor/bare Barracks never spam dropped `562` train-ghost commands!
          (when (and has-rax-tl-ready?
+                    (or (not live-game?) (> rax-tl-open-now 0))
                     (or (not crisis-tech-upgrade-deferral?)
                         (and enemy-high-value-ghost-tgts? (< (l2-unit-count ctx 'ghost) 4)))
                     (memq 'ghost-academy ready-bldg-types)
@@ -26264,12 +26304,28 @@
                     (or (l2-plan-wants-now? ctx 'ghost)
                         enemy-high-value-ghost-tgts?
                         (memq effective-enemy-race '(Protoss Zerg))))
-           (when (l2-try-train-unit! ctx 'ghost 'barracks 5
-                                    #:respect-bo-reserve? (and (not enemy-high-value-ghost-tgts?)
-                                                               (if live-game? terran-bo-escrow-imminent? #t)))
-             (when (> rax-tl-open-now 0)
-               (set! rax-tl-open-now (max 0 (sub1 rax-tl-open-now)))
-               (hash-set! open-prod-slots 'barracks-techlab-open rax-tl-open-now))))
+           (define pre-slots (hash-ref open-prod-slots 'barracks 0))
+           (when (and live-game? (> rax-tl-open-now 0) (< rax-tl-open-now pre-slots))
+             (hash-set! open-prod-slots 'barracks rax-tl-open-now))
+           (define ghost-batch-cap
+             (if live-game?
+                 (min rax-tl-open-now (max 1 (- desired-ghost-cap (l2-unit-count ctx 'ghost))))
+                 1))
+           (define trained-ghost?
+             (l2-try-train-unit! ctx 'ghost 'barracks 5
+                                 #:max-batch ghost-batch-cap
+                                 #:respect-bo-reserve? (and (not enemy-high-value-ghost-tgts?)
+                                                            (if live-game? terran-bo-escrow-imminent? #t))))
+           (define post-slots (hash-ref open-prod-slots 'barracks 0))
+           (define consumed (max 0 (- (if (and live-game? (> rax-tl-open-now 0) (< rax-tl-open-now pre-slots))
+                                          rax-tl-open-now
+                                          pre-slots)
+                                      post-slots)))
+           (when (and live-game? (> rax-tl-open-now 0) (< rax-tl-open-now pre-slots))
+             (hash-set! open-prod-slots 'barracks (max 0 (- pre-slots consumed))))
+           (when trained-ghost?
+             (set! rax-tl-open-now (max 0 (- rax-tl-open-now consumed)))
+             (hash-set! open-prod-slots 'barracks-techlab-open rax-tl-open-now)))
          (define marauder-gate-open?
            (and has-rax-tl-ready?
                 (not terran-hold-for-siege-tank-now?)

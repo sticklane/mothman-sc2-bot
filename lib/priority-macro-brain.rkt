@@ -7021,10 +7021,12 @@
          (or protoss-post-worker-rush-release-cyber?
              (not (and under-early-rush-crisis?
                        (< (unit-count-equivalent unit-counts 'zealot) 1))))))
+  ;; Loop 73 A2: Allow CyberCore before Pylon #2 at >= 4 supply-left (19/23), but at 20/23 (supply-left=3)
+  ;; Pylon #2 takes priority so CyberCore never induces a 23/23 supply block!
   (define protoss-cyber-before-pylon2?
     (and protoss-root-cyber-due?
          (= (bldg-count-equivalent total-bldg-counts 'pylon) 1)
-         (>= supply-left 3)
+         (>= supply-left 4)
          (not supply-lockout-active?)
          (>= minerals 100)))
 

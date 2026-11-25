@@ -19684,9 +19684,13 @@
 ;; =============================================================================
 
 (define SC2-FASTER-LOOPS-PER-MINUTE 1344.0)
+;; Loop 73 Lane C: Include 11 Zerg Larva train IDs (`1342..1356`) so identical-ability 1-Larva
+;; train commands coalesce into one multi-Larva packet (`ev-cost = 2` vs `2K`), while keeping
+;; Terran Reactor building queues (`560..626`) strictly uncoalesced!
 (define SC2-WIRE-COALESCABLE-ABILITIES
-  (seteqv 16 17 18 23 42 76 171 316 380 388 390 403 405 556 558 1036 1042 1442 1526
-          1692 1725 1727 1729 1731 1882 2095 2097 2108 2110 2244 2328 2338 2346 2375 2387 2393 2706
+  (seteqv 16 17 18 23 42 76 171 316 380 388 390 403 405 556 558 1036 1042
+          1342 1343 1344 1345 1346 1348 1351 1352 1353 1354 1356
+          1442 1526 1692 1725 1727 1729 1731 1882 2095 2097 2108 2110 2244 2328 2338 2346 2375 2387 2393 2706
           3661 3662 3665 3666 3667 3674 3675 3680 3681 3685 3687 4109))
 
 (struct wire-apm-governor
@@ -19770,6 +19774,7 @@
        (loop tl (cons hd acc))])))
 
 (define SC2-GOV-LAST-P1-LOOP (make-weak-hasheq))
+(define SC2-GOV-LAST-P1-TRAIN-LOOP (make-weak-hasheq))
 (define SC2-GOV-LAST-P2-LOOP (make-weak-hasheq))
 (define SC2-GOV-LAST-P3-LOOP (make-weak-hasheq))
 (define SC2-GOV-P0-MODE-DEDUP (make-weak-hasheq))
@@ -19877,6 +19882,24 @@
   (seteqv 388 390 403 405 556 558 1978 1998 2095 2097 2108 2110 2362 2364 2558 2560))
 (define SC2-GOV-P1-ADDON-ABILITIES
   (seteqv 419 421 422 454 455 487 488 520 522 554 1524 3678 3682 3683))
+;; Loop 73 Lane C: Core unit-training & supply-provider P1 abilities isolated from Creep Tumors,
+;; unit morphs, addons, Depot lower, routine buildings/research, and MULE so non-training P1
+;; emissions can never mask overdue unit/supply rescue!
+(define SC2-GOV-P1-TRAIN-SUPPLY-ABILITIES
+  (seteqv
+   ;; Zerg Larva train & Queen (1344 = Overlord supply)
+   1342 1343 1344 1345 1346 1348 1351 1352 1353 1354 1356 1632
+   ;; Terran Supply Depot & unit train
+   319 524 560 561 562 563 591 594 595 596 597 614 620 621 622 623 624 626
+   ;; Protoss Pylon & unit train / Warp-In
+   881 110 916 917 919 920 921 922 946 948 950 954 955 976 977 978 979 994 1006
+   1413 1414 1416 1417 1418 1419))
+;; Low-priority P1 filler abilities (Creep Tumors, unit morphs, Depot lower) sorted behind
+;; core macro (unit training, supply, production buildings, MULE, research) in `p1-cmds`
+;; so tumor/morph bursts never outrank unit training or building construction while preserving
+;; caller rotation among core macro commands (train / supply / build / MULE)!
+(define SC2-GOV-P1-FILLER-ABILITIES
+  (seteqv 556 1372 1448 1518 1662 1694 1733 1766 2330 2332 2708 3691 4121))
 
 (define (govern-sc2-wire-actions! gov raw-cmds game-loop [_obs #f])
   (define cur-loop (if (exact-integer? game-loop) (max 0 game-loop) 0))
@@ -19894,6 +19917,7 @@
     (set-box! SC2-GOV-LAST-CAM-X #f)
     (set-box! SC2-GOV-LAST-CAM-Y #f)
     (hash-set! SC2-GOV-LAST-P1-LOOP gov -1000)
+    (hash-set! SC2-GOV-LAST-P1-TRAIN-LOOP gov -1000)
     (hash-set! SC2-GOV-LAST-P2-LOOP gov -1000)
     (hash-set! SC2-GOV-LAST-P3-LOOP gov -1000)
     (hash-set! SC2-GOV-P0-MODE-DEDUP gov (make-hash))
@@ -20194,6 +20218,12 @@
       [(2) 12.0]
       [(3) 24.0]
       [else 30.0]))
+  (define (p1-train-or-supply-cmd? c)
+    (and (= (eff-cmd-tier c) 1)
+         (sc2-raw-unit-command? c)
+         (not (unchanged-demoted-cmd? c))
+         (set-member? SC2-GOV-P1-TRAIN-SUPPLY-ABILITIES
+                      (sc2-raw-unit-command-ability-id c))))
   (define (run-cmd-list! cmds tok-floor-fn hr-floor-fn #:max-count [max-count #f])
     (let tier-loop ([rem (filter (lambda (c) (not (hash-has-key? emitted-set c))) cmds)]
                     [emitted-here 0])
@@ -20289,6 +20319,8 @@
                      (not (sc2-raw-camera-move? chosen))
                      (not (unchanged-demoted-cmd? chosen)))
             (hash-set! SC2-GOV-LAST-P1-LOOP gov cur-loop))
+          (when (p1-train-or-supply-cmd? chosen)
+            (hash-set! SC2-GOV-LAST-P1-TRAIN-LOOP gov cur-loop))
           (when (= (eff-cmd-tier chosen) 2)
             (hash-set! SC2-GOV-LAST-P2-LOOP gov cur-loop))
           (when (= (eff-cmd-tier chosen) 3)
@@ -20300,19 +20332,33 @@
   (define (cmds-for-tier tier)
     (filter (lambda (c) (= (eff-cmd-tier c) tier)) coalesced))
 
-  ;; 1a-pre. L34-P0-1 (`H2H #06` / `#43` Overlord P0 APM freeze -> 0) + L35-P0-1 (`#44` blocked
-  ;;         Starport addon demotion): Partition any previously-unchanged `P1` addon/build retries
-  ;;         to the BACK of `p1-cmds` & `p1-macro-all`, then run critical overdue P1 macro rescue
-  ;;         (`>= 12` loops since `SC2-GOV-LAST-P1-LOOP`, `#:max-count 3`, `tok-floor = -4.0`,
-  ;;         `hr-floor = 0.0`) BEFORE `1a` `p0-urgent-cmds`!
+  ;; 1a-pre. L34-P0-1 + L35-P0-1 + Loop 73 Lane C:
+  ;;         Partition fresh P1 so core macro (unit training, supply, build, MULE, research) always
+  ;;         leads low-priority filler (Creep Tumors/morphs/Depot lower), with demoted retries at the
+  ;;         back. Run general overdue P1 rescue (`>= 12` loops since `SC2-GOV-LAST-P1-LOOP`) OR, when
+  ;;         non-training P1 (e.g. Creep Tumors/morphs) kept `LAST-P1-LOOP` fresh while training/supply
+  ;;         is overdue (`>= 12` loops since `SC2-GOV-LAST-P1-TRAIN-LOOP`), run isolated training/supply
+  ;;         rescue BEFORE `1a` `p0-active-spell-cmds` (`cond` guarantees strictly `<= 3` rescued).
   (define-values (p1-demoted-cmds p1-fresh-cmds)
     (partition unchanged-demoted-cmd? (cmds-for-tier 1)))
-  (define p1-cmds (append p1-fresh-cmds p1-demoted-cmds))
+  (define-values (p1-filler-fresh-cmds p1-core-fresh-cmds)
+    (partition (lambda (c)
+                 (and (sc2-raw-unit-command? c)
+                      (set-member? SC2-GOV-P1-FILLER-ABILITIES
+                                   (sc2-raw-unit-command-ability-id c))))
+               p1-fresh-cmds))
+  (define p1-train-supply-cmds
+    (filter p1-train-or-supply-cmd? p1-core-fresh-cmds))
+  (define p1-cmds (append p1-core-fresh-cmds p1-filler-fresh-cmds p1-demoted-cmds))
   (define p1-macro-all
     (filter (lambda (c) (not (sc2-raw-camera-move? c))) p1-cmds))
-  (when (and (pair? p1-macro-all)
-             (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 12))
-    (run-cmd-list! p1-macro-all (lambda (_) -4.0) (lambda (_) 0.0) #:max-count 3))
+  (cond
+    [(and (pair? p1-macro-all)
+          (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 12))
+     (run-cmd-list! p1-macro-all (lambda (_) -4.0) (lambda (_) 0.0) #:max-count 3)]
+    [(and (pair? p1-train-supply-cmds)
+          (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-TRAIN-LOOP gov -1000)) 12))
+     (run-cmd-list! p1-train-supply-cmds (lambda (_) -4.0) (lambda (_) 0.0) #:max-count 3)])
 
   ;; 1a. Run P0 urgent survival, opening worker splits, and active combat spells first.
   ;;     Partition out non-urgent P0 mode-switches (388/390/403/405/1978/1998/2095/2097/2108/2110/2362/2364/2558/2560)
@@ -20405,11 +20451,16 @@
                                    4
                                    (if p2-second-prong 2 1))))
 
-  ;; 1c. L33-P0-1: Overdue P1 macro rescue (`>= 8` loops since `SC2-GOV-LAST-P1-LOOP`, `#:max-count 4`,
-  ;;     `hr-floor = 0.0`) runs BEFORE non-urgent P0 mode switches (`1d`).
-  (when (and (pair? p1-macro-all)
-             (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 8))
-    (run-cmd-list! p1-macro-all (lambda (_) -3.0) (lambda (_) 0.0) #:max-count 4))
+  ;; 1c. L33-P0-1 + Loop 73 Lane C: Overdue P1 rescue (`>= 8` loops, `#:max-count 4`, `hr-floor = 0.0`)
+  ;;     runs BEFORE non-urgent P0 mode switches (`1d`), falling back to isolated training/supply rescue
+  ;;     when non-training P1 kept `SC2-GOV-LAST-P1-LOOP` fresh (`cond` caps rescues at `<= 4`).
+  (cond
+    [(and (pair? p1-macro-all)
+          (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 8))
+     (run-cmd-list! p1-macro-all (lambda (_) -3.0) (lambda (_) 0.0) #:max-count 4)]
+    [(and (pair? p1-train-supply-cmds)
+          (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-TRAIN-LOOP gov -1000)) 8))
+     (run-cmd-list! p1-train-supply-cmds (lambda (_) -3.0) (lambda (_) 0.0) #:max-count 4)])
 
   ;; 1d. Run remaining non-urgent P0 mode switches (`>= 10`-loop deduped above).
   (run-cmd-list! p0-mode-switch-cmds
@@ -20424,9 +20475,15 @@
   (define p1-macro-rem
     (filter (lambda (c) (and (not (hash-has-key? emitted-set c)) (not (sc2-raw-camera-move? c))))
             p1-cmds))
-  (when (and (pair? p1-macro-rem)
-             (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 8))
-    (run-cmd-list! p1-macro-rem (lambda (_) -3.0) (lambda (_) 0.0) #:max-count 4))
+  (define p1-train-supply-rem
+    (filter (lambda (c) (not (hash-has-key? emitted-set c))) p1-train-supply-cmds))
+  (cond
+    [(and (pair? p1-macro-rem)
+          (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 8))
+     (run-cmd-list! p1-macro-rem (lambda (_) -3.0) (lambda (_) 0.0) #:max-count 4)]
+    [(and (pair? p1-train-supply-rem)
+          (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-TRAIN-LOOP gov -1000)) 8))
+     (run-cmd-list! p1-train-supply-rem (lambda (_) -3.0) (lambda (_) 0.0) #:max-count 4)])
 
   ;; 3. Bounded anti-starvation rescue for overdue P2 combat (>= 12 loops stale), overdue P3 routine
   ;;    worker/transfer (>= 24 loops stale, W18-P0-2-wire), and 1 overdue routine P4 camera (>= 44 loops).

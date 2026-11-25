@@ -8466,19 +8466,25 @@
   (define cap (if (number? food-cap) (inexact->exact (floor food-cap)) 0))
   (define pend (if (number? pending-supply) (max 0 (inexact->exact (floor pending-supply))) 0))
   (define base-margin (compute-supply-preemption-margin cap))
-  ;; W7-P0-4-belief + W9-P0-1/3-belief + W10-P0-2-belief: Protoss Warp-Gate bursts & Terran multi-Rax/Fac/Port
-  ;; need extra midgame supply lead time (+2 at cap>=30, +3 at cap>=60), while keeping Terran cap=23 at margin=2
-  ;; so Natural CommandCenter #2 drops strictly BEFORE SupplyDepot #2 (Pro #1 Dep->Rax->Ref->CC->Dep)!
+  ;; W7-P0-4-belief + W9-P0-1/3-belief + W10-P0-2-belief + Loop 73 A1:
+  ;; Protoss Warp-Gate bursts (+2 at cap>=23 for 19/23 Pylon #2, +3 at cap>=60),
+  ;; Terran multi-Rax/Fac/Port (+2 at cap>=30, +3 at cap>=60; cap=23 kept strictly at margin=2
+  ;; so Natural CommandCenter #2 drops strictly BEFORE SupplyDepot #2!),
+  ;; and Zerg inject-burst lead time (+2 at cap>=28, +3 at cap>=52).
   (define margin
     (cond
-      [(and (memq race '(Protoss Terran)) (>= cap 60)) (+ base-margin 3)]
-      [(and (memq race '(Protoss Terran)) (>= cap 30)) (+ base-margin 2)]
+      [(and (eq? race 'Protoss) (>= cap 60)) (+ base-margin 3)]
+      [(and (eq? race 'Protoss) (>= cap 23)) (+ base-margin 2)]
+      [(and (eq? race 'Terran)  (>= cap 60)) (+ base-margin 3)]
+      [(and (eq? race 'Terran)  (>= cap 30)) (+ base-margin 2)]
+      [(and (eq? race 'Zerg)    (>= cap 52)) (+ base-margin 3)]
+      [(and (eq? race 'Zerg)    (>= cap 28)) (+ base-margin 2)]
       [else base-margin]))
   (define proj-cap (+ cap (* 8 pend)))
   (and (< cap 200)
        (cond
-         [(<= cap 14) (>= used cap)]
-         [(= cap 15)  (>= used (if (eq? race 'Terran) 13 14))]
+         [(<= cap 14) (>= used (min cap 13))]
+         [(= cap 15)  (>= used 13)]
          [else        (>= used (- cap margin))])
        (or (= pend 0)
            (and (< proj-cap 200)
