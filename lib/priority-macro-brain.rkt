@@ -4135,6 +4135,11 @@
       (when (>= (unit-count-equivalent unit-counts 'high-templar) 2)
         (add-goal-spec! 'archon 'army-production 'morph (if (>= supply-used 140) 3 2) 490.0 't3-endgame-army))))
   (when t3-endgame-window?
+    ;; Loop 75 A1: Cash-near ready-prereq +2/+3 & Armor/Carapace utility boost strictly inside
+    ;; `t3-endgame-window?` (>=3 bases, peaceful/ahead, >=150M/150G -> zero early 2-base greed!).
+    (define cash-near-upg? (and (>= minerals 150) (>= gas 150)))
+    (define (upg-t6-util base-u ready-prereq? boosted-u)
+      (if (and cash-near-upg? ready-prereq?) boosted-u base-u))
     (case race
       [(Zerg)
        ;; Loop 64 A3 (Graphs 13-14): Lower Infestation Pit gate (60 -> 44 army or 56w @ 8:00),
@@ -4147,10 +4152,13 @@
          (add-goal-spec! 'infestation-pit 'tech-infrastructure 'build 1 474.0 't3-endgame-tech))
        (when (and (> (bldg-count-equivalent ready-bldg-counts 'evolution-chamber) 0)
                   (or (not zerg-t3-on?) (> (bldg-count-equivalent total-bldg-counts 'evolution-chamber) 0)))
-         (add-goal-spec! 'zerg-ground-armor-1 'tech-infrastructure 'research 1 472.0 't3-endgame-tech)
+         (add-goal-spec! 'zerg-ground-armor-1 'tech-infrastructure 'research 1
+                         (upg-t6-util 472.0 #t 522.0) 't3-endgame-tech)
          (when has-lair-or-hive-ready?
-           (add-goal-spec! 'zerg-missile-weapons-2 'tech-infrastructure 'research 1 468.0 't3-endgame-tech)
-           (add-goal-spec! 'zerg-ground-armor-2 'tech-infrastructure 'research 1 468.0 't3-endgame-tech)))
+           (add-goal-spec! 'zerg-missile-weapons-2 'tech-infrastructure 'research 1
+                           (upg-t6-util 468.0 (has-upgrade-sym? 'zerg-missile-weapons-1 all-upgs) 526.0) 't3-endgame-tech)
+           (add-goal-spec! 'zerg-ground-armor-2 'tech-infrastructure 'research 1
+                           (upg-t6-util 468.0 (has-upgrade-sym? 'zerg-ground-armor-1 all-upgs) 520.0) 't3-endgame-tech)))
        (when (and has-lair-or-hive-ready?
                   (> (bldg-count-equivalent ready-bldg-counts 'roach-warren) 0)
                   (>= (unit-count-equivalent unit-counts 'roach) 4))
@@ -4168,8 +4176,11 @@
          (add-goal-spec! 'viper 'army-production 'train (if (>= supply-used 130) 2 1) (if zerg-t3-on? 493.0 474.0) 't3-endgame-army)
          (add-goal-spec! 'ultralisk-cavern 'tech-infrastructure 'build 1 472.0 't3-endgame-tech)
          (when (or (not zerg-t3-on?) (> (bldg-count-equivalent total-bldg-counts 'evolution-chamber) 0))
-           (add-goal-spec! 'zerg-missile-weapons-3 'tech-infrastructure 'research 1 468.0 't3-endgame-tech)
-           (add-goal-spec! 'zerg-ground-armor-3 'tech-infrastructure 'research 1 468.0 't3-endgame-tech)))
+           (define zerg-evo-ready-t6? (> (bldg-count-equivalent ready-bldg-counts 'evolution-chamber) 0))
+           (add-goal-spec! 'zerg-missile-weapons-3 'tech-infrastructure 'research 1
+                           (upg-t6-util 468.0 (and zerg-evo-ready-t6? (has-upgrade-sym? 'zerg-missile-weapons-2 all-upgs)) 524.0) 't3-endgame-tech)
+           (add-goal-spec! 'zerg-ground-armor-3 'tech-infrastructure 'research 1
+                           (upg-t6-util 468.0 (and zerg-evo-ready-t6? (has-upgrade-sym? 'zerg-ground-armor-2 all-upgs)) 518.0) 't3-endgame-tech)))
        (when (> (bldg-count-equivalent ready-bldg-counts 'infestation-pit) 0)
          (add-goal-spec! 'infestor 'army-production 'train (if (>= supply-used 140) 2 1) (if zerg-t3-on? 488.0 448.0) 't3-endgame-army))
        (when (or (and zerg-pit-spire-army-ok? (or (>= workers 56) (>= effective-phase-supply 110)))
@@ -4196,7 +4207,14 @@
          (let ([raw (min 6 (max (if (>= terran-bio-sup-t6 6) 1 0)
                                 (quotient terran-bio-sup-t6 5)))])
            (if (< terran-bio-sup-t6 14) (min 2 raw) raw)))
-       (add-goal-spec! 'armory 'tech-infrastructure 'build 1 468.0 't3-endgame-tech)
+       (add-goal-spec! 'armory 'tech-infrastructure 'build 1
+                       (if (and (>= frame 10080)
+                                (has-upgrade-sym? 'terran-infantry-weapons-1 all-upgs)
+                                (>= minerals 150)
+                                (>= gas 100))
+                           516.0
+                           468.0)
+                       't3-endgame-tech)
        (when (and (not (eq? enemy-race 'Zerg))
                   (or (>= active-bases 3) (>= frame 9408)))
          (add-goal-spec! 'ghost-academy 'tech-infrastructure 'build 1 (if (eq? enemy-race 'Protoss) 468.0 462.0) 't3-endgame-tech))
@@ -4220,12 +4238,21 @@
            (add-goal-spec! 'starport-techlab 'tech-infrastructure 'addon 1 462.0 't3-endgame-tech))
          (add-goal-spec! 'fusion-core 'tech-infrastructure 'build 1 464.0 't3-endgame-tech))
        (when (> (bldg-count-equivalent ready-bldg-counts 'armory) 0)
+         (define terran-ebay-ready-t6? (> (bldg-count-equivalent ready-bldg-counts 'engineering-bay) 0))
          (add-goal-spec! 'thor 'army-production 'train (max desired-thors (if (>= active-bases 4) 4 2))
                          (if (>= active-bases 3) 470.0 462.0) 't3-endgame-army)
-         (add-goal-spec! 'terran-infantry-weapons-2 'tech-infrastructure 'research 1 466.0 't3-endgame-tech)
-         (add-goal-spec! 'terran-infantry-armor-2 'tech-infrastructure 'research 1 464.0 't3-endgame-tech)
-         (add-goal-spec! 'terran-infantry-weapons-3 'tech-infrastructure 'research 1 464.0 't3-endgame-tech)
-         (add-goal-spec! 'terran-infantry-armor-3 'tech-infrastructure 'research 1 462.0 't3-endgame-tech))
+         (add-goal-spec! 'terran-infantry-weapons-2 'tech-infrastructure 'research 1
+                         (upg-t6-util 466.0 (and terran-ebay-ready-t6? (has-upgrade-sym? 'terran-infantry-weapons-1 all-upgs)) 526.0)
+                         't3-endgame-tech)
+         (add-goal-spec! 'terran-infantry-armor-2 'tech-infrastructure 'research 1
+                         (upg-t6-util 464.0 (and terran-ebay-ready-t6? (has-upgrade-sym? 'terran-infantry-armor-1 all-upgs)) 522.0)
+                         't3-endgame-tech)
+         (add-goal-spec! 'terran-infantry-weapons-3 'tech-infrastructure 'research 1
+                         (upg-t6-util 464.0 (and terran-ebay-ready-t6? (has-upgrade-sym? 'terran-infantry-weapons-2 all-upgs)) 524.0)
+                         't3-endgame-tech)
+         (add-goal-spec! 'terran-infantry-armor-3 'tech-infrastructure 'research 1
+                         (upg-t6-util 462.0 (and terran-ebay-ready-t6? (has-upgrade-sym? 'terran-infantry-armor-2 all-upgs)) 518.0)
+                         't3-endgame-tech))
        (when (> (bldg-count-equivalent ready-bldg-counts 'fusion-core) 0)
          (add-goal-spec! 'advanced-ballistics 'tech-infrastructure 'research 1 458.0 't3-endgame-tech)
          (when (>= active-bases 4)
@@ -4235,13 +4262,21 @@
        ;; Loop 64 A3 (Graphs 13-14 & 18): Forge +1 Weapons strictly ahead of +1 Armor (+2/+3 chain),
        ;; boosted Templar Archive / Psi Storm / HT / Archon T3 progression!
        (when (> (bldg-count-equivalent ready-bldg-counts 'forge) 0)
+         (define protoss-twilight-ready-t6? (> (bldg-count-equivalent ready-bldg-counts 'twilight-council) 0))
          (add-goal-spec! 'protoss-ground-weapons-1 'tech-infrastructure 'research 1 478.0 't3-endgame-tech)
-         (add-goal-spec! 'protoss-ground-weapons-2 'tech-infrastructure 'research 1 474.0 't3-endgame-tech)
+         (add-goal-spec! 'protoss-ground-weapons-2 'tech-infrastructure 'research 1
+                         (upg-t6-util 474.0 (and protoss-twilight-ready-t6? (has-upgrade-sym? 'protoss-ground-weapons-1 all-upgs)) 526.0)
+                         't3-endgame-tech)
          (when (or (has-upgrade-sym? 'protoss-ground-weapons-1 all-upgs)
                    (>= (bldg-count-equivalent ready-bldg-counts 'forge) 2))
-           (add-goal-spec! 'protoss-ground-armor-1 'tech-infrastructure 'research 1 470.0 't3-endgame-tech))
-         (add-goal-spec! 'protoss-ground-weapons-3 'tech-infrastructure 'research 1 468.0 't3-endgame-tech)
-         (add-goal-spec! 'protoss-ground-armor-2 'tech-infrastructure 'research 1 466.0 't3-endgame-tech))
+           (add-goal-spec! 'protoss-ground-armor-1 'tech-infrastructure 'research 1
+                           (upg-t6-util 470.0 #t 520.0) 't3-endgame-tech))
+         (add-goal-spec! 'protoss-ground-weapons-3 'tech-infrastructure 'research 1
+                         (upg-t6-util 468.0 (and protoss-twilight-ready-t6? (has-upgrade-sym? 'protoss-ground-weapons-2 all-upgs)) 524.0)
+                         't3-endgame-tech)
+         (add-goal-spec! 'protoss-ground-armor-2 'tech-infrastructure 'research 1
+                         (upg-t6-util 466.0 (and protoss-twilight-ready-t6? (has-upgrade-sym? 'protoss-ground-armor-1 all-upgs)) 518.0)
+                         't3-endgame-tech))
        (add-goal-spec! 'robotics-facility 'tech-infrastructure 'build 1 468.0 't3-endgame-tech)
        (add-goal-spec! 'robotics-bay 'tech-infrastructure 'build 1
                        (if (and (>= active-bases 2)
@@ -7685,10 +7720,31 @@
              (>= enemy-starport-tl-cnt 1)
              (and (> (bldg-count-equivalent enemy-b-counts 'starport) 0)
                   (<= frame 8064)))))
+  ;; Loop 75 A3 (`#5148545`): Compute enemy ground combat supply early so Widow Mines + Medivacs
+  ;; or 1 lone Banshee against a ground-heavy Terran army NEVER lock `protoss-cloaked-air-crisis?`!
+  (define enemy-ground-combat-supply-early
+    (for/sum ([pair (in-list '((zealot . 2) (stalker . 2) (adept . 2) (sentry . 2)
+                               (immortal . 4) (colossus . 6) (archon . 4) (high-templar . 2)
+                               (dark-templar . 2) (disruptor . 3)
+                               (marine . 1) (marauder . 2) (reaper . 1) (hellion . 2) (hellbat . 2)
+                               (widow-mine . 2) (cyclone . 3) (siege-tank . 3) (thor . 6) (ghost . 2)
+                               (zergling . 0.5) (baneling . 0.5) (roach . 2) (ravager . 3)
+                               (hydralisk . 2) (lurker . 3) (ultralisk . 6)))])
+      (* (cdr pair) (unit-count-equivalent enemy-u-counts (car pair)))))
   (define protoss-cloaked-air-crisis?
     (and (eq? race 'Protoss)
-         (or (and enemy-cloaked-threat-active? eff-req-aa?)
-             (>= enemy-banshee-cnt 1)
+         (or (>= enemy-banshee-cnt 2)
+             (and (>= enemy-banshee-cnt 1)
+                  (< (unit-count-equivalent unit-counts 'phoenix) 3)
+                  (< enemy-ground-combat-supply-early 20))
+             (and enemy-cloaked-threat-active?
+                  (> (+ enemy-muta-cnt-now
+                        (unit-count-equivalent enemy-u-counts 'oracle)
+                        (unit-count-equivalent enemy-u-counts 'void-ray)
+                        (unit-count-equivalent enemy-u-counts 'battlecruiser)
+                        (unit-count-equivalent enemy-u-counts 'carrier)
+                        (unit-count-equivalent enemy-u-counts 'tempest))
+                     0))
              enemy-air-dominant?)))
   (define terran-cloaked-det-crisis?
     (and (eq? race 'Terran)
@@ -10555,6 +10611,9 @@
                   (or (>= (unit-count-equivalent unit-counts 'zealot) 6)
                       (< minerals 400)))
              (and protoss-midgame-robo-bay-due?
+                  (not (and protoss-pvt-midgame-chargelot-due?
+                            (< (unit-count-equivalent unit-counts 'zealot) 6)
+                            (>= minerals 200)))
                   (or (>= (unit-count-equivalent unit-counts 'zealot) 6)
                       (< minerals 250))))))
   ;; L27-P0-2 (`#03/#18/#21/#24/#33` Protoss W@4m 26 -> 28+): Limit Protoss to at most ONE
@@ -11396,7 +11455,11 @@
                       (and (eq? nsym 'medivac)
                            (>= (unit-count-equivalent unit-counts 'medivac) 1))))
              (eq? nsym 'widow-mine)
-             (and (eq? nsym 'armory) (< gas 250))
+             (and (eq? nsym 'armory)
+                  (< gas 250)
+                  (not (and (>= frame 10080)
+                            (or (has-upgrade-sym? 'terran-infantry-weapons-1 researched-upgrades)
+                                (has-upgrade-sym? 'terran-infantry-weapons-1 pending-upgrades)))))
              (and (eq? nsym 'engineering-bay)
                   (>= (bldg-count-equivalent total-bldg-counts 'engineering-bay) 1))
              (and (memq nsym '(starport-techlab starport-reactor))
@@ -16225,7 +16288,8 @@
               (max 880.0 plan-weight u0)]
              [protoss-det-cannon-boost? (max (if static-det-repeat-nonblocking? 516.0 870.0) plan-weight u0)]
              [protoss-det-forge-boost? (max 870.0 plan-weight u0)]
-             [protoss-aa-air-unit-boost?
+             [(and protoss-aa-air-unit-boost?
+                   (not (and (eq? nsym 'phoenix) protoss-phoenix-capped?)))
               (max (cond [(or enemy-heavy-cap-air? protoss-anti-tempest-pvp-due?) 1520.0]
                          [(or protoss-cloaked-air-crisis?
                               (and protoss-confirmed-banshee-or-sptl? (< protoss-phoenix-cnt 3)))
@@ -17596,7 +17660,8 @@
             (max u 880.0)]
            [protoss-det-cannon-post? (max u (if static-det-repeat-nonblocking-post? 516.0 870.0))]
            [protoss-det-forge-post? (max u 870.0)]
-           [protoss-aa-air-unit-post?
+           [(and protoss-aa-air-unit-post?
+                 (not (and (eq? nsym 'phoenix) protoss-phoenix-capped?)))
             (max u (cond [(or enemy-heavy-cap-air? protoss-anti-tempest-pvp-due?) 1520.0]
                          [(or protoss-cloaked-air-crisis?
                               (and protoss-confirmed-banshee-or-sptl? (< protoss-phoenix-cnt 3)))
@@ -18854,9 +18919,13 @@
               (not terran-air-dom-starport-scale-due?)
               (< minerals 300))
          #f]
-        ;; L43-P0-2a (`#62 SmoothBrain`): Block Armory (<250G) and 2nd EngineeringBay while TvT SiegeTank < 4!
+        ;; L43-P0-2a + Loop 75 A2: Block Armory (<250G, unless >= 7:30 after +1W) and 2nd EngineeringBay while TvT SiegeTank < 4!
         [(and terran-tvt-tank4-gas-lock?
-              (or (and (eq? csym 'armory) (< gas 250))
+              (or (and (eq? csym 'armory)
+                       (< gas 250)
+                       (not (and (>= frame 10080)
+                                 (or (has-upgrade-sym? 'terran-infantry-weapons-1 researched-upgrades)
+                                     (has-upgrade-sym? 'terran-infantry-weapons-1 pending-upgrades)))))
                   (and (eq? csym 'engineering-bay)
                        (>= (+ existing-tech-cnt sched-tech-cnt) 1))))
          #f]
@@ -19884,7 +19953,11 @@
                      (not (and (eq? race 'Protoss)
                                (or (and (eq? csym 'zealot)
                                         (or (and (eq? rid 'colossus) protoss-colossus-core2-due?)
-                                            (and (eq? rid 'robotics-bay) protoss-midgame-robo-bay-due?)))
+                                            (and (eq? rid 'robotics-bay)
+                                                 protoss-midgame-robo-bay-due?
+                                                 (not (and protoss-pvt-midgame-chargelot-due?
+                                                           (< (unit-count-equivalent unit-counts 'zealot) 6)
+                                                           (>= rem-min 200))))))
                                    (and (eq? cat 'worker)
                                         (eq? rid 'colossus)
                                         protoss-colossus-core2-due?

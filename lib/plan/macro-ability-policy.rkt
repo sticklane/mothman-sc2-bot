@@ -754,7 +754,7 @@
          #:recharge-available? recharge-available?
          #:recharge-off-cooldown? recharge-off-cooldown?
          #:cast-range [cast-range (sc2-spell-cast-range 'nexus-energy-recharge 14.5)]
-         #:approach-hold-range [approach-hold-range (+ (exact->inexact cast-range) 10.0)])
+         #:approach-hold-range [approach-hold-range (+ (exact->inexact cast-range) 4.0)])
   (define eff-cast-range (exact->inexact cast-range))
   (define eff-hold-range (max eff-cast-range (exact->inexact approach-hold-range)))
   ;; L63B (`#1752` Bug #2A): Always scan up to `eff-hold-range` (`<= 22.0t`) BOTH in combat
@@ -826,8 +826,9 @@
          #:caster-ready? caster-ready?
          #:target-ready? target-ready?)
   (cond
-    [(or (>= cur-loop 4704)
-         (>= worker-count 28)
+    [(or (>= cur-loop 6720)
+         (>= worker-count 34)
+         (and (>= cur-loop 5376) (>= worker-count 28))
          (null? ready-nexuses))
      '()]
     [else
@@ -919,14 +920,12 @@
   (define sym (if (symbol? target-sym) target-sym 'unknown))
   (define nx-en (exact->inexact nexus-energy))
   (define army-sup (exact->inexact army-supply))
-  ;; Loop 74 A2: Shift Chrono pivot from 4:00/34w to 3:30/28w (`4704f / 28w`) so CyberCore & Robo
-  ;; get boosted ahead of Nexus Probes while keeping 0..3:30 (<4704f & <28w) Nexus-first!
   (define post-4m-pivot?
-    (or (>= cur-loop 4704)
-        (>= worker-count 28)))
+    (or (>= cur-loop 5376)
+        (>= worker-count 34)))
   (cond
     [(not post-4m-pivot?)
-     ;; Phase 0-3:30 (`< 4704f` & `< 28w`)
+     ;; Phase 0-4m (`< 5376f` & `< 34w`)
      (cond
        [(and early-ling-or-worker-rush?
              (eq? sym 'nexus)
@@ -945,7 +944,7 @@
        [(set-member? PROTOSS-CHRONO-GATE-SYMS sym) 700.0]
        [else -1.0])]
     [else
-     ;; Sharp 3:30/28w Pivot (`>= 4704f` OR `>= 28w`): TechUpgrades > Robo > Stargate > Nexus; suppress Gateway!
+     ;; Sharp 4:00 Pivot (`>= 5376f` OR `>= 34w`): TechUpgrades > Robo > Stargate > Nexus; suppress Gateway!
      ;; Loop 65 (`#1831`): On active main-base breach under pressure, promote busy Robo (`958.0`) ahead of
      ;; Forge upgrades so emergency Immortals/Colossi pop faster, while preserving peaceful Tech > Robo!
      (cond
@@ -953,19 +952,16 @@
        [(memq sym '(forge twilight-council templar-archive robotics-bay)) 955.0]
        [(eq? sym 'cybernetics-core) 952.0]
        [(set-member? PROTOSS-CHRONO-TECH-UPGRADE-SYMS sym) 950.0]
-       [(eq? sym 'robotics-facility) (if facility-override-pressure? 945.0 920.0)]
+       [(eq? sym 'robotics-facility) (if facility-override-pressure? 925.0 900.0)]
        [(eq? sym 'stargate) (if facility-override-pressure? 885.0 860.0)]
        [(eq? sym 'nexus)
         (cond
-          ;; L64B (`#1814` Bug #4) + L67 Phase D + Loop 74 A2: Lift post-pivot Nexus worker cap
-          ;; `< 56 -> < 66` when no unbuffed Tech/Robo needs Chrono, hold `50..99e` at `>= 52w` when
-          ;; `has-ally-caster?` is active for Energy Recharge / Robo bursts, add bounded `+25.0` bias
-          ;; under `mineral-override-pressure?`, plus cap-bleed at `>= 125.0e`.
+          ;; L64B (`#1814` Bug #4) + L67 Phase D (`#2020` Contract 2.2): Lift post-4m Nexus worker cap
+          ;; `< 56 -> < 66` when no unbuffed Tech/Robo needs Chrono, add bounded `+25.0` bias under
+          ;; `mineral-override-pressure?` when `< 60w` & `(not dry-caster-near?)`, plus cap-bleed at `>= 125.0e`.
           [(and (< worker-count 66)
                 (not has-busy-tech-or-robo?)
-                (or (>= nx-en 100.0)
-                    (and (not dry-caster-near?)
-                         (not (and has-ally-caster? (>= worker-count 52))))))
+                (or (>= nx-en 100.0) (not dry-caster-near?)))
            (if (and mineral-override-pressure?
                     (< worker-count 60)
                     (not dry-caster-near?))

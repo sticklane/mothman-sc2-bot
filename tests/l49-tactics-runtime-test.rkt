@@ -5928,20 +5928,20 @@
       (define a-ms-cd (step-layer2-economy! rt-ms (hash-set obs-ms 'frame 5016))) ;; +16f < 24f dedup
       (define a-ms-retry (step-layer2-economy! rt-ms (hash-set obs-ms 'frame 5030))) ;; +30f >= 24f retries!
 
-      ;; 2. Loop 74 Lane A: Dry Sentry (`80e < 100e`) at `22.0t` (<= 24.5t hold) with `enemy-units = '()`
-      ;;    & 65e Nexus (< 100e): HOLDS ChronoBoost for Recharge; at `26.0t` (> 24.5t) Nexus Chronos freely!
-      (define sen-220 (hash-set (mk-u 94603 'sentry 54.5 32.5 #:hp 40.0 #:shield 40.0) 'energy 80.0))
-      (define sen-260 (hash-set (mk-u 94604 'sentry 58.5 32.5 #:hp 40.0 #:shield 40.0) 'energy 80.0))
+      ;; 2. Dry Sentry (`80e < 100e`) at `20.5t` (<= 22.0t hold) with `enemy-units = '()` & 65e Nexus (< 100e):
+      ;;    HOLDS ChronoBoost for Recharge; at `23.5t` (> 22.0t) Nexus Chronos freely!
+      (define sen-205 (hash-set (mk-u 94603 'sentry 53.0 32.5 #:hp 40.0 #:shield 40.0) 'energy 80.0))
+      (define sen-235 (hash-set (mk-u 94604 'sentry 56.0 32.5 #:hp 40.0 #:shield 40.0) 'energy 80.0))
       (define a-hold
         (step-layer2-economy!
          (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss)
          (mk-live-obs 'Protoss 'Terran 5100 #:supply-used 24 #:supply-cap 39
-                      #:ally-units (list sen-220) #:ally-buildings (list nx-65) #:enemy-units '())))
+                      #:ally-units (list sen-205) #:ally-buildings (list nx-65) #:enemy-units '())))
       (define a-free
         (step-layer2-economy!
          (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss)
          (mk-live-obs 'Protoss 'Terran 5100 #:supply-used 24 #:supply-cap 39
-                      #:ally-units (list sen-260) #:ally-buildings (list nx-65) #:enemy-units '())))
+                      #:ally-units (list sen-235) #:ally-buildings (list nx-65) #:enemy-units '())))
 
       (check-true "L63B-Protoss-Nexus-Recharge-Mothership-EdgeRange-24fDedup-And-22tHold"
                   (and (has-rech? a-ms1 94601 94602)

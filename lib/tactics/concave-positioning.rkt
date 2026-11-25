@@ -43,7 +43,8 @@
 (define TERRAN-BIO-SYMS    '(marine marauder hellbat ghost reaper))
 (define TERRAN-CASTER-SYMS '(medivac raven ghost))
 
-(define ZERG-FRONT-SYMS    '(zergling baneling roach ultralisk))
+(define ZERG-FRONT-SYMS         '(zergling baneling roach ultralisk))
+(define ZERG-DURABLE-FRONT-SYMS '(roach ultralisk baneling))
 ;; L58-HOLD Bug #3a fix: restrict Zerg two-wing surround strictly to fast melee `'zergling`
 ;; (never pull ranged `roach`/`ravager`/`hydralisk` or `baneling` laterally into choke walls!)
 (define ZERG-SURROUND-SYMS '(zergling))
@@ -65,6 +66,10 @@
 
 (define ENEMY-UPHILL-SIEGE-SYMS
   '(siege-tank-sieged lurker-burrowed lurker-mp-burrowed))
+
+(define ENEMY-AIR-COMBAT-ATTACKER-SYMS
+  '(mutalisk banshee oracle void-ray voidray liberator liberator-ag
+    battlecruiser carrier tempest mothership brood-lord broodlord phoenix))
 
 (define NON-COMBAT-IGNORE-SYMS
   '(larva egg changeling overlord overlord-cocoon observer observer-siege-mode
@@ -91,7 +96,7 @@
    p-core-cnt p-core-cx p-core-cy
    z-core-cnt z-core-cx z-core-cy
    ;; Splash, air & entrenched uphill siege records
-   enemy-air-pts          ;; list of (cons ex ey) flying combat enemies
+   enemy-air-pts          ;; list of (cons ex ey) flying combat attackers (excl. support air)
    enemy-splash-pts       ;; list of (cons ex ey)
    enemy-uphill-siege     ;; list of (vector ex ey ez sym)
    ally-has-uphill-breaker?
@@ -233,14 +238,13 @@
          (define w (rec-supply-weight e))
          (define d-rough (dist2d-fl ex ey rough-ax rough-ay))
          (define closer? (or (not nex) (fl< d-rough ned)))
+         ;; Strictly air-to-ground / ground-threatening combat flyers (exclude medivac,
+         ;; warp-prism, raven, viper, overlord, overseer, observer, corruptor, viking-fighter)
+         ;; so non-ground-attacking support air NEVER disables front-to-back ground screening!
          (define is-air?
-           (or (eq? (hash-ref e 'flying? #f) #t)
-               (eq? (hash-ref e 'flying #f) #t)
-               (eq? (hash-ref e 'is-flying #f) #t)
-               (and (memq canon '(mutalisk corruptor brood-lord broodlord viper phoenix void-ray
-                                  oracle carrier tempest mothership viking-fighter medivac
-                                  banshee raven battlecruiser liberator))
-                    #t)))
+           (and (or (memq raw ENEMY-AIR-COMBAT-ATTACKER-SYMS)
+                    (memq canon ENEMY-AIR-COMBAT-ATTACKER-SYMS))
+                #t))
          (define is-splash?
            (or (memq raw ENEMY-SPLASH-SYMS)
                (memq canon '(baneling colossus high-templar disruptor archon))))
@@ -280,6 +284,7 @@
                   pfc pfx pfy
                   tfc tfx tfy
                   zfc zfx zfy
+                  zdc zdx zdy
                   tbc tbx tby
                   pcc pcx pcy pcc-all pcx-all pcy-all
                   zcc zcx zcy zcc-all zcx-all zcy-all
@@ -290,6 +295,7 @@
                [pfc 0] [pfx 0.0] [pfy 0.0]
                [tfc 0] [tfx 0.0] [tfy 0.0]
                [zfc 0] [zfx 0.0] [zfy 0.0]
+               [zdc 0] [zdx 0.0] [zdy 0.0]
                [tbc 0] [tbx 0.0] [tby 0.0]
                [pcc 0] [pcx 0.0] [pcy 0.0] [pcca 0] [pcxa 0.0] [pcya 0.0]
                [zcc 0] [zcx 0.0] [zcy 0.0] [zcca 0] [zcxa 0.0] [zcya 0.0]
@@ -307,6 +313,7 @@
       (define in-approach? (and (> ecnt 0) (fl>= d-e 5.0) (fl<= d-e 18.5)))
       (define is-pcore? (and (memq canon PROTOSS-CORE-SYMS) #t))
       (define is-zcore? (and (memq canon ZERG-CORE-SYMS) #t))
+      (define is-zdur? (and near-fight? (memq canon ZERG-DURABLE-FRONT-SYMS) #t))
       (values (add1 ac) (fl+ asx ux) (fl+ asy uy) (fl+ astr (rec-supply-weight u))
               (if loc-ally? (add1 lac) lac)
               (if loc-ally? (fl+ lasx ux) lasx)
@@ -320,6 +327,9 @@
               (if (and near-fight? (memq canon ZERG-FRONT-SYMS)) (add1 zfc) zfc)
               (if (and near-fight? (memq canon ZERG-FRONT-SYMS)) (fl+ zfx ux) zfx)
               (if (and near-fight? (memq canon ZERG-FRONT-SYMS)) (fl+ zfy uy) zfy)
+              (if is-zdur? (add1 zdc) zdc)
+              (if is-zdur? (fl+ zdx ux) zdx)
+              (if is-zdur? (fl+ zdy uy) zdy)
               (if (memq canon TERRAN-BIO-SYMS) (add1 tbc) tbc)
               (if (memq canon TERRAN-BIO-SYMS) (fl+ tbx ux) tbx)
               (if (memq canon TERRAN-BIO-SYMS) (fl+ tby uy) tby)
@@ -359,8 +369,15 @@
   (define pfcy (if (> pfc 0) (fl/ pfy (exact->inexact pfc)) acy))
   (define tfcx (if (> tfc 0) (fl/ tfx (exact->inexact tfc)) acx))
   (define tfcy (if (> tfc 0) (fl/ tfy (exact->inexact tfc)) acy))
-  (define zfcx (if (> zfc 0) (fl/ zfx (exact->inexact zfc)) acx))
-  (define zfcy (if (> zfc 0) (fl/ zfy (exact->inexact zfc)) acy))
+  ;; Anchor Zerg frontline to durable tanks (Roach/Ultralisk/Baneling) when >= 2 near the fight
+  ;; so fast flanking Zerglings never pull z-front-proj forward and expose Hydralisks/Ravagers!
+  (define eff-zfc (if (>= zdc 2) zdc zfc))
+  (define zfcx (cond [(>= zdc 2) (fl/ zdx (exact->inexact zdc))]
+                     [(> zfc 0)  (fl/ zfx (exact->inexact zfc))]
+                     [else acx]))
+  (define zfcy (cond [(>= zdc 2) (fl/ zdy (exact->inexact zdc))]
+                     [(> zfc 0)  (fl/ zfy (exact->inexact zfc))]
+                     [else acy]))
   (define tbcx (if (> tbc 0) (fl/ tbx (exact->inexact tbc)) acx))
   (define tbcy (if (> tbc 0) (fl/ tby (exact->inexact tbc)) acy))
   (define eff-pcc (if (> pcc 0) pcc pcc-all))
@@ -392,7 +409,7 @@
    ecnt ecx ecy fwd-ux fwd-uy perp-ux perp-uy
    pfc pfcx pfcy (proj pfcx pfcy)
    tfc tfcx tfcy (proj tfcx tfcy)
-   zfc zfcx zfcy (proj zfcx zfcy)
+   eff-zfc zfcx zfcy (proj zfcx zfcy)
    tbc tbcx tbcy
    eff-pcc eff-pcx eff-pcy
    eff-zcc eff-zcx eff-zcy
@@ -452,14 +469,14 @@
                   (combat-pos-ctx-z-front-cx pos-ctx)
                   (combat-pos-ctx-z-front-cy pos-ctx)
                   (combat-pos-ctx-z-front-proj pos-ctx)
-                  2.2 6.0 16.0)]
+                  2.4 5.5 16.0)]
          [else
           (values 0 0.0 0.0 0.0 0.0 6.0 16.0)]))
      (cond
        [(or (= fcnt 0)
             (fl< d-tgt min-app-d)
             (fl> d-tgt max-app-d)
-            (fl<= d-tgt (fl+ wr 1.0)))
+            (fl<= d-tgt (fl+ wr (if (memq sym ZERG-MID-SYMS) 0.5 1.0))))
         (values #f #f)]
        [else
         (define fux (combat-pos-ctx-fwd-ux pos-ctx))
@@ -467,15 +484,15 @@
         (define pux (combat-pos-ctx-perp-ux pos-ctx))
         (define puy (combat-pos-ctx-perp-uy pos-ctx))
         (define u-proj (fl+ (fl* ux fux) (fl* uy fuy)))
-        ;; Never hold an anti-air unit behind ground-only frontliners when enemy air is within 16t!
+        ;; Never hold an anti-air unit behind ground-only frontliners when enemy air attackers are within 14t!
         (define enemy-air-near?
           (and (memq sym '(hydralisk stalker marine sentry))
                (for/or ([ap (in-list (combat-pos-ctx-enemy-air-pts pos-ctx))])
-                 (fl<= (dist2d-fl ux uy (car ap) (cdr ap)) 16.0))))
-        ;; Only hold back when genuinely role-inverted (at or ahead of the frontline centroid!)
+                 (fl<= (dist2d-fl ux uy (car ap) (cdr ap)) 14.0))))
+        ;; Only hold back when genuinely role-inverted (level with or ahead of the frontline centroid!)
         ;; AND frontline is within 10.5t (part of the same advancing group!)
         (if (and (not enemy-air-near?)
-                 (fl>= u-proj (fl- fproj 0.25))
+                 (fl>= u-proj (fl- fproj 0.5))
                  (fl<= (dist2d-fl ux uy fcx fcy) 10.5))
             (let* ([lat-off (clamp-fl (fl+ (fl* (fl- ux fcx) pux)
                                            (fl* (fl- uy fcy) puy))

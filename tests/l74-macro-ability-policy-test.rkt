@@ -60,14 +60,14 @@
   (macro-self-unit-info sym tid x y 8.0 s? w? #t))
 
 ;; =============================================================================
-;; 1. Queen Creep-Tumor Surplus Energy Floor = 75
+;; 1. Queen Creep-Tumor Surplus Energy Floor = 45 (Restored in Loop 75)
 ;; =============================================================================
-(check! (= SC2-QUEEN-TUMOR-SURPLUS-ENERGY 75)
-        (format "1. SC2-QUEEN-TUMOR-SURPLUS-ENERGY must equal 75; got ~a"
+(check! (= SC2-QUEEN-TUMOR-SURPLUS-ENERGY 45)
+        (format "1. SC2-QUEEN-TUMOR-SURPLUS-ENERGY must equal 45; got ~a"
                 SC2-QUEEN-TUMOR-SURPLUS-ENERGY))
 
 ;; =============================================================================
-;; 2. Early Probe Chrono Cutoff (`4704f` / `28w`)
+;; 2. Early Probe Chrono Cutoff (`6720f` / `34w` / `5376f & 28w`, Restored in Loop 75)
 ;; =============================================================================
 (let ()
   (define nx1 (mk-nx 101 60.0))
@@ -76,24 +76,36 @@
      #:loop 2400 #:worker-count 24 #:ready-nexuses (list nx1)
      #:ally-casters '() #:enemy-units-present? #f #:recharge-available? #f
      #:caster-ready? (lambda (_) #t) #:target-ready? (lambda (_) #t)))
-  (define p-loop-cut
+  (define p-mid-boost
     (select-early-probe-chrono-pairs
      #:loop 4800 #:worker-count 24 #:ready-nexuses (list nx1)
      #:ally-casters '() #:enemy-units-present? #f #:recharge-available? #f
      #:caster-ready? (lambda (_) #t) #:target-ready? (lambda (_) #t)))
+  (define p-loop-cut
+    (select-early-probe-chrono-pairs
+     #:loop 6800 #:worker-count 24 #:ready-nexuses (list nx1)
+     #:ally-casters '() #:enemy-units-present? #f #:recharge-available? #f
+     #:caster-ready? (lambda (_) #t) #:target-ready? (lambda (_) #t)))
   (define p-worker-cut
     (select-early-probe-chrono-pairs
-     #:loop 3600 #:worker-count 28 #:ready-nexuses (list nx1)
+     #:loop 3600 #:worker-count 34 #:ready-nexuses (list nx1)
+     #:ally-casters '() #:enemy-units-present? #f #:recharge-available? #f
+     #:caster-ready? (lambda (_) #t) #:target-ready? (lambda (_) #t)))
+  (define p-4m-28w-cut
+    (select-early-probe-chrono-pairs
+     #:loop 5400 #:worker-count 28 #:ready-nexuses (list nx1)
      #:ally-casters '() #:enemy-units-present? #f #:recharge-available? #f
      #:caster-ready? (lambda (_) #t) #:target-ready? (lambda (_) #t)))
   (check! (and (equal? p-early '((101 . 101)))
+               (equal? p-mid-boost '((101 . 101)))
                (null? p-loop-cut)
-               (null? p-worker-cut))
-          (format "2. select-early-probe-chrono-pairs must boost at 2400/24w and stop at 4800/24w or 3600/28w; early=~s loop=~s w=~s"
-                  p-early p-loop-cut p-worker-cut)))
+               (null? p-worker-cut)
+               (null? p-4m-28w-cut))
+          (format "2. select-early-probe-chrono-pairs must boost at 2400/24w & 4800/24w and stop at 6800/24w, 3600/34w, or 5400/28w; early=~s mid=~s loop=~s w=~s m28=~s"
+                  p-early p-mid-boost p-loop-cut p-worker-cut p-4m-28w-cut)))
 
 ;; =============================================================================
-;; 3. Protoss Chrono Pivot (`4704f / 28w`), Robo Promotion & Caster Hold
+;; 3. Protoss Chrono Pivot (`5376f / 34w`, Restored in Loop 75) & Robo 900/925
 ;; =============================================================================
 (let ()
   (define c-nx   (macro-chrono-candidate-info 101 'nexus))
@@ -101,23 +113,27 @@
   (define c-robo (macro-chrono-candidate-info 103 'robotics-facility))
   (define c-frg  (macro-chrono-candidate-info 104 'forge))
 
-  ;; 3a: 2400f/22w stays Nexus-first; 4800f/26w picks CyberCore over Nexus; 3800f/28w picks Robo over Nexus
+  ;; 3a: 2400f/22w & 4800f/26w stay Nexus-first; 5500f/26w picks CyberCore; 3800f/34w picks Robo
   (define pick-early
     (select-protoss-chrono-target-policy
      #:candidates (list c-nx c-cyb c-robo) #:loop 2400 #:worker-count 22 #:nexus-energy 60.0))
   (define pick-4800
     (select-protoss-chrono-target-policy
      #:candidates (list c-nx c-cyb) #:loop 4800 #:worker-count 26 #:nexus-energy 60.0))
-  (define pick-28w
+  (define pick-5500
     (select-protoss-chrono-target-policy
-     #:candidates (list c-nx c-robo) #:loop 3800 #:worker-count 28 #:nexus-energy 60.0))
+     #:candidates (list c-nx c-cyb) #:loop 5500 #:worker-count 26 #:nexus-energy 60.0))
+  (define pick-34w
+    (select-protoss-chrono-target-policy
+     #:candidates (list c-nx c-robo) #:loop 3800 #:worker-count 34 #:nexus-energy 60.0))
   (check! (and pick-early (= (macro-chrono-candidate-info-tag pick-early) 101)
-               pick-4800  (= (macro-chrono-candidate-info-tag pick-4800) 102)
-               pick-28w   (= (macro-chrono-candidate-info-tag pick-28w) 103))
-          (format "3a. Chrono pivot must keep 2400/22w Nexus-first and promote CyberCore@4800/26w & Robo@3800/28w; got early=~s 4800=~s 28w=~s"
-                  pick-early pick-4800 pick-28w))
+               pick-4800  (= (macro-chrono-candidate-info-tag pick-4800) 101)
+               pick-5500  (= (macro-chrono-candidate-info-tag pick-5500) 102)
+               pick-34w   (= (macro-chrono-candidate-info-tag pick-34w) 103))
+          (format "3a. Chrono pivot must keep 2400/22w & 4800/26w Nexus-first and promote CyberCore@5500/26w & Robo@3800/34w; got early=~s 4800=~s 5500=~s 34w=~s"
+                  pick-early pick-4800 pick-5500 pick-34w))
 
-  ;; 3b: Robo post-pivot scores 920.0 (945.0 under facility pressure, strictly < Forge 955.0, exact +25 delta)
+  ;; 3b: Robo post-pivot scores 900.0 (925.0 under facility pressure, strictly < Forge 955.0, exact +25 delta)
   (define sc-robo-norm
     (score-protoss-chrono-target-policy 'robotics-facility #:loop 6000 #:worker-count 40 #:nexus-energy 60.0))
   (define sc-robo-pres
@@ -129,52 +145,54 @@
     (select-protoss-chrono-target-policy
      #:candidates (list c-robo c-frg) #:loop 6000 #:worker-count 40 #:nexus-energy 60.0
      #:facility-override-pressure? #t))
-  (check! (and (= sc-robo-norm 920.0)
-               (= sc-robo-pres 945.0)
+  (check! (and (= sc-robo-norm 900.0)
+               (= sc-robo-pres 925.0)
                (< sc-robo-pres sc-forge)
                pick-frg-vs-robo (= (macro-chrono-candidate-info-tag pick-frg-vs-robo) 104))
-          (format "3b. Post-pivot Robo must score 920/945 (< Forge 955); norm=~a pres=~a frg=~a pick=~s"
+          (format "3b. Post-pivot Robo must score 900/925 (< Forge 955); norm=~a pres=~a frg=~a pick=~s"
                   sc-robo-norm sc-robo-pres sc-forge pick-frg-vs-robo))
 
-  ;; 3c: #:has-ally-caster? #t holds 75e Nexus at >= 52w, allows >= 100e, and default #f preserves 62w/75e
-  (define hold-caster-75
+  ;; 3c: #:has-ally-caster? accepted harmlessly without blocking 54w/75e Nexus (reverted in Loop 75),
+  ;;     while #:dry-caster-near? #t still holds 75e and allows 100e!
+  (define allow-caster-75
     (select-protoss-chrono-target-policy
      #:candidates (list c-nx) #:loop 7500 #:worker-count 54 #:nexus-energy 75.0
      #:has-ally-caster? #t))
-  (define allow-caster-100
+  (define hold-dry-75
+    (select-protoss-chrono-target-policy
+     #:candidates (list c-nx) #:loop 7500 #:worker-count 54 #:nexus-energy 75.0
+     #:dry-caster-near? #t))
+  (define allow-dry-100
     (select-protoss-chrono-target-policy
      #:candidates (list c-nx) #:loop 7500 #:worker-count 54 #:nexus-energy 100.0
-     #:has-ally-caster? #t))
-  (define allow-default-62w-75
-    (select-protoss-chrono-target-policy
-     #:candidates (list c-nx) #:loop 7500 #:worker-count 62 #:nexus-energy 75.0))
-  (check! (and (not hold-caster-75)
-               allow-caster-100 (= (macro-chrono-candidate-info-tag allow-caster-100) 101)
-               allow-default-62w-75 (= (macro-chrono-candidate-info-tag allow-default-62w-75) 101))
-          (format "3c. has-ally-caster?=#t must hold 75e Nexus at >=52w, boost at 100e, and preserve default 62w/75e; hold75=~s allow100=~s def62=~s"
-                  hold-caster-75 allow-caster-100 allow-default-62w-75)))
+     #:dry-caster-near? #t))
+  (check! (and allow-caster-75 (= (macro-chrono-candidate-info-tag allow-caster-75) 101)
+               (not hold-dry-75)
+               allow-dry-100 (= (macro-chrono-candidate-info-tag allow-dry-100) 101))
+          (format "3c. has-ally-caster?=#t must allow 54w/75e Nexus (Loop 75 revert) while dry-caster-near?=#t still holds 75e & boosts 100e; allow75=~s holdDry=~s allow100=~s"
+                  allow-caster-75 hold-dry-75 allow-dry-100)))
 
 ;; =============================================================================
-;; 4. Protoss Recharge Approach Hold Range (`+10.0` -> `24.5t` Default)
+;; 4. Protoss Recharge Approach Hold Range (`+4.0` -> `18.5t` Default, Restored in Loop 75)
 ;; =============================================================================
 (let ()
   (define nx1 (mk-nx 101 75.0 30.0 30.0))
-  (define sentry-23t (mk-caster 201 'sentry 53.0 30.0 40.0))
-  (define sentry-26t (mk-caster 202 'sentry 56.0 30.0 40.0))
-  (define d-23
+  (define sentry-175t (mk-caster 201 'sentry 47.5 30.0 40.0))
+  (define sentry-20t  (mk-caster 202 'sentry 50.0 30.0 40.0))
+  (define d-175
     (evaluate-protoss-nexus-recharge-policy
-     #:ready-nexuses (list nx1) #:ally-casters (list sentry-23t)
+     #:ready-nexuses (list nx1) #:ally-casters (list sentry-175t)
      #:enemy-units-present? #f #:recharge-available? #t #:recharge-off-cooldown? #t))
-  (define d-26
+  (define d-20
     (evaluate-protoss-nexus-recharge-policy
-     #:ready-nexuses (list nx1) #:ally-casters (list sentry-26t)
+     #:ready-nexuses (list nx1) #:ally-casters (list sentry-20t)
      #:enemy-units-present? #f #:recharge-available? #t #:recharge-off-cooldown? #t))
-  (check! (and (not (protoss-nexus-recharge-decision-cast-nexus-tag d-23))
-               (set-member? (protoss-nexus-recharge-decision-hold-nexus-tags d-23) 101)
-               (not (set-member? (protoss-nexus-recharge-decision-hold-nexus-tags d-26) 101)))
-          (format "4. Recharge approach-hold-range default (24.5t) must hold 75e Nexus at 23.0t and not at 26.0t; h23=~s h26=~s"
-                  (protoss-nexus-recharge-decision-hold-nexus-tags d-23)
-                  (protoss-nexus-recharge-decision-hold-nexus-tags d-26))))
+  (check! (and (not (protoss-nexus-recharge-decision-cast-nexus-tag d-175))
+               (set-member? (protoss-nexus-recharge-decision-hold-nexus-tags d-175) 101)
+               (not (set-member? (protoss-nexus-recharge-decision-hold-nexus-tags d-20) 101)))
+          (format "4. Recharge approach-hold-range default (18.5t) must hold 75e Nexus at 17.5t and not at 20.0t; h175=~s h20=~s"
+                  (protoss-nexus-recharge-decision-hold-nexus-tags d-175)
+                  (protoss-nexus-recharge-decision-hold-nexus-tags d-20))))
 
 ;; =============================================================================
 ;; 5. Terran 1-OC `4:00-5:00` Non-Cloak MULE Release (`5376..6719f`)
