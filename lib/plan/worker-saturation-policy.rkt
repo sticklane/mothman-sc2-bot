@@ -748,6 +748,13 @@
           [(and (>= (- th-asgn th-idl) 2)
                 (or sticky-under-th best-under-for-th))
            (or sticky-under-th best-under-for-th)]
+          ;; Loop 72 A2: After 4:30 (> 6048f), rally saturated (>= ideal) TH straight onto a safe
+          ;; under-saturated 3rd/4th base (deficit >= 4) instead of waiting for +2 oversaturation!
+          [(and (> cur-loop 6048)
+                (>= th-asgn th-idl)
+                (let ([u (or sticky-under-th best-under-for-th)])
+                  (and u (>= (- (th-effective-ideal u) (th-effective-assigned u)) 4))))
+           (or sticky-under-th best-under-for-th)]
           [(and rallied-elsewhere?
                 (or sticky-under-th best-under-for-th)
                 (> th-asgn (max 0 (- th-idl 3))))
@@ -1382,6 +1389,19 @@
       (and (<= cur-loop 6048)
            (>= (length dst-mins) 4)
            (< (th-effective-assigned dst-th) 8)))
+    ;; Loop 72 A2: Post-4:30 (> 6048f) safe 3rd/4th-base kickstart (never drop any donor < 12!)
+    (define midgame-newbase-kickstart?
+      (and (> cur-loop 6048)
+           (>= (length online-ready-townhalls) 3)
+           (>= (length dst-mins) 6)
+           (< (th-effective-assigned dst-th) 6)))
+    (define midgame-donors
+      (if midgame-newbase-kickstart?
+          (filter (lambda (th)
+                    (and (not (= (sat-base-info-tag th) dst-tag))
+                         (>= (th-effective-assigned th) 15)))
+                  online-ready-townhalls)
+          '()))
     (define donor-min-workers (if early-natural-split? 12 14))
     (define donor-keep-workers (if early-natural-split? 10 13))
     (define donor-candidates
@@ -1399,13 +1419,18 @@
                                     (th-effective-ideal sth))))
          (define rem-surp (max 0 (- sth-surp in-flight-to-dst)))
          (define rem-def (max 0 (- dst-deficit in-flight-to-dst)))
-         (define lim (min (if (or early-natural-split? (>= rem-surp 2)) 2 1) rem-surp rem-def))
+         (define lim (min (cond
+                            [(and (> cur-loop 6048) (>= rem-surp 4) (>= rem-def 4)) 4]
+                            [(or early-natural-split? (>= rem-surp 2)) 2]
+                            [else 1])
+                          rem-surp rem-def))
          (values sth
                  sth-surp
                  lim
                  (and (not (= (sat-base-info-tag sth) dst-tag))
                       (if (> cur-loop 6048)
-                          (>= sth-surp 2)
+                          (or (>= sth-surp 2)
+                              (and (>= sth-surp 1) (< (th-effective-assigned dst-th) 8)))
                           (>= (+ sth-surp dst-deficit) 2))
                       (> lim 0)))]
         [(and (<= cur-loop 6048) (pair? donor-candidates) (> dst-near-slots-needed 0))
@@ -1415,6 +1440,13 @@
          (define rem-surp (max 0 (- sth-surp in-flight-to-dst)))
          (define rem-def (max 0 (- dst-deficit in-flight-to-dst)))
          (define lim (min (if (or early-natural-split? (>= rem-surp 2)) 2 1) rem-near rem-surp rem-def))
+         (values sth sth-surp lim (> lim 0))]
+        [(and midgame-newbase-kickstart? (pair? midgame-donors))
+         (define sth (argmax th-effective-assigned midgame-donors))
+         (define sth-surp (max 0 (- (th-effective-assigned sth) 12)))
+         (define rem-surp (max 0 (- sth-surp in-flight-to-dst)))
+         (define rem-def (max 0 (- (- 6 (th-effective-assigned dst-th)) in-flight-to-dst)))
+         (define lim (min 4 rem-surp rem-def))
          (values sth sth-surp lim (> lim 0))]
         [else (values #f 0 0 #f)]))
     (define xfer-base-cd (if apm-pressure-backoff? 96 48))
