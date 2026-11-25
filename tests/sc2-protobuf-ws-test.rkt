@@ -341,7 +341,7 @@
 
 ;; Regression Tests for Bugs #8–#20 & Central SC2 Game Constants
 (check-eqv "constants-queen-inject-energy" SC2-QUEEN-INJECT-ENERGY 25)
-(check-eqv "constants-queen-tumor-surplus-energy" SC2-QUEEN-TUMOR-SURPLUS-ENERGY 45)
+(check-eqv "constants-queen-tumor-surplus-energy" SC2-QUEEN-TUMOR-SURPLUS-ENERGY 75)
 (check-eqv "constants-pylon-total-max-hp" SC2-PYLON-TOTAL-MAX-HP 400)
 (check-eqv "constants-stalker-cost"
            (list (sc2-min-cost 'stalker) (sc2-gas-cost 'stalker) (sc2-supply-cost 'stalker))
@@ -11291,9 +11291,9 @@
     (l55-mule-tags (saturate-workers-and-gas-commands
                     (make-test-obs 5720 200 100 (list l55-oc1-75 l55-oc2-60 l55-min1 l55-min2))
                     #:game-info l55-gi-t)))
-  ;; (a2) TvP at 4:15 (5732 >= 5376), 0 Ravens, 0 Turrets -> HOLD MULE (reserves Scan!)
+  ;; (a2) Loop 74 Lane A: 1-OC TvP at 4:15 (5732 < 6720) clean -> releases MULE!
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
-  (define m-hold-1
+  (define m-tvp-1oc-415
     (l55-mule-tags (saturate-workers-and-gas-commands
                     (make-test-obs 5732 200 100 (list l55-oc1-75 l55-min1))
                     #:game-info l55-gi-p)))
@@ -11310,43 +11310,49 @@
     (l55-mule-tags (saturate-workers-and-gas-commands
                     (make-test-obs 5850 200 100 (list l55-oc1-90 l55-oc2-75 l55-oc3-60 l55-min1 l55-min2 l55-min3))
                     #:game-info l55-gi-p)))
-  ;; (c) OC1 at 100e -> drops MULE cleanly (50e Scan remains banked!)
+  ;; (b3) Loop 74 Lane A: 1-OC TvP at >= 5:00 (6732 >= 6720), 0 Ravens, 0 Turrets -> HOLD MULE (reserves Scan!)
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-hold-1
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 6732 200 100 (list l55-oc1-75 l55-min1))
+                    #:game-info l55-gi-p)))
+  ;; (c) OC1 at 100e (>= 5:00) -> drops MULE cleanly (50e Scan remains banked!)
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-100e
     (l55-mule-tags (saturate-workers-and-gas-commands
-                    (make-test-obs 5860 200 100 (list l55-oc1-100 l55-min1))
+                    (make-test-obs 6750 200 100 (list l55-oc1-100 l55-min1))
                     #:game-info l55-gi-p)))
-  ;; (d) With a ready Missile Turret OR Raven OR vs Zerg -> OC1 at 75e drops MULE!
+  ;; (d) With a ready Missile Turret OR Raven OR vs Zerg (>= 5:00) -> OC1 at 75e drops MULE!
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-with-turret
     (l55-mule-tags (saturate-workers-and-gas-commands
-                    (make-test-obs 5880 200 100 (list l55-oc1-75 l55-turret l55-min1))
+                    (make-test-obs 6770 200 100 (list l55-oc1-75 l55-turret l55-min1))
                     #:game-info l55-gi-p)))
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-with-raven
     (l55-mule-tags (saturate-workers-and-gas-commands
-                    (make-test-obs 5900 200 100 (list l55-oc1-75 l55-raven l55-min1))
+                    (make-test-obs 6790 200 100 (list l55-oc1-75 l55-raven l55-min1))
                     #:game-info l55-gi-p)))
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-vs-zerg
     (l55-mule-tags (saturate-workers-and-gas-commands
-                    (make-test-obs 5920 200 100 (list l55-oc1-75 l55-min1))
+                    (make-test-obs 6810 200 100 (list l55-oc1-75 l55-min1))
                     #:game-info l55-gi-z)))
   ;; (e) TvT WITH scouted enemy StarportTechLab (41) OR Banshee (55) -> holds 100e on top-1 OC only (2nd OC still MULEs)!
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-tvt-stl
     (l55-mule-tags (saturate-workers-and-gas-commands
-                    (make-test-obs 5940 200 100 (list l55-oc1-75 l55-min1 l55-enemy-stl))
+                    (make-test-obs 6830 200 100 (list l55-oc1-75 l55-min1 l55-enemy-stl))
                     #:game-info l55-gi-t)))
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-tvt-stl-two-oc
     (l55-mule-tags (saturate-workers-and-gas-commands
-                    (make-test-obs 5950 200 100 (list l55-oc1-75 l55-oc2-60 l55-min1 l55-min2 l55-enemy-stl))
+                    (make-test-obs 6840 200 100 (list l55-oc1-75 l55-oc2-60 l55-min1 l55-min2 l55-enemy-stl))
                     #:game-info l55-gi-t)))
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-tvt-ban
     (l55-mule-tags (saturate-workers-and-gas-commands
-                    (make-test-obs 5960 200 100 (list l55-oc1-75 l55-min1 l55-enemy-ban))
+                    (make-test-obs 6850 200 100 (list l55-oc1-75 l55-min1 l55-enemy-ban))
                     #:game-info l55-gi-t)))
   ;; Clean rewind reset for subsequent checks
   (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l55-min1))))
@@ -11356,6 +11362,7 @@
                    (equal? (sort m-tvt-405-two-oc <) '(99973 99974))
                    (equal? m-tvt-415-clean '(99973))
                    (equal? (sort m-tvt-415-two-oc <) '(99973 99974))
+                   (equal? m-tvp-1oc-415 '(99973))
                    (null? m-hold-1)
                    (equal? m-two-oc '(99974))
                    (equal? m-three-oc '(99979))
@@ -11591,15 +11598,16 @@
                     (make-test-obs 16 200 100 (append (list l55-oc1-75 l55-min1) l58-8mar))
                     #:game-info l55-gi-p)))
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  ;; Loop 74 Lane A: Sec 6b early Probe Chrono runs in 0:00-3:30 (`< 4704f`); test yield vs normal at 4250/4260!
   (define l58-chrono-yield
     (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3755)))
             (saturate-workers-and-gas-commands
-             (make-test-obs 6250 200 100 (list l58-nx-prb l58-ht-near l58-emar l55-min1)))))
+             (make-test-obs 4250 200 100 (list l58-nx-prb l58-ht-near l58-emar l55-min1)))))
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define l58-chrono-normal
     (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3755)))
             (saturate-workers-and-gas-commands
-             (make-test-obs 6260 200 100 (list l58-nx-prb l58-ht-full l58-emar l55-min1)))))
+             (make-test-obs 4260 200 100 (list l58-nx-prb l58-ht-full l58-emar l55-min1)))))
   ;; Rewind cleanly so no recall/cooldown boxes persist
   (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l55-min1))))
   (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l55-min1))))
@@ -13535,25 +13543,25 @@
      (translate-bot-actions->sc2-raw-commands
       '((cast-spell 83202 nexus-energy-recharge 83203)
         (cast-spell 83201 nexus-energy-recharge 83204))
-      (make-test-obs 5000 100 50 (list l63b-nx-50 l63b-nx-496b l63b-sen-166 l63b-sen-200)))))
-  (define l63b-ready-after-rej? (sc2-nexus-recharge-cooldown-ready? 5004))
-  ;; Valid cast at 16.6t (`> 15.0` old cap, `<= 18.0` edge-to-edge) succeeds at Tier P1 & latches 5010!
+      (make-test-obs 3000 100 50 (list l63b-nx-50 l63b-nx-496b l63b-sen-166 l63b-sen-200)))))
+  (define l63b-ready-after-rej? (sc2-nexus-recharge-cooldown-ready? 3004))
+  ;; Valid cast at 16.6t (`> 15.0` old cap, `<= 18.0` edge-to-edge) succeeds at Tier P1 & latches 3010!
   (define l63b-emit-5010
     (er-4126-cmds
      (translate-bot-actions->sc2-raw-commands
       '((cast-spell 83201 nexus-energy-recharge 83203))
-      (make-test-obs 5010 100 50 (list l63b-nx-50 l63b-sen-166)))))
-  (define l63b-ready-5100? (sc2-nexus-recharge-cooldown-ready? 5100))
-  (define l63b-ready-6353? (sc2-nexus-recharge-cooldown-ready? 6353))
-  (define l63b-ready-6354? (sc2-nexus-recharge-cooldown-ready? 6354))
+      (make-test-obs 3010 100 50 (list l63b-nx-50 l63b-sen-166)))))
+  (define l63b-ready-5100? (sc2-nexus-recharge-cooldown-ready? 3100))
+  (define l63b-ready-6353? (sc2-nexus-recharge-cooldown-ready? 4353))
+  (define l63b-ready-6354? (sc2-nexus-recharge-cooldown-ready? 4354))
   ;; Second cast within `< 1344f` (both `cast-spell` & direct `nexus-energy-recharge` form) is blocked!
   (define l63b-blocked-5100
     (er-4126-cmds
      (translate-bot-actions->sc2-raw-commands
       '((cast-spell 83201 nexus-energy-recharge 83203)
         (nexus-energy-recharge 83201 83203))
-      (make-test-obs 5100 100 50 (list l63b-nx-50 l63b-sen-166)))))
-  ;; Sec 6b Probe Chrono (`3755`) MUST NOT yield to `4126` while `4126` is on its 1344f wire cooldown!
+      (make-test-obs 3100 100 50 (list l63b-nx-50 l63b-sen-166)))))
+  ;; Sec 6b Probe Chrono (`3755`, `< 4704f` in Loop 74) MUST NOT yield to `4126` while `4126` is on its 1344f wire cooldown!
   (define l63b-nx-prb-75
     (mk-l63b-u 83210 59 1 30.0 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:en 75.0
                #:orders (list (sc2-unit-order 1006 #f 0 0.25))))
@@ -13562,15 +13570,15 @@
   (define l63b-chrono-on-cd
     (chrono-3755-cmds
      (saturate-workers-and-gas-commands
-      (make-test-obs 5110 100 50 (list l63b-nx-prb-75 l63b-sen-near l63b-min)))))
-  ;; At `+1344f` (`6354`), `4126` unlocks cleanly and emits again at Tier P1 (including direct action form)!
+      (make-test-obs 3110 100 50 (list l63b-nx-prb-75 l63b-sen-near l63b-min)))))
+  ;; At `+1344f` (`4354`), `4126` unlocks cleanly and emits again at Tier P1 (including direct action form)!
   (define l63b-emit-6354
     (er-4126-cmds
      (translate-bot-actions->sc2-raw-commands
       '((nexus-energy-recharge 83201 83203))
-      (make-test-obs 6354 100 50 (list l63b-nx-50 l63b-sen-166)))))
+      (make-test-obs 4354 100 50 (list l63b-nx-50 l63b-sen-166)))))
   ;; Rewind (`cur-loop = 4`) & `reset-sc2-live-response-data!` reset `SC2-NEXUS-RECHARGE-LAST-LOOP`!
-  (define l63b-cd-after-6354? (sc2-nexus-recharge-cooldown-ready? 6400))
+  (define l63b-cd-after-6354? (sc2-nexus-recharge-cooldown-ready? 4400))
   (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 100 50 (list l63b-min))))
   (define l63b-ready-after-rewind? (sc2-nexus-recharge-cooldown-ready? 500))
   (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP 5000)

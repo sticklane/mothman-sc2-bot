@@ -16486,19 +16486,19 @@
             (>= frame 2200)
             (or all-ready-hatches-injected?
                 (>= (length queens) (length inject-hatcheries)))))
-  ;; W3-TAC-6 + Loop 64 B3 (`#1755` Graph 20 Queen Transfuse Pivot): Exempt Queens with >= 50 energy
-  ;; within <= 14t (>= 4:00 / under pressure) or <= 10t (< 4:00) of an injured high-value ally
-  ;; (< 70% HP or >= 60 missing HP) from L2 inject/creep so L34 Transfuse (1664) fires like Pros!
+  ;; W3-TAC-6 + Loop 64 B3 + Loop 74 B1: Exempt Queens with >= 50 energy within <= 14t (>= 4:00 /
+  ;; under pressure) or <= 10t (< 4:00) of an injured high-value ally (mhp >= 85.0 incl. 90-HP
+  ;; Hydralisks, missing-hp >= 35.0, < 70% HP or >= 60 missing) from L2 inject/creep so Transfuse fires!
   (define l2-transfuse-targets
     (append
      (for/list ([a (in-list (l2-ctx-ally-units ctx))]
                 #:when (and (hash? a)
                             (let* ([hp (hash-ref a 'hp #f)]
                                    [mhp (or (hash-ref a 'max-hp #f) (hash-ref a 'hp-max #f))])
-                              (and (real? hp) (real? mhp) (>= mhp 120.0)
+                              (and (real? hp) (real? mhp) (>= mhp 85.0)
                                    (or (< hp (* 0.70 mhp))
                                        (>= (- mhp hp) 60.0))
-                                   (>= (- mhp hp) 50.0)
+                                   (>= (- mhp hp) 35.0)
                                    (real? (hash-ref a 'x #f))
                                    (real? (hash-ref a 'y #f))))))
        (vector (hash-ref a 'id -1)
@@ -16538,6 +16538,14 @@
                          (let ([dx (fl- fqx (vector-ref tv 1))]
                                [dy (fl- fqy (vector-ref tv 2))])
                            (fl<= (fl+ (fl* dx dx) (fl* dy dy)) l2-transfuse-r2)))))))))
+  ;; Loop 74 B1: Hold Queen energy for Transfuse (>= 75e surplus -> retains >= 50e after tumor!)
+  ;; whenever under attack, facing >= 6 threat supply, or already holding >= 3 active tumors;
+  ;; keeps 100% of Hatchery Inject Larva (25e) and early 0..2 tumor creep startup untouched!
+  (define hold-queen-energy-for-transfuse?
+    (and live-game?
+         (or (l2-ctx-under-base-attack? ctx)
+             (>= (l2-ctx-live-enemy-threat-supply ctx) 6)
+             (>= (length active-creep-tumors) 3))))
   (define pass1-dispatched-emergency-tumor? #f)
   (for ([q (in-list queens)]
            #:when (and (not (set-member? used-queen-ids (hash-ref q 'id 120)))
@@ -16547,11 +16555,12 @@
        (define q-energy (hash-ref q 'energy (if live-game? 0 SC2-QUEEN-INJECT-ENERGY)))
        (define dedicated-creeper? (set-member? dedicated-creeping-queen-ids qid))
        (define can-creep-at-25?
-         (or dedicated-creeper?
-             (and (not suppress-non-ded-creep-25?)
-                  (or (and (not creep-self-sustaining?) all-ready-hatches-injected?)
-                      (and (not pass1-dispatched-emergency-tumor?)
-                           (or zero-tumors-2plus-queens? base-inject-catchup-tumor-ok?))))))
+         (and (not hold-queen-energy-for-transfuse?)
+              (or dedicated-creeper?
+                  (and (not suppress-non-ded-creep-25?)
+                       (or (and (not creep-self-sustaining?) all-ready-hatches-injected?)
+                           (and (not pass1-dispatched-emergency-tumor?)
+                                (or zero-tumors-2plus-queens? base-inject-catchup-tumor-ok?)))))))
        (define req-energy
          (if can-creep-at-25?
              SC2-QUEEN-INJECT-ENERGY
@@ -16622,12 +16631,16 @@
          (set-add! claimed-inject-hatch-ids hid)
          (acquire-unit-lease! leases gqid 'inject-queen frame 24
                               #:target-id hid #:x hx #:y hy)))
+  (define pass2-creep-req-energy
+    (if hold-queen-energy-for-transfuse?
+        SC2-QUEEN-TUMOR-SURPLUS-ENERGY
+        SC2-QUEEN-INJECT-ENERGY))
   (for ([q (in-list queens)]
            #:when (and (not (set-member? used-queen-ids (hash-ref q 'id 120)))
-                       (>= (hash-ref q 'energy 0) SC2-QUEEN-INJECT-ENERGY)
+                       (>= (hash-ref q 'energy 0) pass2-creep-req-energy)
                        (not (queen-close-combat? q))
                        (not (queen-has-urgent-transfuse-target? q))))
-       (queen-dispatch-creep-tumor! q #:surplus-pass? #f))
+       (queen-dispatch-creep-tumor! q #:surplus-pass? hold-queen-energy-for-transfuse?))
   (define max-tumor-attempts (if live-game? 8 4))
   (define used-tumors-set (live-bot-runtime-used-creep-tumors rt))
   (define mature-ready-tumors
@@ -19541,7 +19554,7 @@
      #:recharge-available? (or (not live-game?) (sc2-ability-live-available? 4126))
      #:recharge-off-cooldown? recharge-cd-ready?
      #:cast-range recharge-cast-range-eff
-     #:approach-hold-range 22.0))
+     #:approach-hold-range 24.5))
   (define recharge-cast-nx-id (protoss-nexus-recharge-decision-cast-nexus-tag recharge-dec))
   (define recharge-cast-tgt-id (protoss-nexus-recharge-decision-cast-target-tag recharge-dec))
   (define recharge-hold-nx-ids (protoss-nexus-recharge-decision-hold-nexus-tags recharge-dec))
@@ -19565,7 +19578,7 @@
                (ormap (lambda (c)
                         (and (not (macro-caster-info-hallucination? c))
                              (< (exact->inexact (macro-caster-info-energy c)) 100.0)
-                             (<= (dist2d nxx nxy (macro-caster-info-x c) (macro-caster-info-y c)) 22.0)))
+                             (<= (dist2d nxx nxy (macro-caster-info-x c) (macro-caster-info-y c)) 24.5)))
                       recharge-caster-infos)))))
   (define step-chrono-fac-pressure?
     (and live-game? (l2-arbiter-override-pressure? ctx 'facility-busy)))
@@ -19574,6 +19587,16 @@
          (l2-arbiter-override-pressure? ctx 'budget-mineral 224 6)
          (>= (l2-ctx-gas ctx) 200)
          (< (l2-ctx-minerals ctx) 150)))
+  (define protoss-has-ally-caster?
+    (and (ormap (lambda (u)
+                  (and (hash? u)
+                       (not (or (eq? (hash-ref u 'is-hallucination #f) #t)
+                                (eq? (hash-ref u 'hallucination #f) #t)
+                                (eq? (hash-ref u 'hallucination? #f) #t)))
+                       (memq (fast-canonical-unit-sym (unit-type-sym u))
+                             '(high-templar oracle sentry mothership))))
+                ally-units)
+         #t))
   (define (chrono-prio-score nx b)
     (define bsym (fast-canonical-structure-sym (unit-type-sym b)))
     (score-protoss-chrono-target-policy
@@ -19583,6 +19606,7 @@
      #:nexus-energy (exact->inexact (hash-ref nx 'energy SC2-NEXUS-CHRONO-BOOST-ENERGY))
      #:has-busy-tech-or-robo? protoss-has-busy-tech-or-robo?
      #:dry-caster-near? (protoss-dry-caster-near-nx? nx)
+     #:has-ally-caster? protoss-has-ally-caster?
      #:early-ling-or-worker-rush? (or protoss-early-ling-rush? worker-rush-chrono?)
      #:early-gate-defenders protoss-early-gate-defenders
      #:under-pressure? (or early-survival-crisis? under-base-attack?)
@@ -21252,9 +21276,16 @@
          (l2-emit-build-verified! ctx 'twilight-council tcx tcy)))
   (when (and (memq 'twilight-council ready-bldg-types)
                 (not urgent-combat-or-intel-need?))
+       ;; Loop 74 B2: Unlock Blink-first in PvP and Stalker-core PvT (>= 4 Stalkers, < 4 Zealots)
+       ;; while preserving Charge-first in PvZ (unless AA/Mutas) and Zealot-heavy PvT!
        (define blink-first?
          (and live-game?
-              (or protoss-aa-needed? (> enemy-muta-cnt-p 0))))
+              (or protoss-aa-needed?
+                  (> enemy-muta-cnt-p 0)
+                  (eq? effective-enemy-race 'Protoss)
+                  (and (eq? effective-enemy-race 'Terran)
+                       (>= (l2-unit-count ctx 'stalker) 4)
+                       (< (l2-unit-count ctx 'zealot) 4)))))
        (cond
          [(and blink-first?
                (l2-upgrade-needed? ctx 'blink)
@@ -21791,6 +21822,17 @@
          (list 'protoss-shields-1 #f (and allow-armor1-now? (p-upg-ok? 'protoss-shields-1)))
          (list 'protoss-shields-2 'protoss-shields-1 (and tc-ready? (p-upg-ok? 'protoss-shields-2)))
          (list 'protoss-shields-3 'protoss-shields-2 (and tc-ready? (p-upg-ok? 'protoss-shields-3))))))
+  ;; Loop 74 B3: Peaceful 2-base PvT/PvP Templar Archive unlock (>= 66 sup, >= 200G, Robo/RoboBay
+  ;; present/pending) while strictly preserving Colossus escrow and expansion escrow!
+  (define pvt-pvp-2base-templar-ok?
+    (and (memq effective-enemy-race '(Terran Protoss))
+         (>= (length nexuses) 2)
+         (>= eff-phase-supply 66)
+         (>= (l2-ctx-gas ctx) 200)
+         (or (l2-building-present-or-pending? ctx 'robotics-bay)
+             (l2-building-present-or-pending? ctx 'robotics-facility))
+         (not under-base-attack?)
+         (not (l2-ctx-early-survival-crisis? ctx))))
   (when (and (memq 'twilight-council ready-bldg-types)
                 (or (not protoss-saving-for-expand?)
                     (and live-game?
@@ -21812,7 +21854,8 @@
                              ;; >= 2 bases at >= 68 supply in PvZ so PvZ transitions into Archon/Storm!
                              (and (eq? effective-enemy-race 'Zerg)
                                   (>= (length nexuses) 2)
-                                  (>= eff-phase-supply 68)))
+                                  (>= eff-phase-supply 68))
+                             pvt-pvp-2base-templar-ok?)
                          (or (l2-plan-wants-now? ctx 'templar-archive)
                              (l2-can-spend-by-priority? ctx 'templar-archive 'tech-upgrade)
                              (and (eq? effective-enemy-race 'Zerg)
@@ -21820,6 +21863,7 @@
                                   (>= eff-phase-supply 68)
                                   (not under-base-attack?)
                                   (not (l2-ctx-early-survival-crisis? ctx)))
+                             pvt-pvp-2base-templar-ok?
                              (>= eff-phase-supply 92))))
                 (not (l2-building-present-or-pending? ctx 'templar-archive))
                 (>= (length nexuses) SC2-MIN-DESIRED-BASES)

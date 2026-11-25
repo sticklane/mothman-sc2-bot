@@ -178,6 +178,8 @@
  unit-mode-tracker-hellbat-dwell-elapsed
  unit-mode-tracker-viking-dwell-elapsed
  unit-mode-tracker-widow-mine-dwell-elapsed
+ unit-mode-tracker-siege-tank-dwell-elapsed
+ unit-mode-tracker-liberator-dwell-elapsed
  unit-mode-tracker-cyclone-lock-state
  unit-mode-tracker-marauder-slow-until
  unit-mode-tracker-enemy-slowed?
@@ -194,11 +196,22 @@
  WIDOW-MINE-MODE-COOLDOWN-FRAMES
  UNIT-MODE-TRANSPORT-LOAD-COOLDOWN-FRAMES
  SIEGE-TANK-SPLASH-RADIUS
+ SIEGE-TANK-EMERGENCY-UNSIEGE-ABILITY-ID
+ SIEGE-TANK-EMERGENCY-UNSIEGE-COOLDOWN-FRAMES
+ LIBERATOR-UNIT-TYPE-ID
+ LIBERATOR-AG-UNIT-TYPE-ID
+ MORPH-LIBERATOR-AG-ABILITY-ID
+ MORPH-LIBERATOR-AA-ABILITY-ID
+ LIBERATOR-MODE-COOLDOWN-FRAMES
  evaluate-widow-mine-mode
  plan-widow-mine-modes
  select-widow-mine-cluster-target
  siege-tank-target-safe?
  plan-siege-tank-targets
+ evaluate-siege-tank-emergency-unsiege
+ plan-siege-tank-emergency-unsiege
+ evaluate-liberator-mode
+ plan-liberator-modes
 
  ;; Unit Predicates & Scoring Helpers
  thor-explosive-threat-air?
@@ -293,6 +306,27 @@
 
 (: SIEGE-TANK-SPLASH-RADIUS Float)
 (define SIEGE-TANK-SPLASH-RADIUS 1.25)
+
+(: SIEGE-TANK-EMERGENCY-UNSIEGE-ABILITY-ID Integer)
+(define SIEGE-TANK-EMERGENCY-UNSIEGE-ABILITY-ID 390)
+
+(: SIEGE-TANK-EMERGENCY-UNSIEGE-COOLDOWN-FRAMES Integer)
+(define SIEGE-TANK-EMERGENCY-UNSIEGE-COOLDOWN-FRAMES 112)
+
+(: LIBERATOR-UNIT-TYPE-ID Integer)
+(define LIBERATOR-UNIT-TYPE-ID 689)
+
+(: LIBERATOR-AG-UNIT-TYPE-ID Integer)
+(define LIBERATOR-AG-UNIT-TYPE-ID 734)
+
+(: MORPH-LIBERATOR-AG-ABILITY-ID Integer)
+(define MORPH-LIBERATOR-AG-ABILITY-ID 2558)
+
+(: MORPH-LIBERATOR-AA-ABILITY-ID Integer)
+(define MORPH-LIBERATOR-AA-ABILITY-ID 2560)
+
+(: LIBERATOR-MODE-COOLDOWN-FRAMES Integer)
+(define LIBERATOR-MODE-COOLDOWN-FRAMES 64)
 
 ;; Canonical Wire Ability IDs (`lib/sc2-protobuf-ws.rkt:986-995`, `lib/sc2-typed-commands.rkt:1666-1758`)
 (: MORPH-THOR-HIGH-IMPACT-ABILITY-ID Integer)
@@ -532,12 +566,16 @@
    [marauder-slow-table : (Mutable-HashTable Integer Integer)]
    [remembered-enemy-air : (Mutable-HashTable Integer remembered-air-rec)]
    [widow-mine-modes : (Mutable-HashTable Integer mode-switch-rec)]
-   [transport-last-load : (Mutable-HashTable Integer Integer)]))
+   [transport-last-load : (Mutable-HashTable Integer Integer)]
+   [siege-tank-modes : (Mutable-HashTable Integer mode-switch-rec)]
+   [liberator-modes : (Mutable-HashTable Integer mode-switch-rec)]))
 
 ;; Creates a fresh empty `unit-mode-tracker`.
 (: make-unit-mode-tracker (-> unit-mode-tracker))
 (define (make-unit-mode-tracker)
   (unit-mode-tracker
+   (make-hasheqv)
+   (make-hasheqv)
    (make-hasheqv)
    (make-hasheqv)
    (make-hasheqv)
@@ -558,6 +596,16 @@
 (: unit-mode-tracker-widow-mine-dwell-elapsed (-> unit-mode-tracker Integer Integer Integer))
 (define (unit-mode-tracker-widow-mine-dwell-elapsed tr tag current-frame)
   (mode-dwell-elapsed (unit-mode-tracker-widow-mine-modes tr) tag current-frame))
+
+;; Returns elapsed frames since `tag` last switched SiegeTank mode.
+(: unit-mode-tracker-siege-tank-dwell-elapsed (-> unit-mode-tracker Integer Integer Integer))
+(define (unit-mode-tracker-siege-tank-dwell-elapsed tr tag current-frame)
+  (mode-dwell-elapsed (unit-mode-tracker-siege-tank-modes tr) tag current-frame))
+
+;; Returns elapsed frames since `tag` last switched Liberator Fighter/Defender mode.
+(: unit-mode-tracker-liberator-dwell-elapsed (-> unit-mode-tracker Integer Integer Integer))
+(define (unit-mode-tracker-liberator-dwell-elapsed tr tag current-frame)
+  (mode-dwell-elapsed (unit-mode-tracker-liberator-modes tr) tag current-frame))
 
 (: unit-mode-tracker-transport-load-cooldown (-> unit-mode-tracker Integer Integer Integer))
 (define (unit-mode-tracker-transport-load-cooldown tr tr-tag current-frame)
@@ -631,11 +679,15 @@
   (define slow-tbl (unit-mode-tracker-marauder-slow-table tr))
   (define wm-tbl (unit-mode-tracker-widow-mine-modes tr))
   (define tr-load-tbl (unit-mode-tracker-transport-last-load tr))
+  (define tk-tbl (unit-mode-tracker-siege-tank-modes tr))
+  (define lib-tbl (unit-mode-tracker-liberator-modes tr))
   (for ([dtag (in-list dead-tags)])
     (hash-remove! mem dtag)
     (hash-remove! slow-tbl dtag)
     (hash-remove! wm-tbl dtag)
-    (hash-remove! tr-load-tbl dtag)))
+    (hash-remove! tr-load-tbl dtag)
+    (hash-remove! tk-tbl dtag)
+    (hash-remove! lib-tbl dtag)))
 
 ;; =============================================================================
 ;; Internal Unit Normalization & Classification Helpers
@@ -1039,7 +1091,8 @@
   (for ([a (in-list ally-units)])
     (define ut (exact-unit-type a))
     (when (and (memq ut '(thor thor-ap hellion hellbat viking-fighter viking viking-assault
-                          widow-mine widow-mine-burrowed))
+                          widow-mine widow-mine-burrowed siege-tank siege-tank-sieged
+                          liberator liberator-ag))
                (u-alive? a))
       (define tag (u-tag a))
       (when (> tag 0)
@@ -1059,7 +1112,11 @@
                              (if (or (eq? ut 'widow-mine-burrowed)
                                      (eq? (dyn-hash-ref a 'burrowed #f) #t))
                                  'burrowed
-                                 'mobile))]))))
+                                 'mobile))]
+          [(siege-tank)        (sync-unit-mode-entry! (unit-mode-tracker-siege-tank-modes tr) tag current-frame 'mobile)]
+          [(siege-tank-sieged) (sync-unit-mode-entry! (unit-mode-tracker-siege-tank-modes tr) tag current-frame 'sieged)]
+          [(liberator)         (sync-unit-mode-entry! (unit-mode-tracker-liberator-modes tr) tag current-frame 'fighter)]
+          [(liberator-ag)      (sync-unit-mode-entry! (unit-mode-tracker-liberator-modes tr) tag current-frame 'defender)]))))
   (sync-unit-mode-tracker-post! tr ally-units enemy-units current-frame dead-tags track-air-memory?))
 
 ;; =============================================================================
@@ -3058,6 +3115,313 @@
   (plan-siege-tank-targets/list tanks ally-units enemy-units only-on-splash-risk?))
 
 ;; =============================================================================
+;; 6d. Loop 74 C2: Abandoned Sieged-Tank Unsiege-Retreat & Liberator Defender Mode
+;; =============================================================================
+
+(: u-mode-enemy-targetable? (-> Any Boolean))
+(define (u-mode-enemy-targetable? e)
+  (and (u-alive? e)
+       (not (eq? (dyn-hash-ref e 'is-hallucination? #f) #t))
+       (not (eq? (dyn-hash-ref e 'is-hallucination #f) #t))
+       (not (eq? (dyn-hash-ref e 'hallucination #f) #t))
+       (not (eqv? (dyn-hash-ref e 'cloak 0) 1))
+       (not (eq? (dyn-hash-ref e 'cloak #f) 'cloaked))))
+
+(: u-mode-noncombat-sym? (-> Symbol Boolean))
+(define (u-mode-noncombat-sym? ut)
+  (not (not (memq ut '(scv probe drone mule larva egg overlord overlord-transport
+                       overseer overseer-siege-mode observer observer-siege-mode
+                       warp-prism warp-prism-phasing medivac changeling
+                       changeling-zealot changeling-marine changeling-marine-shield
+                       changeling-zergling changeling-zergling-wings
+                       creep-tumor creep-tumor-burrowed creep-tumor-queen
+                       cocoon baneling-cocoon ravager-cocoon brood-lord-cocoon
+                       overlord-cocoon transport-overlord-cocoon lurker-egg lurker-mp-egg
+                       unknown)))))
+
+(: u-mode-has-air-attack? (-> Any Boolean))
+(define (u-mode-has-air-attack? u)
+  (define ut (exact-unit-type u))
+  (cond
+    [(memq ut '(missile-turret spore-crawler photon-cannon bunker)) #t]
+    [else
+     (define stats (cached-unit-combat-stats ut))
+     (> (safe-finite-real (hash-ref stats 'air-dps (lambda () 0.0)) 0.0) 0.0)]))
+
+(: evaluate-siege-tank-emergency-unsiege
+   (->* (Any (Listof Any) (Listof Any))
+        (#:tracker (Option unit-mode-tracker)
+         #:current-frame Integer)
+        (Option unit-mode-directive)))
+(define (evaluate-siege-tank-emergency-unsiege tank-u ally-units enemy-units
+                                               #:tracker [tr #f]
+                                               #:current-frame [current-frame 0])
+  (define ut (exact-unit-type tank-u))
+  (define ttag (u-tag tank-u))
+  (cond
+    [(or (not (u-alive? tank-u))
+         (<= ttag 0)
+         (not (eq? ut 'siege-tank-sieged)))
+     #f]
+    [else
+     (define dwell
+       (if tr
+           (unit-mode-tracker-siege-tank-dwell-elapsed tr ttag current-frame)
+           10000))
+     (cond
+       [(< dwell SIEGE-TANK-EMERGENCY-UNSIEGE-COOLDOWN-FRAMES) #f]
+       [else
+        (define tx (u-x tank-u))
+        (define ty (u-y tank-u))
+        ;; Never emergency-unsiege if:
+        ;;  1. Defending an owned base (CC / OC / PF) within 14.0t, OR
+        ;;  2. Covered by another live sieged Siege Tank within 8.0t, OR
+        ;;  3. Screened within 8.0t by a friendly Bunker or ground non-tank combat unit.
+        (define protected? : Boolean
+          (for/or : Boolean
+                  ([a (in-list ally-units)]
+                   #:when (and (u-alive? a)
+                               (not (= (u-tag a) ttag))))
+            (define aut (exact-unit-type a))
+            (define d (dist-2d tx ty (u-x a) (u-y a)))
+            (cond
+              [(and (memq aut '(command-center orbital-command planetary-fortress))
+                    (<= d 14.0))
+               #t]
+              [(and (eq? aut 'siege-tank-sieged)
+                    (<= d 8.0))
+               #t]
+              [(and (<= d 8.0)
+                    (or (eq? aut 'bunker)
+                        (and (not (u-flying? a))
+                             (not (u-structure? a))
+                             (not (eq? aut 'siege-tank))
+                             (not (u-mode-noncombat-sym? aut)))))
+               #t]
+              [else #f])))
+        (cond
+          [protected? #f]
+          [else
+           (define-values (deadzone-cnt close-5t-cnt active-siege-cnt)
+             (for/fold ([dz : Integer 0]
+                        [c5 : Integer 0]
+                        [act : Integer 0])
+                       ([e (in-list enemy-units)]
+                        #:when (and (u-mode-enemy-targetable? e)
+                                    (not (u-flying? e))
+                                    (not (u-structure? e))
+                                    (not (u-mode-noncombat-sym? (exact-unit-type e)))))
+               (define d (dist-2d tx ty (u-x e) (u-y e)))
+               (values (if (<= d 3.0) (add1 dz) dz)
+                       (if (< d 5.0) (add1 c5) c5)
+                       (if (and (>= d 4.5) (<= d 12.5)) (add1 act) act))))
+           ;; Unsiege ONLY when not actively shelling a target in [4.5, 12.5]t AND either:
+           ;;  - an enemy is inside the minimum-range deadzone (<= 3.0t), OR
+           ;;  - >= 2 close ground threats (< 5.0t) while Tank HP < 65%.
+           (if (and (= active-siege-cnt 0)
+                    (or (>= deadzone-cnt 1)
+                        (and (>= close-5t-cnt 2)
+                             (< (u-hp-ratio tank-u) 0.65))))
+               (begin
+                 (when tr
+                   (record-mode-switch! (unit-mode-tracker-siege-tank-modes tr)
+                                        ttag current-frame 'mobile))
+                 (unit-mode-directive ttag 'siege-tank-sieged 'cast-spell 'unsiege-mode
+                                      SIEGE-TANK-EMERGENCY-UNSIEGE-ABILITY-ID
+                                      ttag tx ty 'siege-tank-abandoned-unsiege))
+               #f)])])]))
+
+(: plan-siege-tank-emergency-unsiege/list
+   (-> (Listof Any) (Listof Any) (Listof Any) (Option unit-mode-tracker) Integer
+       (Listof unit-mode-directive)))
+(define (plan-siege-tank-emergency-unsiege/list tanks ally-units enemy-units tr current-frame)
+  (for/fold ([acc : (Listof unit-mode-directive) '()] #:result (reverse acc))
+            ([t (in-list tanks)])
+    (define d (evaluate-siege-tank-emergency-unsiege t ally-units enemy-units
+                                                     #:tracker tr
+                                                     #:current-frame current-frame))
+    (if d (cons d acc) acc)))
+
+(: plan-siege-tank-emergency-unsiege
+   (->* ((Listof Any) (Listof Any))
+        (#:tracker (Option unit-mode-tracker)
+         #:current-frame Integer)
+        (Listof unit-mode-directive)))
+(define (plan-siege-tank-emergency-unsiege ally-units enemy-units
+                                           #:tracker [tr #f]
+                                           #:current-frame [current-frame 0])
+  (define tanks
+    (for/fold ([rev : (Listof Any) '()] #:result (reverse rev))
+              ([a (in-list ally-units)]
+               #:when (and (u-alive? a) (eq? (exact-unit-type a) 'siege-tank-sieged)))
+      (cons a rev)))
+  (plan-siege-tank-emergency-unsiege/list tanks ally-units enemy-units tr current-frame))
+
+(: liberator-hv-ground-sym? (-> Symbol Boolean))
+(define (liberator-hv-ground-sym? ut)
+  (not (not (memq ut '(siege-tank-sieged siege-tank immortal colossus
+                       lurker-burrowed lurker-mp-burrowed ravager roach
+                       ultralisk thor thor-ap marauder)))))
+
+(: evaluate-liberator-mode
+   (->* (Any (Listof Any) (Listof Any))
+        (#:tracker (Option unit-mode-tracker)
+         #:current-frame Integer)
+        (Option unit-mode-directive)))
+(define (evaluate-liberator-mode lib-u ally-units enemy-units
+                                 #:tracker [tr #f]
+                                 #:current-frame [current-frame 0])
+  (define ut (exact-unit-type lib-u))
+  (define ltag (u-tag lib-u))
+  (cond
+    [(or (not (u-alive? lib-u))
+         (<= ltag 0)
+         (not (memq ut '(liberator liberator-ag))))
+     #f]
+    [else
+     (define dwell
+       (if tr
+           (unit-mode-tracker-liberator-dwell-elapsed tr ltag current-frame)
+           10000))
+     (cond
+       [(< dwell LIBERATOR-MODE-COOLDOWN-FRAMES) #f]
+       [(eq? ut 'liberator)
+        (define lx (u-x lib-u))
+        (define ly (u-y lib-u))
+        ;; Guard against overwhelming uncontested air-to-air threats within 7.0t
+        (define enemy-aa-air-cnt : Integer
+          (for/fold ([cnt : Integer 0])
+                    ([e (in-list enemy-units)]
+                     #:when (and (u-mode-enemy-targetable? e)
+                                 (u-flying? e)
+                                 (u-mode-has-air-attack? e)
+                                 (<= (dist-2d lx ly (u-x e) (u-y e)) 7.0)))
+            (add1 cnt)))
+        (define friendly-aa-near? : Boolean
+          (and (>= enemy-aa-air-cnt 3)
+               (for/or : Boolean ([a (in-list ally-units)])
+                 (and (u-alive? a)
+                      (not (= (u-tag a) ltag))
+                      (u-mode-has-air-attack? a)
+                      (<= (dist-2d lx ly (u-x a) (u-y a)) 10.0)))))
+        (cond
+          [(and (>= enemy-aa-air-cnt 3) (not friendly-aa-near?)) #f]
+          [else
+           (define near-ground
+             (for/list : (Listof Any)
+                       ([e (in-list enemy-units)]
+                        #:when (and (u-mode-enemy-targetable? e)
+                                    (not (u-flying? e))
+                                    (not (u-structure? e))
+                                    (not (u-mode-noncombat-sym? (exact-unit-type e)))
+                                    (<= (dist-2d lx ly (u-x e) (u-y e)) 10.5)))
+               e))
+           (define has-hv?
+             (for/or : Boolean ([e (in-list near-ground)])
+               (liberator-hv-ground-sym? (exact-unit-type e))))
+           (cond
+             [(not (or (>= (length near-ground) 2) has-hv?)) #f]
+             [else
+              ;; Densest enemy ground clump centroid within 3.75t Liberation Zone radius
+              (define-values (best-cx best-cy _best-sc)
+                (for/fold ([bcx : Float lx] [bcy : Float ly] [bsc : Float -1.0])
+                          ([seed (in-list near-ground)])
+                  (define sx0 (u-x seed))
+                  (define sy0 (u-y seed))
+                  (define-values (sum-x sum-y cnt hv-bonus)
+                    (for/fold ([ax : Float 0.0] [ay : Float 0.0] [n : Integer 0] [hb : Float 0.0])
+                              ([o (in-list near-ground)])
+                      (if (<= (dist-2d sx0 sy0 (u-x o) (u-y o)) 3.75)
+                          (values (+ ax (u-x o))
+                                  (+ ay (u-y o))
+                                  (add1 n)
+                                  (+ hb (if (liberator-hv-ground-sym? (exact-unit-type o)) 0.6 0.0)))
+                          (values ax ay n hb))))
+                  (define n-fl (max 1.0 (->float cnt)))
+                  (define cx (/ sum-x n-fl))
+                  (define cy (/ sum-y n-fl))
+                  (define sc (+ (->float cnt) hv-bonus (- (* 0.05 (dist-2d lx ly cx cy)))))
+                  (if (> sc bsc)
+                      (values cx cy sc)
+                      (values bcx bcy bsc))))
+              ;; Clamp cast point strictly <= 4.8t from Liberator (inside SC2 5.0t cast range)
+              (define dx (- best-cx lx))
+              (define dy (- best-cy ly))
+              (define d (dist-2d lx ly best-cx best-cy))
+              (define-values (cand-x cand-y)
+                (if (> d 4.8)
+                    (let ([scale (/ 4.8 d)])
+                      (values (+ lx (* dx scale)) (+ ly (* dy scale))))
+                    (values best-cx best-cy)))
+              (define clamped-pt (clamp-playable-pt cand-x cand-y))
+              (define tx (point2d-x clamped-pt))
+              (define ty (point2d-y clamped-pt))
+              (when tr
+                (record-mode-switch! (unit-mode-tracker-liberator-modes tr)
+                                     ltag current-frame 'defender))
+              (unit-mode-directive ltag 'liberator 'cast-spell 'morph-liberator-ag
+                                   MORPH-LIBERATOR-AG-ABILITY-ID 0 tx ty
+                                   'liberator-defender-zone)])])]
+       [else
+        ;; Defender (`liberator-ag`) -> Fighter (`morph-liberator-aa`, 2560, no-target)
+        (define lx (u-x lib-u))
+        (define ly (u-y lib-u))
+        (define ground-in-115 : Integer
+          (for/fold ([cnt : Integer 0])
+                    ([e (in-list enemy-units)]
+                     #:when (and (u-mode-enemy-targetable? e)
+                                 (not (u-flying? e))
+                                 (not (u-structure? e))
+                                 (not (u-mode-noncombat-sym? (exact-unit-type e)))
+                                 (<= (dist-2d lx ly (u-x e) (u-y e)) 11.5)))
+            (add1 cnt)))
+        (define enemy-aa-in-8 : Integer
+          (if (< (u-hp-ratio lib-u) 0.35)
+              (for/fold ([cnt : Integer 0])
+                        ([e (in-list enemy-units)]
+                         #:when (and (u-mode-enemy-targetable? e)
+                                     (u-mode-has-air-attack? e)
+                                     (<= (dist-2d lx ly (u-x e) (u-y e)) 8.0)))
+                (add1 cnt))
+              0))
+        (if (or (= ground-in-115 0)
+                (and (< (u-hp-ratio lib-u) 0.35) (>= enemy-aa-in-8 2)))
+            (begin
+              (when tr
+                (record-mode-switch! (unit-mode-tracker-liberator-modes tr)
+                                     ltag current-frame 'fighter))
+              (unit-mode-directive ltag 'liberator-ag 'cast-spell 'morph-liberator-aa
+                                   MORPH-LIBERATOR-AA-ABILITY-ID ltag lx ly
+                                   'liberator-unsiege-reposition))
+            #f)])]))
+
+(: plan-liberator-modes/list
+   (-> (Listof Any) (Listof Any) (Listof Any) (Option unit-mode-tracker) Integer
+       (Listof unit-mode-directive)))
+(define (plan-liberator-modes/list libs ally-units enemy-units tr current-frame)
+  (for/fold ([acc : (Listof unit-mode-directive) '()] #:result (reverse acc))
+            ([lu (in-list libs)])
+    (define d (evaluate-liberator-mode lu ally-units enemy-units
+                                       #:tracker tr
+                                       #:current-frame current-frame))
+    (if d (cons d acc) acc)))
+
+(: plan-liberator-modes
+   (->* ((Listof Any) (Listof Any))
+        (#:tracker (Option unit-mode-tracker)
+         #:current-frame Integer)
+        (Listof unit-mode-directive)))
+(define (plan-liberator-modes ally-units enemy-units
+                              #:tracker [tr #f]
+                              #:current-frame [current-frame 0])
+  (define libs
+    (for/fold ([rev : (Listof Any) '()] #:result (reverse rev))
+              ([a (in-list ally-units)]
+               #:when (and (u-alive? a) (memq (exact-unit-type a) '(liberator liberator-ag))))
+      (cons a rev)))
+  (plan-liberator-modes/list libs ally-units enemy-units tr current-frame))
+
+;; =============================================================================
 ;; 7. Unified S-Expression Action Conversion & Orchestrator
 ;; =============================================================================
 
@@ -3096,21 +3460,31 @@
     [(cast-spell)
      (define ab (unit-mode-directive-ability d))
      (define tgt (unit-mode-directive-target-tag d))
-     ;; W12-P0-4-rt (`w12-tac-3`): Emit zero-target mode toggles as 3-element `(cast-spell uid ab)`
-     ;; so Layer-5 `pre-coalesced-actions` & `human-cortex` coalesce full squads into 1 command!
-     (if (memq ab '(morph-viking-fighter morph-viking-assault
-                    morph-hellbat morph-hellion
-                    morph-thor-high-impact morph-thor-explosive
-                    siege-mode unsiege-mode
-                    widow-mine-burrow widow-mine-unburrow
-                    lurker-burrow lurker-unburrow))
-         (list 'cast-spell
-               (unit-mode-directive-unit-tag d)
-               ab)
-         (list 'cast-spell
-               (unit-mode-directive-unit-tag d)
-               (or ab 'unknown)
-               (if (> tgt 0) tgt (unit-mode-directive-unit-tag d))))]
+     ;; W12-P0-4-rt (`w12-tac-3`) + Loop 74 C2:
+     ;; Point-target `morph-liberator-ag` (`2558`) emits 5-element `(cast-spell uid 'morph-liberator-ag tx ty)`;
+     ;; zero-target mode toggles (`morph-liberator-aa`, `unsiege-mode`, etc.) emit 3-element `(cast-spell uid ab)`!
+     (cond
+       [(eq? ab 'morph-liberator-ag)
+        (list 'cast-spell
+              (unit-mode-directive-unit-tag d)
+              'morph-liberator-ag
+              (unit-mode-directive-tx d)
+              (unit-mode-directive-ty d))]
+       [(memq ab '(morph-viking-fighter morph-viking-assault
+                   morph-hellbat morph-hellion
+                   morph-thor-high-impact morph-thor-explosive
+                   morph-liberator-aa
+                   siege-mode unsiege-mode
+                   widow-mine-burrow widow-mine-unburrow
+                   lurker-burrow lurker-unburrow))
+        (list 'cast-spell
+              (unit-mode-directive-unit-tag d)
+              ab)]
+       [else
+        (list 'cast-spell
+              (unit-mode-directive-unit-tag d)
+              (or ab 'unknown)
+              (if (> tgt 0) tgt (unit-mode-directive-unit-tag d)))])]
     [(move kite retreat attack-pos)
      (list (unit-mode-directive-action d)
            (unit-mode-directive-unit-tag d)
@@ -3156,8 +3530,10 @@
   (define hellion-tbl (unit-mode-tracker-hellion-modes tr))
   (define viking-tbl (unit-mode-tracker-viking-modes tr))
   (define wm-tbl (unit-mode-tracker-widow-mine-modes tr))
+  (define tk-tbl (unit-mode-tracker-siege-tank-modes tr))
+  (define lib-tbl (unit-mode-tracker-liberator-modes tr))
   (define auto-armory-init? (not (eq? armory-arg 'auto)))
-  (define-values (thors-rev hellions-rev vikings-rev cyclones-rev marauders-rev widow-mines-rev siege-tanks-rev armory-ok?)
+  (define-values (thors-rev hellions-rev vikings-rev cyclones-rev marauders-rev widow-mines-rev siege-tanks-rev liberators-rev armory-ok?)
     (for/fold ([ts : (Listof Any) '()]
                [hs : (Listof Any) '()]
                [vs : (Listof Any) '()]
@@ -3165,6 +3541,7 @@
                [ms : (Listof Any) '()]
                [wms : (Listof Any) '()]
                [tks : (Listof Any) '()]
+               [libs : (Listof Any) '()]
                [arm? : Boolean auto-armory-init?])
               ([a (in-list ally-units)]
                #:when (u-alive? a))
@@ -3173,27 +3550,27 @@
         [(thor)
          (define tag (u-tag a))
          (when (> tag 0) (sync-unit-mode-entry! thor-tbl tag current-frame 'explosive))
-         (values (cons a ts) hs vs cs ms wms tks arm?)]
+         (values (cons a ts) hs vs cs ms wms tks libs arm?)]
         [(thor-ap)
          (define tag (u-tag a))
          (when (> tag 0) (sync-unit-mode-entry! thor-tbl tag current-frame 'high-impact))
-         (values (cons a ts) hs vs cs ms wms tks arm?)]
+         (values (cons a ts) hs vs cs ms wms tks libs arm?)]
         [(hellion)
          (define tag (u-tag a))
          (when (> tag 0) (sync-unit-mode-entry! hellion-tbl tag current-frame 'hellion))
-         (values ts (cons a hs) vs cs ms wms tks arm?)]
+         (values ts (cons a hs) vs cs ms wms tks libs arm?)]
         [(hellbat)
          (define tag (u-tag a))
          (when (> tag 0) (sync-unit-mode-entry! hellion-tbl tag current-frame 'hellbat))
-         (values ts (cons a hs) vs cs ms wms tks arm?)]
+         (values ts (cons a hs) vs cs ms wms tks libs arm?)]
         [(viking-fighter viking)
          (define tag (u-tag a))
          (when (> tag 0) (sync-unit-mode-entry! viking-tbl tag current-frame 'fighter))
-         (values ts hs (cons a vs) cs ms wms tks arm?)]
+         (values ts hs (cons a vs) cs ms wms tks libs arm?)]
         [(viking-assault)
          (define tag (u-tag a))
          (when (> tag 0) (sync-unit-mode-entry! viking-tbl tag current-frame 'assault))
-         (values ts hs (cons a vs) cs ms wms tks arm?)]
+         (values ts hs (cons a vs) cs ms wms tks libs arm?)]
         [(widow-mine widow-mine-burrowed)
          (define tag (u-tag a))
          (when (> tag 0)
@@ -3202,17 +3579,31 @@
                                          (eq? (dyn-hash-ref a 'burrowed #f) #t))
                                      'burrowed
                                      'mobile)))
-         (values ts hs vs cs ms (cons a wms) tks arm?)]
+         (values ts hs vs cs ms (cons a wms) tks libs arm?)]
+        [(siege-tank)
+         (define tag (u-tag a))
+         (when (> tag 0) (sync-unit-mode-entry! tk-tbl tag current-frame 'mobile))
+         (values ts hs vs cs ms wms tks libs arm?)]
         [(siege-tank-sieged)
-         (values ts hs vs cs ms wms (cons a tks) arm?)]
+         (define tag (u-tag a))
+         (when (> tag 0) (sync-unit-mode-entry! tk-tbl tag current-frame 'sieged))
+         (values ts hs vs cs ms wms (cons a tks) libs arm?)]
+        [(liberator)
+         (define tag (u-tag a))
+         (when (> tag 0) (sync-unit-mode-entry! lib-tbl tag current-frame 'fighter))
+         (values ts hs vs cs ms wms tks (cons a libs) arm?)]
+        [(liberator-ag)
+         (define tag (u-tag a))
+         (when (> tag 0) (sync-unit-mode-entry! lib-tbl tag current-frame 'defender))
+         (values ts hs vs cs ms wms tks (cons a libs) arm?)]
         [(cyclone)
-         (values ts hs vs (cons a cs) ms wms tks arm?)]
+         (values ts hs vs (cons a cs) ms wms tks libs arm?)]
         [(marauder)
-         (values ts hs vs cs (cons a ms) wms tks arm?)]
+         (values ts hs vs cs (cons a ms) wms tks libs arm?)]
         [(armory)
-         (values ts hs vs cs ms wms tks (or arm? (and (eq? armory-arg 'auto) (u-completed? a))))]
+         (values ts hs vs cs ms wms tks libs (or arm? (and (eq? armory-arg 'auto) (u-completed? a))))]
         [else
-         (values ts hs vs cs ms wms tks arm?)])))
+         (values ts hs vs cs ms wms tks libs arm?)])))
   (sync-unit-mode-tracker-post! tr ally-units enemy-units current-frame dead-tags track-air-memory?)
   (define thor-dirs
     (if (null? thors-rev)
@@ -3258,17 +3649,41 @@
         '()
         (plan-widow-mine-modes/list (reverse widow-mines-rev) ally-units enemy-units
                                     tr current-frame '())))
-  (define siege-tank-dirs
+  (define siege-tank-unsiege-dirs
     (if (null? siege-tanks-rev)
         '()
-        (plan-siege-tank-targets/list (reverse siege-tanks-rev) ally-units enemy-units #t)))
+        (plan-siege-tank-emergency-unsiege/list (reverse siege-tanks-rev) ally-units enemy-units
+                                                tr current-frame)))
+  (define siege-tank-target-dirs
+    (if (null? siege-tanks-rev)
+        '()
+        (let ([unsieging-tags : (HashTable Integer Boolean)
+                              (for/hasheqv : (HashTable Integer Boolean)
+                                           ([d (in-list siege-tank-unsiege-dirs)])
+                                (values (unit-mode-directive-unit-tag d) #t))])
+          (define remaining-tanks
+            (if (hash-empty? unsieging-tags)
+                (reverse siege-tanks-rev)
+                (for/list : (Listof Any) ([t (in-list (reverse siege-tanks-rev))]
+                                          #:unless (hash-has-key? unsieging-tags (u-tag t)))
+                  t)))
+          (if (null? remaining-tanks)
+              '()
+              (plan-siege-tank-targets/list remaining-tanks ally-units enemy-units #t)))))
+  (define liberator-dirs
+    (if (null? liberators-rev)
+        '()
+        (plan-liberator-modes/list (reverse liberators-rev) ally-units enemy-units
+                                   tr current-frame)))
   (if (and (null? thor-dirs)
            (null? hellion-dirs)
            (null? viking-dirs)
            (null? cyclone-dirs)
            (null? marauder-orders)
            (null? widow-mine-dirs)
-           (null? siege-tank-dirs))
+           (null? siege-tank-unsiege-dirs)
+           (null? siege-tank-target-dirs)
+           (null? liberator-dirs))
       '()
       (append
        (if (null? thor-dirs) '() (map unit-mode-directive->sexp thor-dirs))
@@ -3277,4 +3692,6 @@
        (if (null? cyclone-dirs) '() (map unit-mode-directive->sexp cyclone-dirs))
        (if (null? marauder-orders) '() (map marauder-order->sexp marauder-orders))
        (if (null? widow-mine-dirs) '() (map unit-mode-directive->sexp widow-mine-dirs))
-       (if (null? siege-tank-dirs) '() (map unit-mode-directive->sexp siege-tank-dirs)))))
+       (if (null? siege-tank-unsiege-dirs) '() (map unit-mode-directive->sexp siege-tank-unsiege-dirs))
+       (if (null? siege-tank-target-dirs) '() (map unit-mode-directive->sexp siege-tank-target-dirs))
+       (if (null? liberator-dirs) '() (map unit-mode-directive->sexp liberator-dirs)))))

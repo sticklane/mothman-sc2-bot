@@ -11058,7 +11058,7 @@
     (plan-zerg-spellcaster-micro
      (list (hash 'id 45201 'type 'queen 'x 30.0 'y 50.0 'hp 175 'max-hp 175 'energy 60)
            (hash 'id 45202 'type 'ultralisk 'x 33.0 'y 50.0 'hp 200 'max-hp 500)
-           (hash 'id 45203 'type 'queen 'x 26.0 'y 40.0 'hp 175 'max-hp 175 'energy 50)
+           (hash 'id 45203 'type 'queen 'x 24.0 'y 38.0 'hp 175 'max-hp 175 'energy 50)
            (hash 'id 45204 'type 'ravager 'x 50.0 'y 50.0 'hp 120 'max-hp 120)
            (hash 'id 45205 'type 'infestor 'x 50.0 'y 54.0 'hp 90 'energy 100)
            (hash 'id 45206 'type 'infestor 'x 51.0 'y 54.0 'hp 90 'energy 100)

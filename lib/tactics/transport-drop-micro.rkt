@@ -124,6 +124,8 @@
  STANDARD-TRANSPORT-PICKUP-RANGE
  SAVE-BRUISED-HP-RATIO
  SAVE-UNDER-FIRE-HP-RATIO
+ SAVE-CRITICAL-BIO-HP-RATIO
+ SAVE-CRITICAL-BIO-FOCUS-FIRE-HP-RATIO
  SAVE-HIGH-VALUE-SYMS
  SAFE-DROP-REAR-OFFSET-MIN
  SAFE-DROP-REAR-OFFSET-MAX
@@ -274,12 +276,15 @@
 (: SAVE-UNDER-FIRE-HP-RATIO Float)
 (define SAVE-UNDER-FIRE-HP-RATIO 0.35)
 
-;; W11-P0-4-rt (`w11-tac-5` / `t04` + `novel-84`): Frontline Medivac-healable bio (`marauder`)
-;; should stay fighting and absorb `12.6 HP/s` Medivac heal beam rather than being `3668`-yanked
-;; at 30% HP when no lethal AoE is present; still rescue at lethal-threshold `<= 22%` HP (e.g.
-;; `25/125` one-swipe Ultralisk danger in `novel-84`) or whenever inside an AoE danger zone.
+;; W11-P0-4-rt (`w11-tac-5` / `t04` + `novel-84`) + Loop 74 C3:
+;; Frontline Medivac-healable bio (`marauder`/`marine`) stays fighting under `12.6 HP/s` Medivac
+;; heal beam at 30% HP when facing `< 2` attackers and no lethal AoE (`SAVE-CRITICAL-BIO-HP-RATIO = 0.22`),
+;; while actively focus-fired bio (`>= 2` attackers in range) rescues earlier at `<= 35%` HP!
 (: SAVE-CRITICAL-BIO-HP-RATIO Float)
 (define SAVE-CRITICAL-BIO-HP-RATIO 0.22)
+
+(: SAVE-CRITICAL-BIO-FOCUS-FIRE-HP-RATIO Float)
+(define SAVE-CRITICAL-BIO-FOCUS-FIRE-HP-RATIO 0.35)
 
 (: SAVE-HIGH-VALUE-SYMS (Listof Symbol))
 (define SAVE-HIGH-VALUE-SYMS
@@ -1299,7 +1304,7 @@
         (define hp-rat (if (or in-aoe? disruptor-cd-danger?) 1.0 (u-hp-ratio ally-u)))
         (define critical-bio? (not (not (memq ut SAVE-CRITICAL-BIO-SYMS))))
         (define save-hp-thresh
-          (if critical-bio? SAVE-CRITICAL-BIO-HP-RATIO SAVE-UNDER-FIRE-HP-RATIO))
+          (if critical-bio? SAVE-CRITICAL-BIO-FOCUS-FIRE-HP-RATIO SAVE-UNDER-FIRE-HP-RATIO))
         (define bruised-hp-thresh
           (if critical-bio? SAVE-CRITICAL-BIO-HP-RATIO SAVE-BRUISED-HP-RATIO))
         (define need-rescue?

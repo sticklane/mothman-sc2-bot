@@ -511,6 +511,10 @@
     (list (mk-u 4211 'queen 34.5 32.5 #:hp 175.0 #:energy 55.0)
           (mk-u 4212 'queen 64.5 32.5 #:hp 175.0 #:energy 30.0)
           (mk-u 4213 'roach 52.0 32.5 #:hp 145.0)))
+  (define q-units-80e
+    (list (mk-u 4211 'queen 34.5 32.5 #:hp 175.0 #:energy 80.0)
+          (mk-u 4212 'queen 64.5 32.5 #:hp 175.0 #:energy 30.0)
+          (mk-u 4213 'roach 52.0 32.5 #:hp 145.0)))
   (define q-obs-30e
     (mk-live-obs 'Zerg 'Protoss 4800 #:minerals 200 #:gas 50 #:supply-used 44 #:supply-cap 66
                  #:mineral-harvesters 28 #:vespene-harvesters 3
@@ -526,6 +530,16 @@
                                            '(authorize roach)
                                            #:cost (make-proposal-cost #:minerals 75 #:gas 25 #:supply 2 #:larva 1)))))
   (define acts-q-press (step-layer2-economy! rt-q-press q-obs-30e))
+  (define rt-q-55e (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define led-q-55e (rt-arbiter-ledger rt-q-55e))
+  (for ([k (in-range 3)])
+    (arbiter-resolve! led-q-55e (+ 4760 (* k 8))
+                      (make-arbiter-budget-snapshot #:minerals 400 #:gas 100 #:supply-left 20 #:larva-count 0)
+                      (list (make-proposal (list 'l2-spend 'roach) 'l2-macro-runtime 'macro 580.0
+                                           '(authorize roach)
+                                           #:cost (make-proposal-cost #:minerals 75 #:gas 25 #:supply 2 #:larva 1)))))
+  (define acts-q-55e
+    (step-layer2-economy! rt-q-55e (hash-set q-obs-30e 'ally-units q-units-55e)))
   (define rt-q-surplus (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
   (define led-q-surplus (rt-arbiter-ledger rt-q-surplus))
   (for ([k (in-range 3)])
@@ -535,16 +549,19 @@
                                            '(authorize roach)
                                            #:cost (make-proposal-cost #:minerals 75 #:gas 25 #:supply 2 #:larva 1)))))
   (define acts-q-surplus
-    (step-layer2-economy! rt-q-surplus (hash-set q-obs-30e 'ally-units q-units-55e)))
-  (check-true "L67-D2b-zerg-larva-pressure-suppresses-25e-creep-injects-both-and-keeps-50e-surplus"
+    (step-layer2-economy! rt-q-surplus (hash-set q-obs-30e 'ally-units q-units-80e)))
+  (check-true "L67-D2b-zerg-larva-pressure-suppresses-25e-creep-injects-both-and-keeps-75e-surplus"
               (and (has-spell? acts-q-base 'spawn-creep-tumor)
                    (not (has-spell? acts-q-press 'spawn-creep-tumor))
                    (= (count-spell acts-q-press 'inject-larva) 2)
+                   (not (has-spell? acts-q-55e 'spawn-creep-tumor))
+                   (= (count-spell acts-q-55e 'inject-larva) 2)
                    (has-spell? acts-q-surplus 'spawn-creep-tumor)
                    (has-spell? acts-q-surplus 'inject-larva))
-              (format "baseSpells=~a pressSpells=~a surplusSpells=~a"
+              (format "baseSpells=~a pressSpells=~a q55Spells=~a surplusSpells=~a"
                       (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell))) acts-q-base)
                       (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell))) acts-q-press)
+                      (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell))) acts-q-55e)
                       (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell))) acts-q-surplus)))
 
   ;; (2c) `step-live-bot-runtime!` `'mineral-override-pressure?` Loop 67B qualification:

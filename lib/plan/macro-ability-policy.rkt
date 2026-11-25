@@ -381,8 +381,9 @@
        ;; Loop 64 A5 (`#1755`): `cloak_seen` (DT/DarkShrine/Banshee/Ghost/Lurker/WidowMine)
        ;; holds 100.0e (>= 1 Scan) on top-2 OCs (lifting `cloak_seen` Scan share toward Pro 50.7%).
        (if (>= (length ready-ocs) 2) 2 1)]
-      [(and (>= cur-loop 5376)
-            (memq eff-enemy-race '(Protoss Random)))
+      [(and (memq eff-enemy-race '(Protoss Random))
+            (or (>= cur-loop 6720)
+                (and (>= cur-loop 5376) (>= (length ready-ocs) 2))))
        (if (>= (length ready-ocs) 3) 2 1)]
       [(and isolated-arena-skirmish?
             (>= friendly-combat-cnt 6))
@@ -565,15 +566,19 @@
     (if (terran-mule-policy-result? mule-policy)
         (terran-mule-policy-result-proactive-scan-oc-tags mule-policy)
         '()))
-  ;; Loop 65 (`#1831`/`#1833`): Relax `under-pressure?` requirement on `4:00-12:00`
-  ;; real supply blocks (`supply-left <= 0`, `< 192` cap) while skipping if a Depot is
-  ;; already nearly done (`> 75%`) peacefully and keeping `100e` scan reserve on `cloak-seen?`!
+  ;; Loop 65 + Loop 74 A2: Broaden Supply Drop window to 3:00-15:00 (4032..20160f) on real
+  ;; supply blocks (`supply-left <= 0`, `< 192` cap), allowing >= 2-OC non-cloak severe-block
+  ;; (`supply-left <= -2`) rescue even when a Depot is nearly done while keeping `100e` cloak reserve!
   (cond
-    [(or (< cur-loop 5376)
-         (> cur-loop 16128)
+    [(or (< cur-loop 4032)
+         (> cur-loop 20160)
          (> supply-left 0)
          (>= supply-cap 192)
-         (and depot-nearly-done? (not under-pressure?))
+         (and depot-nearly-done?
+              (not under-pressure?)
+              (not (and (>= (length ready-ocs) 2)
+                        (not cloak-seen?)
+                        (<= supply-left -2))))
          hard-blocked?
          (null? ready-ocs)
          (null? depots))
@@ -749,7 +754,7 @@
          #:recharge-available? recharge-available?
          #:recharge-off-cooldown? recharge-off-cooldown?
          #:cast-range [cast-range (sc2-spell-cast-range 'nexus-energy-recharge 14.5)]
-         #:approach-hold-range [approach-hold-range (+ (exact->inexact cast-range) 4.0)])
+         #:approach-hold-range [approach-hold-range (+ (exact->inexact cast-range) 10.0)])
   (define eff-cast-range (exact->inexact cast-range))
   (define eff-hold-range (max eff-cast-range (exact->inexact approach-hold-range)))
   ;; L63B (`#1752` Bug #2A): Always scan up to `eff-hold-range` (`<= 22.0t`) BOTH in combat
@@ -821,9 +826,8 @@
          #:caster-ready? caster-ready?
          #:target-ready? target-ready?)
   (cond
-    [(or (>= cur-loop 6720)
-         (>= worker-count 34)
-         (and (>= cur-loop 5376) (>= worker-count 28))
+    [(or (>= cur-loop 4704)
+         (>= worker-count 28)
          (null? ready-nexuses))
      '()]
     [else
@@ -904,6 +908,7 @@
          #:nexus-energy [nexus-energy 50.0]
          #:has-busy-tech-or-robo? [has-busy-tech-or-robo? #f]
          #:dry-caster-near? [dry-caster-near? #f]
+         #:has-ally-caster? [has-ally-caster? #f]
          #:early-ling-or-worker-rush? [early-ling-or-worker-rush? #f]
          #:early-gate-defenders [early-gate-defenders 0]
          #:under-pressure? [under-pressure? #f]
@@ -914,12 +919,14 @@
   (define sym (if (symbol? target-sym) target-sym 'unknown))
   (define nx-en (exact->inexact nexus-energy))
   (define army-sup (exact->inexact army-supply))
+  ;; Loop 74 A2: Shift Chrono pivot from 4:00/34w to 3:30/28w (`4704f / 28w`) so CyberCore & Robo
+  ;; get boosted ahead of Nexus Probes while keeping 0..3:30 (<4704f & <28w) Nexus-first!
   (define post-4m-pivot?
-    (or (>= cur-loop 5376)
-        (>= worker-count 34)))
+    (or (>= cur-loop 4704)
+        (>= worker-count 28)))
   (cond
     [(not post-4m-pivot?)
-     ;; Phase 0-4m (`< 5376f` & `< 34w`)
+     ;; Phase 0-3:30 (`< 4704f` & `< 28w`)
      (cond
        [(and early-ling-or-worker-rush?
              (eq? sym 'nexus)
@@ -938,7 +945,7 @@
        [(set-member? PROTOSS-CHRONO-GATE-SYMS sym) 700.0]
        [else -1.0])]
     [else
-     ;; Sharp 4:00 Pivot (`>= 5376f` OR `>= 34w`): TechUpgrades > Robo > Stargate > Nexus; suppress Gateway!
+     ;; Sharp 3:30/28w Pivot (`>= 4704f` OR `>= 28w`): TechUpgrades > Robo > Stargate > Nexus; suppress Gateway!
      ;; Loop 65 (`#1831`): On active main-base breach under pressure, promote busy Robo (`958.0`) ahead of
      ;; Forge upgrades so emergency Immortals/Colossi pop faster, while preserving peaceful Tech > Robo!
      (cond
@@ -946,16 +953,19 @@
        [(memq sym '(forge twilight-council templar-archive robotics-bay)) 955.0]
        [(eq? sym 'cybernetics-core) 952.0]
        [(set-member? PROTOSS-CHRONO-TECH-UPGRADE-SYMS sym) 950.0]
-       [(eq? sym 'robotics-facility) (if facility-override-pressure? 925.0 900.0)]
+       [(eq? sym 'robotics-facility) (if facility-override-pressure? 945.0 920.0)]
        [(eq? sym 'stargate) (if facility-override-pressure? 885.0 860.0)]
        [(eq? sym 'nexus)
         (cond
-          ;; L64B (`#1814` Bug #4) + L67 Phase D (`#2020` Contract 2.2): Lift post-4m Nexus worker cap
-          ;; `< 56 -> < 66` when no unbuffed Tech/Robo needs Chrono, add bounded `+25.0` bias under
-          ;; `mineral-override-pressure?` when `< 60w` & `(not dry-caster-near?)`, plus cap-bleed at `>= 125.0e`.
+          ;; L64B (`#1814` Bug #4) + L67 Phase D + Loop 74 A2: Lift post-pivot Nexus worker cap
+          ;; `< 56 -> < 66` when no unbuffed Tech/Robo needs Chrono, hold `50..99e` at `>= 52w` when
+          ;; `has-ally-caster?` is active for Energy Recharge / Robo bursts, add bounded `+25.0` bias
+          ;; under `mineral-override-pressure?`, plus cap-bleed at `>= 125.0e`.
           [(and (< worker-count 66)
                 (not has-busy-tech-or-robo?)
-                (or (>= nx-en 100.0) (not dry-caster-near?)))
+                (or (>= nx-en 100.0)
+                    (and (not dry-caster-near?)
+                         (not (and has-ally-caster? (>= worker-count 52))))))
            (if (and mineral-override-pressure?
                     (< worker-count 60)
                     (not dry-caster-near?))
@@ -984,6 +994,7 @@
          #:nexus-energy [nexus-energy 50.0]
          #:has-busy-tech-or-robo? [has-busy-tech-or-robo? 'auto]
          #:dry-caster-near? [dry-caster-near? #f]
+         #:has-ally-caster? [has-ally-caster? #f]
          #:early-ling-or-worker-rush? [early-ling-or-worker-rush? #f]
          #:early-gate-defenders [early-gate-defenders 0]
          #:under-pressure? [under-pressure? #f]
@@ -1013,6 +1024,7 @@
             #:nexus-energy nexus-energy
             #:has-busy-tech-or-robo? eff-busy-tech-or-robo?
             #:dry-caster-near? dry-caster-near?
+            #:has-ally-caster? has-ally-caster?
             #:early-ling-or-worker-rush? early-ling-or-worker-rush?
             #:early-gate-defenders early-gate-defenders
             #:under-pressure? under-pressure?
