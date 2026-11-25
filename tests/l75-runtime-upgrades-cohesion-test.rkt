@@ -567,8 +567,8 @@
               (fmt-fail rt-5c acts-5c)))
 
 ;; -----------------------------------------------------------------------------
-;; 6. L75-B6: Mid-Map 16t Split-Squad Pullback (`OBRet == 0`, `zero_fire_retreat == 0`)
-;;            & 8..14t Stalker Front-to-Back Screening
+;; 6. L76 Revert of L75-B6 Split-Pullback (`#2370` — Keep `OBRet == 0` &
+;;    `zero_fire_retreat == 0`) + 8..14t Stalker Front-to-Back Screening
 ;; -----------------------------------------------------------------------------
 (let ()
   (define z-home-bldgs
@@ -579,8 +579,9 @@
     (for/list ([i (in-range 20)])
       (mk-u (+ 3400 i) 'roach (+ 35.0 (* 0.4 (modulo i 5))) (+ 34.0 (* 0.4 (quotient i 5))) #:hp 145.0)))
 
-  ;; 6a: 4 Roaches at mid-map (90,90) (> 20t from THs) facing 12 Stalkers at (102,90) (d=12t > wr=4t),
-  ;;     while 20 Roaches sit at home (global 2400 >= 0.85 * 2100, local 400 < 0.65 * 2100) -> PULLS BACK (`move`)!
+  ;; 6a (Loop 76 Part 1 `#2370` revert): 4 Roaches at mid-map (90,90) facing 12 Stalkers at (102,90)
+  ;;     while 20 Roaches sit at home (winning global army) -> commits via attack order instead of
+  ;;     reverted Loop 75 B6 passive `'move` split-pullback!
   (define mid-roaches-4
     (for/list ([i (in-range 4)])
       (mk-u (+ 3500 i) 'roach 90.0 (+ 89.0 (* 0.5 i)) #:hp 145.0)))
@@ -598,15 +599,11 @@
                   #:ally-buildings z-home-bldgs
                   #:enemy-units stalkers-12-mid)))
   (define r0-acts-6a (unit-acts acts-6a 3500))
-  (define r0-pulls-back-6a?
-    (and (ormap (lambda (a)
-                  (and (eq? (car a) 'move)
-                       (>= (length a) 4)
-                       (< (third a) 88.0)))
-                r0-acts-6a)
-         (not (ormap (lambda (a) (eq? (car a) 'attack-unit)) r0-acts-6a))))
-  (check-true "L75-B6-6a-midmap-4-roaches-vs-12-stalkers-with-20-at-home-pulls-back"
-              r0-pulls-back-6a?
+  (define r0-commits-no-b6-split-6a?
+    (and (ormap (lambda (a) (memq (car a) '(attack-unit attack-pos))) r0-acts-6a)
+         (not (ormap (lambda (a) (eq? (car a) 'move)) r0-acts-6a))))
+  (check-true "L76-REVERT-6a-midmap-4-roaches-winning-global-army-commits-no-b6-split-retreat"
+              r0-commits-no-b6-split-6a?
               (format "r3500=~a" r0-acts-6a))
 
   ;; 6b: Identical 4 Roaches INSIDE owned base (38,34, <= 14t from TH) vs 12 Stalkers at (46,34) -> FIGHTS (`OBRet == 0`)!

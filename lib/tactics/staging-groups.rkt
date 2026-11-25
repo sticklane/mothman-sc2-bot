@@ -589,10 +589,59 @@
         (filter (lambda (b) (and (rec-xy? b) (not (rec-snapshot? b)))) ally-townhalls)
         (filter (lambda (b) (and (rec-xy? b) (not (rec-snapshot? b)) (memq (rec-type-sym b) TOWNHALL-SYMS)))
                 (or ally-buildings '()))))
+  (define has-owned-th? (pair? th-recs))
+  ;; Loop 76 P0: When 0 owned TownHalls exist (skirmish / base-eliminated), NEVER fall back
+  ;; to distant corner `(base-x, base-y)` (`32.5, 32.5`). Compute a bounded `6.5t` disengage
+  ;; away from `(threat-x, threat-y)` blended tangentially away from arena edges `[10, mw-10]`.
+  (define zero-th-edge (flmin 10.0 (fl* 0.25 (flmin mw mh))))
+  (define-values (zero-th-ux zero-th-uy zero-th-pt)
+    (if has-owned-th?
+        (values 0.0 0.0 (cons fbx fby))
+        (let* ([adx (fl- fgx ftx)]
+               [ady (fl- fgy fty)]
+               [ad (flsqrt (fl+ (fl* adx adx) (fl* ady ady)))]
+               [mcx (fl* 0.5 mw)]
+               [mcy (fl* 0.5 mh)]
+               [cdx (fl- mcx fgx)]
+               [cdy (fl- mcy fgy)]
+               [cd (flmax 1.0 (flsqrt (fl+ (fl* cdx cdx) (fl* cdy cdy))))]
+               [aux (if (fl> ad 0.1) (fl/ adx ad) (fl/ cdx cd))]
+               [auy (if (fl> ad 0.1) (fl/ ady ad) (fl/ cdy cd))]
+               [raw-x (fl+ fgx (fl* 6.5 aux))]
+               [raw-y (fl+ fgy (fl* 6.5 auy))]
+               [near-edge?
+                (or (fl< raw-x zero-th-edge) (fl> raw-x (fl- mw zero-th-edge))
+                    (fl< raw-y zero-th-edge) (fl> raw-y (fl- mh zero-th-edge))
+                    (fl< fgx (fl+ zero-th-edge 4.0)) (fl> fgx (fl- mw (fl+ zero-th-edge 4.0)))
+                    (fl< fgy (fl+ zero-th-edge 4.0)) (fl> fgy (fl- mh (fl+ zero-th-edge 4.0))))]
+               [bux-raw
+                (if near-edge?
+                    (let* ([t1x (fl- auy)] [t1y aux]
+                           [t2x auy] [t2y (fl- aux)]
+                           [d1 (fl+ (fl* t1x cdx) (fl* t1y cdy))]
+                           [d2 (fl+ (fl* t2x cdx) (fl* t2y cdy))]
+                           [tx (if (fl>= d1 d2) t1x t2x)])
+                      (fl+ (fl* 0.35 aux) (fl* 0.65 tx)))
+                    aux)]
+               [buy-raw
+                (if near-edge?
+                    (let* ([t1x (fl- auy)] [t1y aux]
+                           [t2x auy] [t2y (fl- aux)]
+                           [d1 (fl+ (fl* t1x cdx) (fl* t1y cdy))]
+                           [d2 (fl+ (fl* t2x cdx) (fl* t2y cdy))]
+                           [ty (if (fl>= d1 d2) t1y t2y)])
+                      (fl+ (fl* 0.35 auy) (fl* 0.65 ty)))
+                    auy)]
+               [bn (flmax 0.01 (flsqrt (fl+ (fl* bux-raw bux-raw) (fl* buy-raw buy-raw))))]
+               [bux (fl/ bux-raw bn)]
+               [buy (fl/ buy-raw bn)]
+               [px (clamp-fl (fl+ fgx (fl* 6.5 bux)) zero-th-edge (fl- mw zero-th-edge))]
+               [py (clamp-fl (fl+ fgy (fl* 6.5 buy)) zero-th-edge (fl- mh zero-th-edge))])
+          (values bux buy (cons px py)))))
   (define th-pts
-    (if (pair? th-recs)
+    (if has-owned-th?
         (for/list ([b (in-list th-recs)]) (cons (rec-x b fbx) (rec-y b fby)))
-        (list (cons fbx fby))))
+        (list zero-th-pt)))
 
   (define enemy-pts
     (extract-xy-pts enemy-units
@@ -659,37 +708,47 @@
     (define cy (clamp-fl raw-cy margin (fl- mh margin)))
     (set! cands-rev (cons (vector cx cy raw-cx raw-cy hg?) cands-rev)))
 
-  ;; Pool 1: All live owned TownHalls 1..N (5.0t behind each TH away from threat)
-  (for ([th (in-list (if (pair? th-recs) th-recs (list (hasheq 'x fbx 'y fby))))])
-    (define thx (rec-x th fbx))
-    (define thy (rec-y th fby))
-    (define thz (rec-z-opt th))
-    (define th-hg? (and thz threat-z (fl>= (fl- thz threat-z) 0.5)))
-    (define vx (fl- thx ftx))
-    (define vy (fl- thy fty))
-    (define vd (flmax 1.0 (flsqrt (fl+ (fl* vx vx) (fl* vy vy)))))
-    (define ux (fl/ vx vd))
-    (define uy (fl/ vy vd))
-    (for ([ang (in-list '(0.0 0.55 -0.55))])
-      (define-values (rx ry) (rotate-vec ux uy ang))
-      (add-cand! (fl+ thx (fl* 5.0 rx)) (fl+ thy (fl* 5.0 ry)) th-hg?)))
+  ;; Pool 1: All live owned TownHalls 1..N (5.0t behind each TH away from threat).
+  ;; When 0 owned THs exist, use bounded 6.5t tangential-blended disengage arc instead of corner `(fbx, fby)`!
+  (cond
+    [has-owned-th?
+     (for ([th (in-list th-recs)])
+       (define thx (rec-x th fbx))
+       (define thy (rec-y th fby))
+       (define thz (rec-z-opt th))
+       (define th-hg? (and thz threat-z (fl>= (fl- thz threat-z) 0.5)))
+       (define vx (fl- thx ftx))
+       (define vy (fl- thy fty))
+       (define vd (flmax 1.0 (flsqrt (fl+ (fl* vx vx) (fl* vy vy)))))
+       (define ux (fl/ vx vd))
+       (define uy (fl/ vy vd))
+       (for ([ang (in-list '(0.0 0.55 -0.55))])
+         (define-values (rx ry) (rotate-vec ux uy ang))
+         (add-cand! (fl+ thx (fl* 5.0 rx)) (fl+ thy (fl* 5.0 ry)) th-hg?)))]
+    [else
+     (for ([ang (in-list '(0.0 0.45 -0.45 0.90 -0.90))])
+       (define-values (rx ry) (rotate-vec zero-th-ux zero-th-uy ang))
+       (define cx (clamp-fl (fl+ fgx (fl* 6.5 rx)) zero-th-edge (fl- mw zero-th-edge)))
+       (define cy (clamp-fl (fl+ fgy (fl* 6.5 ry)) zero-th-edge (fl- mh zero-th-edge)))
+       (set! cands-rev (cons (vector cx cy (fl+ fgx (fl* 6.5 rx)) (fl+ fgy (fl* 6.5 ry)) #f) cands-rev)))])
 
   ;; Pool 2: Friendly static defense & siege anchor cover (3.5t behind away from threat)
   (for ([da (in-list def-anchor-recs)])
     (define dax (rec-x da fbx))
     (define day (rec-y da fby))
-    (define daz (rec-z-opt da))
-    (define da-hg? (and daz threat-z (fl>= (fl- daz threat-z) 0.5)))
-    (define vx (fl- dax ftx))
-    (define vy (fl- day fty))
-    (define vd (flmax 1.0 (flsqrt (fl+ (fl* vx vx) (fl* vy vy)))))
-    (define ux (fl/ vx vd))
-    (define uy (fl/ vy vd))
-    (add-cand! (fl+ dax (fl* 3.5 ux)) (fl+ day (fl* 3.5 uy)) da-hg?))
+    (when (or has-owned-th? (fl<= (dist2d-fl fgx fgy dax day) 10.0))
+      (define daz (rec-z-opt da))
+      (define da-hg? (and daz threat-z (fl>= (fl- daz threat-z) 0.5)))
+      (define vx (fl- dax ftx))
+      (define vy (fl- day fty))
+      (define vd (flmax 1.0 (flsqrt (fl+ (fl* vx vx) (fl* vy vy)))))
+      (define ux (fl/ vx vd))
+      (define uy (fl/ vy vd))
+      (add-cand! (fl+ dax (fl* 3.5 ux)) (fl+ day (fl* 3.5 uy)) da-hg?)))
 
   ;; Pool 3: Safe friendly reinforcement cluster centroid (>= 4 safe allies)
   (define safe-ally-centroid #f)
-  (when (>= (length safe-ally-pts) 4)
+  (when (and has-owned-th? (>= (length safe-ally-pts) 4))
     (define n-sa (exact->inexact (length safe-ally-pts)))
     (define-values (scx scy)
       (for/fold ([sx 0.0] [sy 0.0] #:result (values (fl/ sx n-sa) (fl/ sy n-sa)))
@@ -704,7 +763,7 @@
 
   ;; Pool 4: Mid-map tactical disengage offset (14/18/22t along 65% away + 35% toward safe anchor)
   (define min-group-th-d (min-dist-to-pts fgx fgy th-pts))
-  (when (and (eq? severity 'skirmish) (fl> min-group-th-d 26.0))
+  (when (and has-owned-th? (eq? severity 'skirmish) (fl> min-group-th-d 26.0))
     ;; Pick nearest safe TH (or safe ally centroid if closer)
     (define safe-home-pt
       (let* ([safe-ths (filter (lambda (p) (fl> (min-dist-to-pts (car p) (cdr p) enemy-pts) 14.0)) th-pts)]
@@ -733,17 +792,18 @@
         (add-cand! (fl+ fgx (fl* r rx)) (fl+ fgy (fl* r ry)) #f))))
 
   ;; Pool 5: Interior high-ground / main ramp choke (5.0t from base toward nat, 0 / +/- 0.45 rad)
-  (let* ([dx (fl- fnx fbx)]
-         [dy (fl- fny fby)]
-         [d (flmax 1.0 (flsqrt (fl+ (fl* dx dx) (fl* dy dy))))]
-         [step (flmin 5.0 (fl* 0.35 d))]
-         [ux (fl/ dx d)]
-         [uy (fl/ dy d)]
-         [main-hg? (or (eq? severity 'severe)
-                       (fl<= (min-dist-to-pts fnx fny enemy-pts) 18.0))])
-    (for ([ang (in-list '(0.0 0.45 -0.45))])
-      (define-values (rx ry) (rotate-vec ux uy ang))
-      (add-cand! (fl+ fbx (fl* step rx)) (fl+ fby (fl* step ry)) main-hg?)))
+  (when has-owned-th?
+    (let* ([dx (fl- fnx fbx)]
+           [dy (fl- fny fby)]
+           [d (flmax 1.0 (flsqrt (fl+ (fl* dx dx) (fl* dy dy))))]
+           [step (flmin 5.0 (fl* 0.35 d))]
+           [ux (fl/ dx d)]
+           [uy (fl/ dy d)]
+           [main-hg? (or (eq? severity 'severe)
+                         (fl<= (min-dist-to-pts fnx fny enemy-pts) 18.0))])
+      (for ([ang (in-list '(0.0 0.45 -0.45))])
+        (define-values (rx ry) (rotate-vec ux uy ang))
+        (add-cand! (fl+ fbx (fl* step rx)) (fl+ fby (fl* step ry)) main-hg?))))
 
   (define (score-fallback-cand cx cy raw-cx raw-cy hg?)
     (define clamp-pen (fl* -4.0 (dist2d-fl raw-cx raw-cy cx cy)))
@@ -772,9 +832,11 @@
                                        (fl+ (if hg? 18.0 0.0)
                                             (fl* (fl- travel-w) travel-d))))))))))
 
+  (define init-bx (if has-owned-th? (clamp-fl fbx margin (fl- mw margin)) (car zero-th-pt)))
+  (define init-by (if has-owned-th? (clamp-fl fby margin (fl- mh margin)) (cdr zero-th-pt)))
   (define-values (best-x best-y _best-sc)
-    (for/fold ([bx (clamp-fl fbx margin (fl- mw margin))]
-               [by (clamp-fl fby margin (fl- mh margin))]
+    (for/fold ([bx init-bx]
+               [by init-by]
                [bsc -1e18])
               ([c (in-list cands-rev)])
       (define cx (vector-ref c 0))

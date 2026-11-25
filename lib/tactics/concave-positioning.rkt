@@ -311,6 +311,7 @@
       (define near-fight? (or (= ecnt 0) (fl<= d-e 26.0)))
       (define loc-ally? (or (= ecnt 0) (fl<= d-e 28.0)))
       (define in-approach? (and (> ecnt 0) (fl>= d-e 5.0) (fl<= d-e 18.5)))
+      (define in-ranged-concave? (and (> ecnt 0) (fl>= d-e 2.0) (fl<= d-e 18.5)))
       (define is-pcore? (and (memq canon PROTOSS-CORE-SYMS) #t))
       (define is-zcore? (and (memq canon ZERG-CORE-SYMS) #t))
       (define is-zdur? (and near-fight? (memq canon ZERG-DURABLE-FRONT-SYMS) #t))
@@ -346,7 +347,7 @@
               (if is-zcore? (fl+ zcxa ux) zcxa)
               (if is-zcore? (fl+ zcya uy) zcya)
               (or brk? (and near-fight? (not (not (memq canon ZERG-UPHILL-BREAKER-SYMS)))))
-              (if (and in-approach? (memq canon RANGED-CONCAVE-SYMS)) (cons u rng) rng)
+              (if (and in-ranged-concave? (memq canon RANGED-CONCAVE-SYMS)) (cons u rng) rng)
               (if (and in-approach? (memq canon ZERG-SURROUND-SYMS)) (cons u zsr) zsr))))
 
   (define acx (cond [(> loc-ac 0) (fl/ loc-asx (exact->inexact loc-ac))]
@@ -469,14 +470,14 @@
                   (combat-pos-ctx-z-front-cx pos-ctx)
                   (combat-pos-ctx-z-front-cy pos-ctx)
                   (combat-pos-ctx-z-front-proj pos-ctx)
-                  2.4 5.5 16.0)]
+                  2.2 6.0 16.0)]
          [else
           (values 0 0.0 0.0 0.0 0.0 6.0 16.0)]))
      (cond
        [(or (= fcnt 0)
             (fl< d-tgt min-app-d)
             (fl> d-tgt max-app-d)
-            (fl<= d-tgt (fl+ wr (if (memq sym ZERG-MID-SYMS) 0.5 1.0))))
+            (fl<= d-tgt (fl+ wr 1.0)))
         (values #f #f)]
        [else
         (define fux (combat-pos-ctx-fwd-ux pos-ctx))
@@ -484,15 +485,15 @@
         (define pux (combat-pos-ctx-perp-ux pos-ctx))
         (define puy (combat-pos-ctx-perp-uy pos-ctx))
         (define u-proj (fl+ (fl* ux fux) (fl* uy fuy)))
-        ;; Never hold an anti-air unit behind ground-only frontliners when enemy air attackers are within 14t!
+        ;; Never hold an anti-air unit behind ground-only frontliners when enemy air attackers are within 16t!
         (define enemy-air-near?
           (and (memq sym '(hydralisk stalker marine sentry))
                (for/or ([ap (in-list (combat-pos-ctx-enemy-air-pts pos-ctx))])
-                 (fl<= (dist2d-fl ux uy (car ap) (cdr ap)) 14.0))))
-        ;; Only hold back when genuinely role-inverted (level with or ahead of the frontline centroid!)
+                 (fl<= (dist2d-fl ux uy (car ap) (cdr ap)) 16.0))))
+        ;; Only hold back when genuinely role-inverted (at or ahead of the frontline centroid!)
         ;; AND frontline is within 10.5t (part of the same advancing group!)
         (if (and (not enemy-air-near?)
-                 (fl>= u-proj (fl- fproj 0.5))
+                 (fl>= u-proj (fl- fproj 0.25))
                  (fl<= (dist2d-fl ux uy fcx fcy) 10.5))
             (let* ([lat-off (clamp-fl (fl+ (fl* (fl- ux fcx) pux)
                                            (fl* (fl- uy fcy) puy))
@@ -788,7 +789,60 @@
             (and (pair? spts)
                  (for/or ([sp (in-list spts)])
                    (fl<= (dist2d-fl ux uy (car sp) (cdr sp)) 18.0)))))
+        (define w-cd
+          (fl->safe (or (and (hash? u)
+                             (or (hash-ref u 'weapon-cooldown #f)
+                                 (hash-ref u 'weapon_cooldown #f)))
+                        0.0)
+                    0.0))
+        (define on-cd? (fl> w-cd 0.08))
+        (define idx (car slot))
+        (define tot (cdr slot))
+        (define fux (combat-pos-ctx-fwd-ux pos-ctx))
+        (define fuy (combat-pos-ctx-fwd-uy pos-ctx))
+        (define pux (combat-pos-ctx-perp-ux pos-ctx))
+        (define puy (combat-pos-ctx-perp-uy pos-ctx))
+        ;; Normalized slot `t` in `[-1.0, +1.0]`
+        (define t (if (> tot 1)
+                      (fl- (fl* 2.0 (fl/ (exact->inexact idx) (exact->inexact (- tot 1)))) 1.0)
+                      0.0))
+        ;; Wider anti-splash spread (`3.0..8.5t`) vs natural max-DPS concave (`2.2..6.0t`)
+        (define half-span
+          (if splash-near?
+              (clamp-fl (fl* 1.20 (exact->inexact (- tot 1))) 3.0 8.5)
+              (clamp-fl (fl* 0.82 (exact->inexact (- tot 1))) 2.2 6.0)))
+        (define lat-target (fl* t half-span))
+        (define cur-lat (fl+ (fl* (fl- ux ecx) pux) (fl* (fl- uy ecy) puy)))
         (cond
+          ;; Loop 76 P2: Mid-fight weapon-cooldown lateral concave stepping (`w-cd > 0.08` ONLY!).
+          ;; Weapon-ready units (`w-cd <= 0.08`) NEVER enter this branch (zero DPS loss!).
+          [(and on-cd? (fl<= d-tgt (fl+ wr 1.0)))
+           (define lat-err (fl- lat-target cur-lat))
+           (cond
+             [(or (fl< d-ec 2.0)
+                  (fl> d-ec 16.5)
+                  (fl<= (flabs lat-err) 0.9))
+              (values #f #f)]
+             [else
+              ;; Project lateral step onto a circular firing arc of radius `r-arc <= wr - 0.35`
+              ;; around `(ftx, fty)` so the unit stays strictly in weapon range on its next shot!
+              (define max-lat-step (if splash-near? 1.9 1.5))
+              (define r-arc (flmin d-tgt (flmax 2.5 (fl- wr 0.35))))
+              (define max-arc-lat (fl* 0.85 r-arc))
+              (define cur-lat-t (fl+ (fl* (fl- ux ftx) pux) (fl* (fl- uy fty) puy)))
+              (define next-lat-t
+                (clamp-fl (fl+ cur-lat-t (clamp-fl lat-err (fl- max-lat-step) max-lat-step))
+                          (fl- max-arc-lat)
+                          max-arc-lat))
+              (define rad-depth
+                (flsqrt (flmax 0.25 (fl- (fl* r-arc r-arc) (fl* next-lat-t next-lat-t)))))
+              (define ax
+                (clamp-fl (fl+ (fl- ftx (fl* rad-depth fux)) (fl* next-lat-t pux))
+                          4.0 (fl- (combat-pos-ctx-map-w pos-ctx) 4.0)))
+              (define ay
+                (clamp-fl (fl+ (fl- fty (fl* rad-depth fuy)) (fl* next-lat-t puy))
+                          4.0 (fl- (combat-pos-ctx-map-h pos-ctx) 4.0)))
+              (values ax ay)])]
           [(or (fl< d-ec 6.5)
                (fl> d-ec 16.5)
                (fl<= d-tgt (fl+ wr 1.0))
@@ -797,23 +851,6 @@
                (and (eq? (rec-canon-sym u) 'roach) (not splash-near?)))
            (values #f #f)]
           [else
-           (define idx (car slot))
-           (define tot (cdr slot))
-           (define fux (combat-pos-ctx-fwd-ux pos-ctx))
-           (define fuy (combat-pos-ctx-fwd-uy pos-ctx))
-           (define pux (combat-pos-ctx-perp-ux pos-ctx))
-           (define puy (combat-pos-ctx-perp-uy pos-ctx))
-           ;; Normalized slot `t` in `[-1.0, +1.0]`
-           (define t (if (> tot 1)
-                         (fl- (fl* 2.0 (fl/ (exact->inexact idx) (exact->inexact (- tot 1)))) 1.0)
-                         0.0))
-           ;; Wider anti-splash spread (`3.0..8.5t`) vs natural max-DPS concave (`2.2..6.0t`)
-           (define half-span
-             (if splash-near?
-                 (clamp-fl (fl* 1.20 (exact->inexact (- tot 1))) 3.0 8.5)
-                 (clamp-fl (fl* 0.82 (exact->inexact (- tot 1))) 2.2 6.0)))
-           (define lat-target (fl* t half-span))
-           (define cur-lat (fl+ (fl* (fl- ux ecx) pux) (fl* (fl- uy ecy) puy)))
            (if (fl< (flabs (fl- cur-lat lat-target)) 1.0)
                (values #f #f)
                (let* ([standoff (flmax (fl+ wr 0.25) (fl- d-ec 2.0))]

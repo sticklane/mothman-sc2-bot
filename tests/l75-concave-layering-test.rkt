@@ -89,24 +89,29 @@
               (= (length (combat-pos-ctx-enemy-air-pts ctx-cair)) (length combat-air))
               (format "len=~a expected=~a" (length (combat-pos-ctx-enemy-air-pts ctx-cair)) (length combat-air)))
 
-  ;; (d) Banshee / Mutalisk within <= 14.0t (12.0t) exempts Stalker from hold (`#f`)
+  ;; (d) Banshee / Mutalisk within <= 16.0t (12.0t) exempts Stalker from hold (`#f`)
   (define ctx-ban-12 (build-combat-positioning-context (list z1 s-inv)
                                                        (list e-mar (mk-u 2040 'banshee 85.0 50.0 #:flying #t))))
   (define ctx-muta-12 (build-combat-positioning-context (list z1 s-inv)
                                                         (list e-mar (mk-u 2041 'mutalisk 85.0 50.0 #:flying #t))))
   (define-values (bx12 _by12) (compute-front-to-back-advance-pt ctx-ban-12 s-inv 84.0 50.0 6.0))
   (define-values (mx12 _my12) (compute-front-to-back-advance-pt ctx-muta-12 s-inv 84.0 50.0 6.0))
-  (check-true "l75-c1-banshee-or-mutalisk-within-14t-disables-aa-hold"
+  (check-true "l75-c1-banshee-or-mutalisk-within-16t-disables-aa-hold"
               (and (not bx12) (not mx12))
               (format "bx12=~a mx12=~a" bx12 mx12))
 
-  ;; (e) Banshee at 15.0t (> 14.0t tightened threshold) STILL allows ground role screening!
+  ;; (e) Banshee at 17.0t (> 16.0t restored threshold) STILL allows ground role screening;
+  ;;     Banshee at 15.0t (<= 16.0t) lets Stalker step up for AA!
   (define ctx-ban-15 (build-combat-positioning-context (list z1 s-inv)
                                                        (list e-mar (mk-u 2042 'banshee 88.0 50.0 #:flying #t))))
+  (define ctx-ban-17 (build-combat-positioning-context (list z1 s-inv)
+                                                       (list e-mar (mk-u 2043 'banshee 90.0 50.0 #:flying #t))))
   (define-values (bx15 _by15) (compute-front-to-back-advance-pt ctx-ban-15 s-inv 84.0 50.0 6.0))
-  (check-true "l75-c1-banshee-beyond-14t-allows-ground-screening"
-              (and bx15 (<= (abs (- bx15 68.8)) 0.15))
-              (format "bx15=~a" bx15)))
+  (define-values (bx17 _by17) (compute-front-to-back-advance-pt ctx-ban-17 s-inv 84.0 50.0 6.0))
+  (check-true "l75-c1-banshee-beyond-16t-allows-ground-screening"
+              (and (not bx15)
+                   bx17 (<= (abs (- bx17 68.8)) 0.15))
+              (format "bx15=~a bx17=~a" bx15 bx17)))
 
 ;; -----------------------------------------------------------------------------
 ;; 2. Durable Zerg Frontline Anchor (`roach`/`ultralisk`/`baneling` >= 2)
@@ -122,7 +127,7 @@
   (define rav-inv   (mk-u 3202 'ravager   74.0 50.0 #:hp 120.0))
 
   ;; (a) 4 Roaches at x=70 + 12 fast flanking Zerglings at x=80 -> `z-front-cx` anchored at 70.0 (Roaches!)
-  ;;     and Hydralisk at x=72 (d=12t) holds cleanly behind Roaches (`hx < 68.0`, ~67.6)!
+  ;;     and Hydralisk at x=72 (d=12t) holds cleanly behind Roaches (`hx < 68.0`, ~67.8)!
   (define ctx-dur (build-combat-positioning-context (append roaches-4 flank-lings-12 (list hydra-inv rav-inv))
                                                     e-marines))
   (define-values (hx hy) (compute-front-to-back-advance-pt ctx-dur hydra-inv 84.0 50.0 6.0))
@@ -130,7 +135,7 @@
   (check-true "l75-c2-zerg-durable-roach-anchor-ignores-flanking-zerglings"
               (and (= (combat-pos-ctx-z-front-cnt ctx-dur) 4)
                    (<= (abs (- (combat-pos-ctx-z-front-cx ctx-dur) 70.0)) 0.05)
-                   hx hy (< hx 68.0) (<= (abs (- hx 67.6)) 0.20)
+                   hx hy (< hx 68.0) (<= (abs (- hx 67.8)) 0.20)
                    rx (< rx 68.0))
               (format "zfc=~a zfcx=~a h=(~a,~a) rx=~a"
                       (combat-pos-ctx-z-front-cnt ctx-dur)
@@ -170,46 +175,46 @@
                       (combat-pos-ctx-z-front-cnt ctx-one-roach))))
 
 ;; -----------------------------------------------------------------------------
-;; 3. Zerg Mid-Screen Calibration, Zero Shot Cancellation & Protoss 5d2 Preservation
+;; 3. Restored Non-Freezing Screening Guardrails (`2.2/6.0/16.0`, `wr+1.0`, `fproj-0.25`)
 ;; -----------------------------------------------------------------------------
 (let ()
   (define e-mar (list (mk-u 4901 'marine 84.0 50.0 #:hp 45.0)))
   (define r-front (list (mk-u 4001 'roach 70.0 49.5 #:hp 145.0)
                         (mk-u 4002 'roach 70.0 50.5 #:hp 145.0)))
 
-  ;; (a) Zero in-range shot cancellation: Hydralisk (`wr=6.0`) at d=5.8t and d=6.5t (`<= wr + 0.5`) -> `#f`!
+  ;; (a) Zero in-range shot cancellation: Hydralisk (`wr=6.0`) at d=5.8t and d=6.9t (`<= wr + 1.0`) -> `#f`!
   (define h-inrange-58 (mk-u 4101 'hydralisk 78.2 50.0 #:hp 90.0)) ;; d=5.8t
-  (define h-inrange-65 (mk-u 4102 'hydralisk 77.5 50.0 #:hp 90.0)) ;; d=6.5t
-  (define ctx-z (build-combat-positioning-context (append r-front (list h-inrange-58 h-inrange-65)) e-mar))
+  (define h-inrange-69 (mk-u 4102 'hydralisk 77.1 50.0 #:hp 90.0)) ;; d=6.9t
+  (define ctx-z (build-combat-positioning-context (append r-front (list h-inrange-58 h-inrange-69)) e-mar))
   (define-values (x58 _y58) (compute-front-to-back-advance-pt ctx-z h-inrange-58 84.0 50.0 6.0))
-  (define-values (x65 _y65) (compute-front-to-back-advance-pt ctx-z h-inrange-65 84.0 50.0 6.0))
-  (check-true "l75-c3-hydra-never-cancels-in-range-shot-le-wr-plus-0.5"
-              (and (not x58) (not x65))
-              (format "x58=~a x65=~a" x58 x65))
+  (define-values (x69 _y69) (compute-front-to-back-advance-pt ctx-z h-inrange-69 84.0 50.0 6.0))
+  (check-true "l75-c3-hydra-never-cancels-in-range-shot-le-wr-plus-1.0"
+              (and (not x58) (not x69))
+              (format "x58=~a x69=~a" x58 x69))
 
-  ;; (b) Unupgraded Hydralisk (`wr=5.0`) at d=5.8t (`> 5.5` and `>= 5.5` min-app-d) holds behind Roaches;
-  ;;     at d=5.4t (`< 5.5`) returns `#f`!
+  ;; (b) Unupgraded Hydralisk (`wr=5.0`) at d=6.5t (`> wr + 1.0` & `>= 6.0` min-app-d) holds behind Roaches (`2.2t`);
+  ;;     at d=5.8t (`< 6.0` & `<= wr + 1.0`) returns `#f` (never freezes entering range)!
   (define r-close (list (mk-u 4003 'roach 76.0 49.5 #:hp 145.0)
                         (mk-u 4004 'roach 76.0 50.5 #:hp 145.0)))
-  (define h-wr5-58 (mk-u 4103 'hydralisk 78.2 50.0 #:hp 90.0)) ;; d=5.8t > 5.5
-  (define h-wr5-54 (mk-u 4104 'hydralisk 78.6 50.0 #:hp 90.0)) ;; d=5.4t < 5.5
-  (define ctx-z5 (build-combat-positioning-context (append r-close (list h-wr5-58 h-wr5-54)) e-mar))
+  (define h-wr5-65 (mk-u 4103 'hydralisk 77.5 50.0 #:hp 90.0)) ;; d=6.5t > 6.0
+  (define h-wr5-58 (mk-u 4104 'hydralisk 78.2 50.0 #:hp 90.0)) ;; d=5.8t < 6.0
+  (define ctx-z5 (build-combat-positioning-context (append r-close (list h-wr5-65 h-wr5-58)) e-mar))
+  (define-values (xw65 _yw65) (compute-front-to-back-advance-pt ctx-z5 h-wr5-65 84.0 50.0 5.0))
   (define-values (xw58 _yw58) (compute-front-to-back-advance-pt ctx-z5 h-wr5-58 84.0 50.0 5.0))
-  (define-values (xw54 _yw54) (compute-front-to-back-advance-pt ctx-z5 h-wr5-54 84.0 50.0 5.0))
-  (check-true "l75-c3-hydra-wr5-screens-at-5.8t-and-skips-at-5.4t"
-              (and xw58 (<= (abs (- xw58 (- 76.0 2.4))) 0.15)
-                   (not xw54))
-              (format "xw58=~a xw54=~a" xw58 xw54))
+  (check-true "l75-c3-hydra-wr5-screens-at-6.5t-and-skips-at-5.8t"
+              (and xw65 (<= (abs (- xw65 (- 76.0 2.2))) 0.15)
+                   (not xw58))
+              (format "xw65=~a xw58=~a" xw65 xw58))
 
-  ;; (c) Tightened inversion threshold (`u-proj >= fproj - 0.5`):
-  ;;     Hydra at x=69.6 (`fproj - 0.4`) smoothly tucks behind; Hydra at x=69.2 (`fproj - 0.8`) is NOT held!
-  (define h-level  (mk-u 4105 'hydralisk 69.6 50.0 #:hp 90.0))
-  (define h-behind (mk-u 4106 'hydralisk 69.2 50.0 #:hp 90.0))
+  ;; (c) Restored inversion threshold (`u-proj >= fproj - 0.25`):
+  ;;     Hydra at x=69.8 (`fproj - 0.2`) tucks behind (`67.8`); Hydra at x=69.6 (`fproj - 0.4`) is NOT frozen!
+  (define h-level  (mk-u 4105 'hydralisk 69.8 50.0 #:hp 90.0))
+  (define h-behind (mk-u 4106 'hydralisk 69.6 50.0 #:hp 90.0))
   (define ctx-lvl (build-combat-positioning-context (append r-front (list h-level h-behind)) e-mar))
   (define-values (xlvl _ylvl) (compute-front-to-back-advance-pt ctx-lvl h-level 84.0 50.0 6.0))
   (define-values (xbhd _ybhd) (compute-front-to-back-advance-pt ctx-lvl h-behind 84.0 50.0 6.0))
-  (check-true "l75-c3-inversion-threshold-fproj-minus-0.5"
-              (and xlvl (<= (abs (- xlvl 67.6)) 0.15)
+  (check-true "l75-c3-inversion-threshold-restored-fproj-minus-0.25"
+              (and xlvl (<= (abs (- xlvl 67.8)) 0.15)
                    (not xbhd))
               (format "xlvl=~a xbhd=~a" xlvl xbhd))
 

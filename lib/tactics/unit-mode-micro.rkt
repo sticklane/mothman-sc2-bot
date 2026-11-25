@@ -234,6 +234,7 @@
   plan-viking-modes
   evaluate-cyclone-micro
   plan-cyclone-micro
+  compute-tether-kite-point
   plan-marauder-concussive-targets
 
   ;; Wave 1C Counter-Unit-Mode Micro (Cyclone Lock-On Break, Hellbat Kite, Viking/Thor Counter)
@@ -1994,8 +1995,13 @@
       [else 150.0]))
   (+ base (* -0.05 ehp) (* -1.5 dist)))
 
-(: compute-tether-orbit-point (-> Float Float Float Float Float Float point2d))
-(define (compute-tether-orbit-point cx cy tx ty home-x home-y)
+(: compute-tether-orbit-point
+   (->* (Float Float Float Float Float Float)
+        (#:map-w Float #:map-h Float)
+        point2d))
+(define (compute-tether-orbit-point cx cy tx ty home-x home-y
+                                    #:map-w [map-w 160.0]
+                                    #:map-h [map-h 160.0])
   (define rx (- cx tx))
   (define ry (- cy ty))
   (define r (dist-2d cx cy tx ty))
@@ -2003,19 +2009,34 @@
     (if (> r 1e-4)
         (values (/ rx r) (/ ry r))
         (values 1.0 0.0)))
-  ;; Blend tangent orbit with slight home-base bias to stay away from enemy army core
+  ;; Blend tangent orbit with wall-clearance preference (avoid corner-trapping!) and home-base bias
   (define tang1-x (+ tx (* CYCLONE-TETHER-TARGET-KITE (- (* 0.85 ux) (* 0.52 uy)))))
   (define tang1-y (+ ty (* CYCLONE-TETHER-TARGET-KITE (+ (* 0.52 ux) (* 0.85 uy)))))
   (define tang2-x (+ tx (* CYCLONE-TETHER-TARGET-KITE (+ (* 0.85 ux) (* 0.52 uy)))))
   (define tang2-y (+ ty (* CYCLONE-TETHER-TARGET-KITE (- (* 0.85 uy) (* 0.52 ux)))))
+  (define clr1 (min (min tang1-x (- map-w tang1-x)) (min tang1-y (- map-h tang1-y))))
+  (define clr2 (min (min tang2-x (- map-w tang2-x)) (min tang2-y (- map-h tang2-y))))
   (define d1 (dist-2d tang1-x tang1-y home-x home-y))
   (define d2 (dist-2d tang2-x tang2-y home-x home-y))
-  (if (<= d1 d2)
-      (clamp-playable-pt tang1-x tang1-y)
-      (clamp-playable-pt tang2-x tang2-y)))
+  (cond
+    [(and (< clr1 12.0) (> clr2 (+ clr1 1.0)))
+     (clamp-playable-pt tang2-x tang2-y)]
+    [(and (< clr2 12.0) (> clr1 (+ clr2 1.0)))
+     (clamp-playable-pt tang1-x tang1-y)]
+    [(<= d1 d2)
+     (clamp-playable-pt tang1-x tang1-y)]
+    [else
+     (clamp-playable-pt tang2-x tang2-y)]))
 
-(: compute-tether-kite-point (-> Float Float Float Float Float Float Float point2d))
-(define (compute-tether-kite-point cx cy tx ty home-x home-y desired-radius)
+;; Loop 76 P3: Wall-proximity and tether-max tangential orbit blending so Cyclones/Hellions
+;; never back into map corners or snap Lock-On past 15.0t while kiting!
+(: compute-tether-kite-point
+   (->* (Float Float Float Float Float Float Float)
+        (#:map-w Float #:map-h Float)
+        point2d))
+(define (compute-tether-kite-point cx cy tx ty home-x home-y desired-radius
+                                   #:map-w [map-w 160.0]
+                                   #:map-h [map-h 160.0])
   (define away-x (- cx tx))
   (define away-y (- cy ty))
   (define d (dist-2d cx cy tx ty))
@@ -2024,18 +2045,72 @@
         (values (/ away-x d) (/ away-y d))
         (let ([hd (max 1e-4 (dist-2d tx ty home-x home-y))])
           (values (/ (- home-x tx) hd) (/ (- home-y ty) hd)))))
-  (define hx (- home-x cx))
-  (define hy (- home-y cy))
-  (define hd (dist-2d cx cy home-x home-y))
-  (define-values (bx by)
-    (if (> hd 1e-4)
-        (values (+ (* 0.70 ax) (* 0.30 (/ hx hd)))
-                (+ (* 0.70 ay) (* 0.30 (/ hy hd))))
-        (values ax ay)))
-  (define blen (max 1e-4 (dist-2d 0.0 0.0 bx by)))
-  (define step (max 2.5 (- desired-radius d)))
-  (clamp-playable-pt (+ cx (* step (/ bx blen)))
-                     (+ cy (* step (/ by blen)))))
+  (define near-wall?
+    (or (< cx 14.0) (> cx (- map-w 14.0))
+        (< cy 14.0) (> cy (- map-h 14.0))))
+  (define near-tether-max?
+    (and (<= desired-radius 12.5)
+         (>= d (- CYCLONE-TETHER-ORBIT-MAX 1.0))))
+  (cond
+    [(or near-wall? near-tether-max?)
+     (define mcx (* 0.5 map-w))
+     (define mcy (* 0.5 map-h))
+     (define to-cx (- mcx cx))
+     (define to-cy (- mcy cy))
+     (define t1x (- ay))
+     (define t1y ax)
+     (define t2x ay)
+     (define t2y (- ax))
+     (define dot1 (+ (* t1x to-cx) (* t1y to-cy)))
+     (define dot2 (+ (* t2x to-cx) (* t2y to-cy)))
+     (define-values (px py)
+       (if (>= dot1 dot2)
+           (values t1x t1y)
+           (values t2x t2y)))
+     (cond
+       [(and (<= desired-radius 12.5) (>= d 12.5))
+        ;; Pure tangential orbit projected onto target-r <= 12.5t so Lock-On never breaks past 15.0t!
+        (define step 3.0)
+        (define raw-x (+ cx (* step px)))
+        (define raw-y (+ cy (* step py)))
+        (define new-d (dist-2d raw-x raw-y tx ty))
+        (define target-r (min 12.5 (max 10.0 (min d desired-radius))))
+        (define-values (fx fy)
+          (if (> new-d target-r)
+              (let ([scale (/ target-r (max 1e-4 new-d))])
+                (values (+ tx (* (- raw-x tx) scale))
+                        (+ ty (* (- raw-y ty) scale))))
+              (values raw-x raw-y)))
+        (clamp-playable-pt fx fy)]
+       [else
+        ;; Blend 0.30 radial-away + 0.70 tangent-toward-center to slide smoothly along arena borders
+        (define bx (+ (* 0.30 ax) (* 0.70 px)))
+        (define by (+ (* 0.30 ay) (* 0.70 py)))
+        (define blen (max 1e-4 (dist-2d 0.0 0.0 bx by)))
+        (define step (max 2.5 (- desired-radius d)))
+        (define raw-x (+ cx (* step (/ bx blen))))
+        (define raw-y (+ cy (* step (/ by blen))))
+        (define new-d (dist-2d raw-x raw-y tx ty))
+        (define-values (fx fy)
+          (if (and (<= desired-radius 12.5) (> new-d 13.5))
+              (let ([scale (/ 13.5 (max 1e-4 new-d))])
+                (values (+ tx (* (- raw-x tx) scale))
+                        (+ ty (* (- raw-y ty) scale))))
+              (values raw-x raw-y)))
+        (clamp-playable-pt fx fy)])]
+    [else
+     (define hx (- home-x cx))
+     (define hy (- home-y cy))
+     (define hd (dist-2d cx cy home-x home-y))
+     (define-values (bx by)
+       (if (> hd 1e-4)
+           (values (+ (* 0.70 ax) (* 0.30 (/ hx hd)))
+                   (+ (* 0.70 ay) (* 0.30 (/ hy hd))))
+           (values ax ay)))
+     (define blen (max 1e-4 (dist-2d 0.0 0.0 bx by)))
+     (define step (max 2.5 (- desired-radius d)))
+     (clamp-playable-pt (+ cx (* step (/ bx blen)))
+                        (+ cy (* step (/ by blen))))]))
 
 ;; Evaluates a Cyclone (`'cyclone` 692) for Lock On (`2350`) or [8.5..13.5]-tile tether kiting.
 ;; Never issues a manual Lock-On cancel (`0%` cancel rate per `#115`).
@@ -2095,8 +2170,12 @@
             (if (< ed bd) (values e ed) (values best bd))))
         (cond
           [(> d CYCLONE-TETHER-ORBIT-MAX)
-           (define step-pt (step-toward-2d cx cy-y lx ly (max 0.5 (- d CYCLONE-TETHER-MAX-RECLOSE))))
-           (define cpt (clamp-playable-pt (point2d-x step-pt) (point2d-y step-pt)))
+           (define near-wall-rc? (or (< cx 14.0) (> cx 146.0) (< cy-y 14.0) (> cy-y 146.0)))
+           (define cpt
+             (if near-wall-rc?
+                 (compute-tether-kite-point cx cy-y lx ly fhx fhy CYCLONE-TETHER-TARGET-KITE)
+                 (let ([step-pt (step-toward-2d cx cy-y lx ly (max 0.5 (- d CYCLONE-TETHER-MAX-RECLOSE)))])
+                   (clamp-playable-pt (point2d-x step-pt) (point2d-y step-pt)))))
            (unit-mode-directive tag ut 'move #f 0 locked-tag
                                 (point2d-x cpt) (point2d-y cpt)
                                 'cyclone-tether-reclose)]
