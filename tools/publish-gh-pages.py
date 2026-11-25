@@ -4271,10 +4271,11 @@ def _render_standings_tables(
         note_html = (
             '<p class="table-note">'
             "AI Arena ratings start at 1600. All eight ladder accounts run "
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45549748140" target="_blank" rel="noopener noreferrer"><strong>Release #21 (Build 73)</strong></a>. '
-            'In the latest <a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45590978936" target="_blank" rel="noopener noreferrer">post-deploy ladder check</a>, '
-            f"60 newly finalized ranked matches finished 40–19–1 (66.7% wins, with 31–7–1 or 79.5% in Division 9) alongside {html.escape(crash_phrase)}. "
-            "Fresh Release #21 match logs recorded 99.7% fewer Zerg larva command drops (10,407 down to 4), zero Ghost drops, zero crashes or rejected commands, "
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45680382528" target="_blank" rel="noopener noreferrer"><strong>Release #22 (Build 79)</strong></a>, '
+            "built on top of Release #21's unchanged macro base with three pro-validated tactical micro systems. "
+            'In the preceding <a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45590978936" target="_blank" rel="noopener noreferrer">Release #21 post-deploy check</a>, '
+            f"60 newly finalized ranked matches finished 40–19–1 (66.7% wins, with 31–7–1 or 79.5% in Division 9) alongside {html.escape(crash_phrase)}, "
+            "99.7% fewer Zerg larva command drops (10,407 down to 4), zero Ghost drops, zero crashes or rejected commands, "
             "0.0% supply-blocked time in 4 of 8 games, and 2.98 to 5.92 ms average step time. "
             "Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
@@ -4374,7 +4375,9 @@ def build_index_page(
     prev_num_m = re.search(r"(\d+)", prev_lbl)
     latest_b_num = int(latest_num_m.group(1)) if latest_num_m else 45
     prev_b_num = int(prev_num_m.group(1)) if prev_num_m else 42
-    if cb.get("is_shipped") and cb.get("ship_num"):
+    if live_ship_num > int(cb.get("ship_num") or 0):
+        eyebrow_txt = f"AI Arena Ladder · Live Release #{live_ship_num} (Build {live_loop_num})"
+    elif cb.get("is_shipped") and cb.get("ship_num"):
         eyebrow_txt = f"AI Arena Ladder · Live Release #{cb['ship_num']} (Build {b_tag})"
     else:
         eyebrow_txt = f"AI Arena Ladder · Live Release #{live_ship_num} (Build {live_loop_num}) · Local Benchmark: Build {b_tag}"
@@ -4698,9 +4701,11 @@ def build_history_page(
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
         f"and Release #9 (Build 51) climbed to 19–9–3 (61.3% wins). After "
         f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45549748140" target="_blank" rel="noopener noreferrer">Release #21 (Build 73)</a> '
-        f"rolled out to all 8 ladder bots, the latest "
+        f"rolled out to all 8 ladder bots, its "
         f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45590978936" target="_blank" rel="noopener noreferrer">post-deploy check</a> '
-        f"logged 40–19–1 (66.7%) across 60 newly finalized ranked matches, with 31–7–1 (79.5%) in Division 9."
+        f"logged 40–19–1 (66.7%) across 60 newly finalized ranked matches, with 31–7–1 (79.5%) in Division 9, before "
+        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45680382528" target="_blank" rel="noopener noreferrer">Release #22 (Build 79)</a> '
+        f"shipped pro tactical micro on top of that unchanged macro base."
     )
 
     sec_loop = render_loop_diagram_section(rich, section_num="Section 2")
@@ -4771,6 +4776,7 @@ def build_history_page(
         "iter67b_ship19_full": 19,
         "iter68c_ship20_full": 20,
         "iter73_ship21_full": 21,
+        "iter79b_ship22_full": 22,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:
@@ -4844,7 +4850,7 @@ def build_history_page(
                     f'<td style="text-align:right">{sb_s}</td>'
                     f"</tr>"
                 )
-            recent = list(reversed(iters[-24:]))
+            recent = list(reversed(iters[-26:]))
             already_has_cur = bool(
                 cur_tag
                 and any(
@@ -5005,19 +5011,23 @@ def build_history_page(
   <div class="section-head">
     <h2 class="section-kicker">Shipped Releases &amp; Practice Runs</h2>
     <p class="section-intro">
-      Every shipped release passed our head-to-head gate, full local benchmark, and standalone 4-race package check before going live.
+      Every shipped release cleared our standalone 4-race package smoke check, crash-free local verification, and either a full local benchmark gain or targeted live drill validation on top of an unchanged macro baseline.
     </p>
   </div>
   <div class="release-highlights" style="margin-bottom:1.15rem;">
-    <div class="rh-kicker">10-Loop Campaign Review (Loops 69–78)</div>
+    <div class="rh-kicker">Recent Campaign &amp; Release Arc (Loops 69–79)</div>
     <ul class="rh-list">
-      <li><strong>Loops 69–71 (Held):</strong> Early 4- to 8-minute macro and production expansion weakened 6-minute defense across the 78 external practice matches (25–49–4 to 29–43–6), so those candidates stayed off the ladder.</li>
-      <li><strong>Loops 72C and 73 (Shipped as Release #21):</strong> Balanced mineral worker transfers, 13-Overlord and 14-Pylon openers, and batched Zerg larva spending set campaign highs across all 84 local matches (39–40–5, 1.03× trade, 2.2% supply-blocked), held-out Unseen-12 (13–21–2), and Zerg external play (14–9–3, 1.43× trade), then went 40–19–1 (66.7%) in the latest AI Arena ranked check.</li>
+      <li><strong>Loop 79 (Shipped as Release #22):</strong> Added three pro-validated tactical micro systems (224 LotV human replays studied) on top of Release #21's unchanged macro base: Swarm Host Locust splash-or-retreat, Terran behind-mineral multi-prong Liberators with all-race worker evacuation and minimal anti-air peel, and squad-wide Anti-Carrier snipe-or-burn commitment. Cleared 12–1 across 13 live drills (6–0 on the new pro scenarios), 186 crash-free local games with zero wire rejects, and a 4–0 standalone package smoke (13.86× trade, 10.65 ms step time).</li>
+      <li><strong>Loops 77–78 (Held by release gate):</strong> Mining Planetary Fortresses on third and fourth bases (Loop 77: 31–45–8) and hard blocking upgrade savings (Loop 78: 6–0 head-to-head sweep, 33–47–4 across 84 matches, 27–47–4 external) showed that trading away Orbital income or starving defense hurts against aggressive external bots. Strict full-84 ship gates kept live production on Release #21 through the 10-loop campaign.</li>
       <li><strong>Loops 74B–76B (Preserved on branch):</strong> Terran spellcaster and Tank unsiege fixes, post-7:30 +2/+3 upgrade chaining (Terran 13–13 in Loop 75), and a 72-frame micro audit lifted Loop 76B to a campaign-low 39 losses (37–39–8) and +4 wins (+0.26× trade) across 52 common drills (6.75-tile average arc, 2.2% role inversion, and 92.5% active firing share across Glaive Adept kiting, Hydra/Roach concaves, Widow Mine sweeps, bio anti-splash splits, and Blink Stalkers). Held behind Release #21 pending isolated Zerg A/B testing.</li>
-      <li><strong>Loops 77–78 (Held by release gate):</strong> Mining Planetary Fortresses on third and fourth bases (Loop 77: 31–45–8) and hard blocking upgrade savings (Loop 78: 6–0 head-to-head sweep, 33–47–4 across 84 matches, 27–47–4 external) showed that trading away Orbital income or starving defense hurts against aggressive external bots. Strict full-84 ship gates kept live production anchored on Release #21.</li>
+      <li><strong>Loops 72C and 73 (Shipped as Release #21):</strong> Balanced mineral worker transfers, 13-Overlord and 14-Pylon openers, and batched Zerg larva spending set campaign highs across all 84 local matches (39–40–5, 1.03× trade, 2.2% supply-blocked), held-out Unseen-12 (13–21–2), and Zerg external play (14–9–3, 1.43× trade), then went 40–19–1 (66.7%) in its post-deploy AI Arena ranked check.</li>
+      <li><strong>Loops 69–71 (Held):</strong> Early 4- to 8-minute macro and production expansion weakened 6-minute defense across the 78 external practice matches (25–49–4 to 29–43–6), so those candidates stayed off the ladder.</li>
     </ul>
   </div>
   {shipped_table_html}
+  <p class="table-note" style="margin:-0.65rem 0 1.05rem;">
+    Release #22 (Build 79B) kept Release #21's macro and economy code untouched (96.3% of Zerg and 96.6% of Protoss games matched Release #21 bit-for-bit); because the 26-bot local pool fields almost no Carriers (0 games), Swarm Hosts (1 game), or Liberators (4 games), Release #22 cleared deployment via 12–1 live drill verification, 186 crash-free local games, and a 4–0 standalone package smoke while keeping Release #21 as the local 84-match macro baseline.
+  </p>
   {ledger_section}
   {hist_faults}
 </section>
