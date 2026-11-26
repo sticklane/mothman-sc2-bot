@@ -33,12 +33,26 @@
           3,
           5.5,
           0.0
+        ],
+        [
+          "medivac",
+          1,
+          6.2,
+          0.0
         ]
       ],
       "max_loops": 960,
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": true
+      "fast_core": true,
+      "p1_upgrades": [
+        "Charge"
+      ],
+      "p2_upgrades": [
+        "Stim",
+        "CombatShield",
+        "ConcussiveShells"
+      ]
     },
     {
       "id": "sc2-real-p02-stalker-immortal-vs-roach-ravager",
@@ -76,7 +90,10 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": false
+      "fast_core": false,
+      "p2_upgrades": [
+        "GlialReconstitution"
+      ]
     },
     {
       "id": "sc2-real-p03-outnumbered-stalkers-vs-lings",
@@ -162,6 +179,14 @@
       "expected_abilities": [
         76,
         1526
+      ],
+      "p1_upgrades": [
+        "ThermalLance"
+      ],
+      "p2_upgrades": [
+        "Stim",
+        "CombatShield",
+        "ConcussiveShells"
       ]
     },
     {
@@ -219,6 +244,11 @@
       "expected_abilities": [
         1036,
         140
+      ],
+      "p2_upgrades": [
+        "MetabolicBoost",
+        "MuscularAugments",
+        "GroovedSpines"
       ]
     },
     {
@@ -301,7 +331,10 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "stalker-blink",
-      "fast_core": false
+      "fast_core": false,
+      "p1_upgrades": [
+        "Blink"
+      ]
     },
     {
       "id": "sc2-real-p08-stalker-phoenix-zealot-vs-bio-tank-cyclone",
@@ -395,7 +428,8 @@
       ],
       "p2_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "description": "Pro-DB PvT: 2 Disruptors + 8 Blink Stalkers + 1 Warp Prism vs 12 Stim Marines + 4 Marauders + 2 Liberators + 2 Vikings",
       "p1_units": [
@@ -442,6 +476,12 @@
           2,
           6.0,
           2.0
+        ],
+        [
+          "medivac",
+          1,
+          6.8,
+          0.0
         ]
       ],
       "max_loops": 960,
@@ -475,46 +515,47 @@
         [
           "probe",
           8,
-          -2.8,
+          -3.2,
           0.0
         ],
         [
           "stalker",
           4,
-          -1.5,
+          2.4,
           1.5
         ],
         [
           "phoenix",
           4,
-          -1.0,
-          -2.5
+          2.8,
+          -2.2
         ],
         [
           "oracle",
           1,
-          -2.0,
-          -1.5
+          2.2,
+          -1.2
         ]
       ],
       "p2_units": [
         [
           "zergling",
           12,
-          4.8,
+          8.0,
           1.5
         ],
         [
           "mutalisk",
           7,
-          5.2,
+          8.6,
           -2.0
         ]
       ],
       "max_loops": 960,
       "tier": "canonical",
       "category": "air-superiority",
-      "fast_core": false
+      "fast_core": false,
+      "use_main_base": true
     },
     {
       "id": "sc2-real-p11-dt-observer-stalker-vs-banshee-raven-bio",
@@ -532,7 +573,8 @@
       ],
       "p2_upgrades": [
         "Cloak",
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "p2_pre_cloaked": true,
       "description": "Cloak+Detection Duel: 3 Dark Templars + 6 Blink Stalkers + 2 Observers vs 3 Cloaked Banshees + 1 Raven + 8 Marines + 2 Marauders",
@@ -647,12 +689,14 @@
       ],
       "p1_upgrades": [
         "Blink",
-        "ThermalLance"
+        "ThermalLance",
+        "Charge"
       ],
       "p2_upgrades": [
         "DrillingClaws",
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "description": "PvT Widow Mine Sweep: 2 Observers + 2 Colossi + 8 Blink Stalkers + 4 Zealots vs 6 Burrowed Widow Mines (DrillingClaws) + 6 Marauders + 14 Stim Marines + 2 Medivacs",
       "p1_units": [
@@ -1052,7 +1096,10 @@
       ],
       "p2_upgrades": [
         "Burrow",
-        "LurkerRange"
+        "LurkerRange",
+        "MuscularAugments",
+        "GroovedSpines",
+        "AdaptiveTalons"
       ],
       "p2_pre_burrowed": [
         "lurker-mp"
@@ -1141,7 +1188,15 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": true
+      "fast_core": true,
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield",
+        "ConcussiveShells"
+      ],
+      "p2_upgrades": [
+        "Charge"
+      ]
     },
     {
       "id": "sc2-real-t02-tank-marine-vs-roach-ling",
@@ -1179,7 +1234,15 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": true
+      "fast_core": true,
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "p2_upgrades": [
+        "MetabolicBoost",
+        "GlialReconstitution"
+      ]
     },
     {
       "id": "sc2-real-t03-outnumbered-bio-vs-lings",
@@ -1211,7 +1274,14 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": false
+      "fast_core": false,
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "p2_upgrades": [
+        "MetabolicBoost"
+      ]
     },
     {
       "id": "sc2-real-t04-ghost-bio-medivac-vs-ultra-infestor",
@@ -1271,6 +1341,17 @@
       "expected_abilities": [
         2714,
         1628
+      ],
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield",
+        "ConcussiveShells"
+      ],
+      "p2_upgrades": [
+        "MetabolicBoost",
+        "AdrenalGlands",
+        "ChitinousPlating",
+        "AnabolicSynthesis"
       ]
     },
     {
@@ -1315,7 +1396,16 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": false
+      "fast_core": false,
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield",
+        "ConcussiveShells"
+      ],
+      "p2_upgrades": [
+        "MetabolicBoost",
+        "CentrifugalHooks"
+      ]
     },
     {
       "id": "sc2-real-t06-early-12pool-marines-reaper-vs-lings",
@@ -1391,7 +1481,11 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": false
+      "fast_core": false,
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield"
+      ]
     },
     {
       "id": "sc2-real-t08-tvt-tank-viking-marine-highground-ramp",
@@ -1432,6 +1526,12 @@
           4,
           -4.5,
           2.5
+        ],
+        [
+          "medivac",
+          1,
+          -5.8,
+          0.0
         ]
       ],
       "p2_units": [
@@ -1458,6 +1558,12 @@
           4,
           5.0,
           -2.5
+        ],
+        [
+          "medivac",
+          1,
+          6.4,
+          0.0
         ]
       ],
       "max_loops": 960,
@@ -1478,7 +1584,9 @@
         "cyclone-kite"
       ],
       "p1_upgrades": [
-        "DrillingClaws"
+        "DrillingClaws",
+        "Stim",
+        "CombatShield"
       ],
       "p2_upgrades": [
         "MetabolicBoost",
@@ -1553,7 +1661,8 @@
       ],
       "p1_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "p2_upgrades": [
         "Charge",
@@ -1697,7 +1806,8 @@
       ],
       "p1_upgrades": [
         "Cloak",
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "p1_pre_cloaked": true,
       "p2_upgrades": [
@@ -1708,52 +1818,53 @@
         [
           "scv",
           8,
-          -2.8,
+          -3.2,
           0.0
         ],
         [
           "marine",
           8,
-          -1.5,
+          2.5,
           0.5
         ],
         [
           "banshee",
           2,
-          -1.5,
+          2.4,
           -2.0
         ],
         [
           "raven",
           1,
-          -2.2,
-          1.5
+          2.2,
+          1.8
         ]
       ],
       "p2_units": [
         [
           "dark-templar",
           3,
-          4.2,
+          7.6,
           0.0
         ],
         [
           "stalker",
           4,
-          5.5,
+          8.6,
           0.0
         ],
         [
           "observer",
           1,
-          5.2,
+          8.4,
           1.8
         ]
       ],
       "max_loops": 960,
       "tier": "canonical",
       "category": "detection-snipe",
-      "fast_core": false
+      "fast_core": false,
+      "use_main_base": true
     },
     {
       "id": "sc2-real-t13-bio-tank-viking-vs-blink-colossus",
@@ -1774,7 +1885,8 @@
       ],
       "p2_upgrades": [
         "Blink",
-        "ThermalLance"
+        "ThermalLance",
+        "Charge"
       ],
       "description": "TvP Mid-Late Clash: 6 Vikings + 2 Sieged Tanks + 14 Stim Marines + 6 Marauders + 2 Medivacs vs 2 Colossi + 12 Blink Stalkers + 4 Zealots + 1 Sentry",
       "p1_units": [
@@ -1856,11 +1968,13 @@
       "p1_upgrades": [
         "Stim",
         "CombatShield",
-        "InterferenceMatrix"
+        "InterferenceMatrix",
+        "ConcussiveShells"
       ],
       "p2_upgrades": [
         "Blink",
-        "ThermalLance"
+        "ThermalLance",
+        "Charge"
       ],
       "description": "TvP Raven Spell Clash: 2 Ravens + 4 Vikings + 14 Stim Marines + 6 Marauders + 2 Medivacs vs 2 Colossi + 10 Blink Stalkers + 6 Zealots",
       "p1_units": [
@@ -1982,6 +2096,10 @@
       "expected_abilities": [
         401,
         2358
+      ],
+      "p2_upgrades": [
+        "MuscularAugments",
+        "GroovedSpines"
       ]
     },
     {
@@ -2049,6 +2167,13 @@
       "fast_core": true,
       "expected_abilities": [
         2338
+      ],
+      "p1_upgrades": [
+        "GlialReconstitution"
+      ],
+      "p2_upgrades": [
+        "Stim",
+        "CombatShield"
       ]
     },
     {
@@ -2087,7 +2212,15 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": false
+      "fast_core": false,
+      "p1_upgrades": [
+        "GlialReconstitution",
+        "MuscularAugments",
+        "GroovedSpines"
+      ],
+      "p2_upgrades": [
+        "Charge"
+      ]
     },
     {
       "id": "sc2-real-z04-queen-ultra-ling-vs-stalker-immortal",
@@ -2111,6 +2244,12 @@
           "queen",
           3,
           -5.2,
+          0.0
+        ],
+        [
+          "creep-tumor-burrowed",
+          1,
+          -4.2,
           0.0
         ]
       ],
@@ -2140,6 +2279,15 @@
       "fast_core": false,
       "expected_abilities": [
         1664
+      ],
+      "p1_upgrades": [
+        "MetabolicBoost",
+        "AdrenalGlands",
+        "ChitinousPlating",
+        "AnabolicSynthesis"
+      ],
+      "p2_upgrades": [
+        "Blink"
       ]
     },
     {
@@ -2178,7 +2326,14 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": false
+      "fast_core": false,
+      "p1_upgrades": [
+        "MuscularAugments",
+        "GroovedSpines"
+      ],
+      "p2_upgrades": [
+        "Charge"
+      ]
     },
     {
       "id": "sc2-real-z06-early-12pool-queen-lings-vs-lings",
@@ -2248,7 +2403,11 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "air-superiority",
-      "fast_core": false
+      "fast_core": false,
+      "p1_upgrades": [
+        "MuscularAugments",
+        "GroovedSpines"
+      ]
     },
     {
       "id": "sc2-real-z08-corruptor-viper-volley-vs-tempest-carrier-cliff",
@@ -2375,7 +2534,8 @@
       "p1_upgrades": [
         "LurkerRange",
         "AdaptiveTalons",
-        "GroovedSpines"
+        "GroovedSpines",
+        "MuscularAugments"
       ],
       "p2_upgrades": [
         "Blink"
@@ -2525,34 +2685,35 @@
         [
           "drone",
           12,
-          -2.5,
+          -3.2,
           0.0
         ],
         [
           "zergling",
           6,
-          -1.0,
+          2.4,
           0.8
         ],
         [
           "queen",
           1,
-          -2.0,
-          -1.2
+          2.2,
+          -1.0
         ]
       ],
       "p2_units": [
         [
           "zergling",
           14,
-          4.8,
+          8.0,
           0.0
         ]
       ],
       "max_loops": 960,
       "tier": "canonical",
       "category": "early-rush-defense",
-      "fast_core": false
+      "fast_core": false,
+      "use_main_base": true
     },
     {
       "id": "sc2-real-z13-ravager-hydra-ling-vs-heavy-tank-line",
@@ -2574,7 +2735,8 @@
       ],
       "p2_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "description": "ZvT 2-Prong Tank-Line Flank: 32 Speedlings + 6 Roaches + 6 Ravagers + 8 Hydralisks flanking from opposite angles onto 5 Sieged Tanks + 16 Stim Marines + 4 Marauders + 2 Medivacs",
       "p1_units": [
@@ -2684,7 +2846,8 @@
       ],
       "p2_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "description": "ZvT Infestor Spell Clash: 3 Infestors + 10 Speed Banelings + 24 Speedlings vs 20 Stim Marines + 6 Marauders + 2 Sieged Tanks + 2 Medivacs",
       "p1_units": [
@@ -2756,10 +2919,13 @@
       ],
       "p1_upgrades": [
         "ChitinousPlating",
-        "MetabolicBoost"
+        "MetabolicBoost",
+        "AdrenalGlands",
+        "AnabolicSynthesis"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "description": "Late ZvT Viper+Ultra: 3 Vipers + 3 Chitinous Ultralisks + 20 Speedlings + 4 Corruptors vs 5 Sieged Tanks + 16 Stim Marines + 6 Vikings + 2 Medivacs",
       "p1_units": [
@@ -2866,7 +3032,11 @@
       ],
       "max_loops": 960,
       "category": "air-superiority",
-      "fast_core": true
+      "fast_core": true,
+      "p2_upgrades": [
+        "Stim",
+        "CombatShield"
+      ]
     },
     {
       "id": "sc2-econ-e01-probe-harass-mineral-defense",
@@ -3251,7 +3421,8 @@
       ],
       "p2_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "description": "Detection-First PvT (No Blink): 4 Dark Templars + 8 Stalkers sniping 2 Missile Turrets first to blind 14 Marines + 4 Marauders + 1 Medivac",
       "p1_units": [
@@ -3424,9 +3595,20 @@
           6,
           5.2,
           0.0
+        ],
+        [
+          "creep-tumor-burrowed",
+          1,
+          4.2,
+          0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "GlialReconstitution",
+        "MuscularAugments",
+        "GroovedSpines"
+      ]
     },
     {
       "id": "sc2-det-d04-p-dt-phoenix-vs-overseers-roach-ravager",
@@ -3483,7 +3665,10 @@
           2.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "GlialReconstitution"
+      ]
     },
     {
       "id": "sc2-det-d05-p-dt-phoenix-vs-ravens-bio-tank",
@@ -3500,7 +3685,8 @@
         "phoenix-anti-detector"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "description": "Detection-First PvT (Mobile Detector): 4 Dark Templars + 5 Phoenixes + 4 Stalkers sniping 2 Ravens to blind 12 Marines + 2 Sieged Tanks",
       "p1_units": [
@@ -3597,7 +3783,10 @@
           2.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "Blink"
+      ]
     },
     {
       "id": "sc2-det-d07-p-blink-dt-vs-cannons-ht-immortal",
@@ -3617,7 +3806,8 @@
         "ShadowStride"
       ],
       "p2_upgrades": [
-        "PsiStorm"
+        "PsiStorm",
+        "Charge"
       ],
       "description": "Detection-First PvP (Shadow-Stride Split): 10 Blink DTs splitting onto 2 Photon Cannons before wiping 2 High Templars + 3 Immortals + 6 Zealots",
       "p1_units": [
@@ -3750,7 +3940,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "Blink",
+        "Charge"
+      ]
     },
     {
       "id": "sc2-det-d09-t-cloaked-banshee-tank-vs-turrets-bio",
@@ -3768,10 +3962,12 @@
       ],
       "p1_upgrades": [
         "BansheeCloak",
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "p1_pre_cloaked": true,
       "description": "Detection-First TvT (Banshee Cloak): 4 Cloaked Banshees + 2 Tanks + 10 Marines sniping 2 Missile Turrets first vs 14 Marines + 2 Tanks",
@@ -3839,7 +4035,8 @@
       ],
       "p1_upgrades": [
         "BansheeCloak",
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "p1_pre_cloaked": true,
       "description": "Detection-First TvP (Mobile Detector): 4 Cloaked Banshees + 4 Vikings + 8 Marines + 1 Raven revealing & sniping 2 Observers so Banshees shred 10 Stalkers + 4 Zealots",
@@ -3889,7 +4086,11 @@
           2.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "Blink",
+        "Charge"
+      ]
     },
     {
       "id": "sc2-det-d11-t-cloaked-banshee-viking-vs-ravens-bio",
@@ -3907,10 +4108,12 @@
       ],
       "p1_upgrades": [
         "BansheeCloak",
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "p1_pre_cloaked": true,
       "description": "Detection-First TvT (Mobile Detector): 4 Cloaked Banshees + 5 Vikings + 8 Marines sniping 2 Ravens vs 14 Marines + 2 Marauders",
@@ -3973,7 +4176,8 @@
       "p1_upgrades": [
         "PersonalCloaking",
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "p1_pre_cloaked": true,
       "description": "Detection-First TvZ (Ghost Cloak): 4 Cloaked Ghosts + 12 Stim Marines + 4 Marauders + 2 Medivacs sniping 2 Spore Crawlers vs 10 Roaches + 8 Hydralisks",
@@ -4044,6 +4248,11 @@
       "max_loops": 960,
       "expected_abilities": [
         382
+      ],
+      "p2_upgrades": [
+        "GlialReconstitution",
+        "MuscularAugments",
+        "GroovedSpines"
       ]
     },
     {
@@ -4062,10 +4271,14 @@
       ],
       "p1_upgrades": [
         "PersonalCloaking",
-        "Stim"
+        "Stim",
+        "ConcussiveShells"
       ],
       "p2_upgrades": [
-        "MetabolicBoost"
+        "MetabolicBoost",
+        "AdrenalGlands",
+        "ChitinousPlating",
+        "AnabolicSynthesis"
       ],
       "p1_pre_cloaked": true,
       "description": "Detection-First TvZ (Mobile Detector): 4 Cloaked Ghosts + 4 Vikings + 8 Marauders + 2 Medivacs sniping 2 Overseers vs 2 Ultralisks + 20 Speedlings",
@@ -4218,7 +4431,8 @@
       "p1_upgrades": [
         "LurkerRange",
         "AdaptiveTalons",
-        "GroovedSpines"
+        "GroovedSpines",
+        "MuscularAugments"
       ],
       "p2_upgrades": [
         "Stim",
@@ -4296,11 +4510,14 @@
       "p1_upgrades": [
         "LurkerRange",
         "AdaptiveTalons",
-        "GroovedSpines"
+        "GroovedSpines",
+        "GlialReconstitution",
+        "MuscularAugments"
       ],
       "p2_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "description": "Detection-First ZvT (Mobile Detector): 4 Burrowed Lurkers + 10 Hydralisks + 6 Roaches sniping 2 Ravens so Lurkers decimate 16 Marines + 6 Marauders",
       "p1_units": [
@@ -4368,10 +4585,13 @@
       "p1_upgrades": [
         "Burrow",
         "TunnelingClaws",
-        "GlialReconstitution"
+        "GlialReconstitution",
+        "MuscularAugments",
+        "GroovedSpines"
       ],
       "p2_upgrades": [
-        "Blink"
+        "Blink",
+        "Charge"
       ],
       "description": "Detection-First ZvP (Mobile Detector): 12 Tunneling-Claws Roaches + 4 Corruptors + 6 Hydralisks + 1 Overseer revealing & sniping 2 Observers to enable free burrow-heal vs 8 Stalkers + 3 Immortals",
       "p1_units": [
@@ -4641,7 +4861,8 @@
       ],
       "p2_upgrades": [
         "MetabolicBoost",
-        "GroovedSpines"
+        "GroovedSpines",
+        "MuscularAugments"
       ],
       "description": "Stalker Blink-Back (PvZ): 14 Blink Stalkers preserving low-shield units vs 10 Hydralisks + 18 Speedlings",
       "p1_units": [
@@ -4689,7 +4910,8 @@
         "Blink"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "description": "Stalker Blink-Forward Snipe (PvT): 14 Blink Stalkers blinking directly onto 3 Sieged Tanks (dead-zone) + 12 Marines",
       "p1_units": [
@@ -4743,7 +4965,9 @@
         "Blink"
       ],
       "p2_upgrades": [
-        "ThermalLance"
+        "ThermalLance",
+        "Blink",
+        "Charge"
       ],
       "description": "Stalker Blink-Forward Snipe (PvP): 14 Blink Stalkers blinking under 2 Thermal-Lance Colossi + 4 Zealots + 6 Stalkers",
       "p1_units": [
@@ -4797,7 +5021,8 @@
         "Blink"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "description": "Stalker Blink-Forward Snipe (PvT): 14 Blink Stalkers blinking past Liberator zones to snipe 3 Sieged Liberators + 2 Medivacs + 8 Marines",
       "p1_units": [
@@ -4902,7 +5127,8 @@
         "Blink"
       ],
       "p2_upgrades": [
-        "PsiStorm"
+        "PsiStorm",
+        "Charge"
       ],
       "description": "Stalker Blink-Forward Snipe (PvP): 12 Blink Stalkers blinking forward to snipe 3 High Templars + 2 Disruptors + 6 Zealots before Storm/Nova lands",
       "p1_units": [
@@ -7383,13 +7609,13 @@
         [
           "oracle",
           2,
-          -4.5,
+          8.5,
           -1.8
         ],
         [
           "adept",
           4,
-          -5.0,
+          9.0,
           1.2
         ]
       ],
@@ -7397,19 +7623,19 @@
         [
           "drone",
           12,
-          3.2,
+          -3.2,
           0.0
         ],
         [
           "queen",
           2,
-          4.2,
+          2.4,
           0.0
         ],
         [
           "zergling",
           6,
-          4.8,
+          3.2,
           1.5
         ]
       ],
@@ -7417,7 +7643,8 @@
       "expected_abilities": [
         2505,
         2375
-      ]
+      ],
+      "use_p2_main_base": true
     },
     {
       "id": "sc2-sta-s03-pvt-oracle-stasis-ramp-trap",
@@ -7439,7 +7666,8 @@
       ],
       "p2_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "description": "Stasis Ward Ramp Trap (PvT): 2 Oracles + 6 Blink Stalkers + 3 Zealots planting Stasis Ward atop ramp vs 12 Stim Marines + 4 Marauders + 1 Medivac",
       "p1_units": [
@@ -7501,7 +7729,8 @@
         "army-split"
       ],
       "p2_upgrades": [
-        "MetabolicBoost"
+        "MetabolicBoost",
+        "GlialReconstitution"
       ],
       "description": "Stasis Ward Army Split (PvZ): 2 Oracles + 6 Stalkers + 2 Immortals trapping Roach/Ling push with Stasis Ward",
       "p1_units": [
@@ -7541,6 +7770,9 @@
       "max_loops": 960,
       "expected_abilities": [
         2505
+      ],
+      "p1_upgrades": [
+        "Blink"
       ]
     },
     {
@@ -7558,7 +7790,10 @@
         "detector-snipe-trap"
       ],
       "p1_upgrades": [
-        "MetabolicBoost"
+        "MetabolicBoost",
+        "GlialReconstitution",
+        "MuscularAugments",
+        "GroovedSpines"
       ],
       "description": "Stasis Ward Defuse (ZvP): 16 Speedlings + 6 Roaches + 6 Hydralisks + 1 Overseer spotting & defusing 2 Stasis Wards with 1 Ling/ranged fire before engaging 6 Stalkers + 2 Immortals",
       "p1_units": [
@@ -7613,7 +7848,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "Blink"
+      ]
     },
     {
       "id": "sc2-sta-s06-tvp-stasis-ward-defuse-raven-bio",
@@ -7631,7 +7869,8 @@
       ],
       "p1_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "description": "Stasis Ward Defuse (TvP): 14 Stim Marines + 4 Marauders + 1 Raven + 2 Medivacs holding back & sniping 2 Stasis Wards before fighting 8 Stalkers + 3 Zealots",
       "p1_units": [
@@ -7686,7 +7925,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "Blink"
+      ]
     },
     {
       "id": "sc2-sta-s07-pvp-stasis-ward-defuse-obs-stalker",
@@ -7752,7 +7994,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "Blink"
+      ]
     },
     {
       "id": "sc2-sta-s08-zvp-stasis-mineral-line-defuse",
@@ -7773,25 +8018,25 @@
         [
           "drone",
           12,
-          -3.0,
+          -3.2,
           0.0
         ],
         [
           "zergling",
           4,
-          -1.5,
+          2.4,
           1.2
         ],
         [
           "queen",
           2,
-          -2.0,
+          2.2,
           -1.5
         ],
         [
           "overseer",
           1,
-          -2.5,
+          2.0,
           2.0
         ]
       ],
@@ -7799,17 +8044,18 @@
         [
           "oracle-stasis-trap",
           1,
-          -1.2,
+          4.0,
           0.0
         ],
         [
           "oracle",
           2,
-          5.0,
+          8.5,
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "use_main_base": true
     },
     {
       "id": "sc2-yam-y01-tvp-bc-yamato-jump-vs-tempest-voidray",
@@ -8334,7 +8580,8 @@
       ],
       "p1_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "p2_upgrades": [
         "MetabolicBoost",
@@ -8515,26 +8762,26 @@
         [
           "zealot",
           4,
-          3.6,
+          3.0,
           0.0
         ],
         [
           "immortal",
           1,
-          4.4,
+          3.8,
           0.0
         ],
         [
           "stalker",
           10,
-          5.2,
+          4.6,
           0.0
         ]
       ],
       "p1_loaded_transports": [
         {
           "transport": "medivac",
-          "dx": -5.5,
+          "dx": 9.0,
           "dy": -1.8,
           "cargo": [
             [
@@ -8545,7 +8792,7 @@
         },
         {
           "transport": "medivac",
-          "dx": -5.5,
+          "dx": 9.0,
           "dy": 1.8,
           "cargo": [
             [
@@ -8559,7 +8806,12 @@
           ]
         }
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "use_p2_main_base": true,
+      "p2_upgrades": [
+        "Blink",
+        "Charge"
+      ]
     },
     {
       "id": "sc2-trn-n05-pvz-warp-prism-archon-drop-juggle",
@@ -8648,7 +8900,8 @@
       ],
       "p2_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "description": "Warp Prism HT Storm Drop (PvT): Speed Warp Prism carrying 2 High Templars + 6 Blink Stalkers dropping Psi Storms on 16 Stim Marines + 4 Marauders + 1 Medivac",
       "p1_units": [
@@ -8714,7 +8967,8 @@
       ],
       "p2_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "description": "Warp Prism Disruptor Drop (PvT): Speed Warp Prism carrying 2 Disruptors + 6 Blink Stalkers firing Novas & picking up vs 14 Stim Marines + 6 Marauders + 2 Medivacs",
       "p1_units": [
@@ -8778,7 +9032,8 @@
         "GraviticDrive"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "description": "Warp Prism DT Drop (PvT): Speed Warp Prism dropping 4 Dark Templars + 4 Stalkers onto 1 Missile Turret + 10 Marines + 2 Tanks",
       "p1_units": [
@@ -8892,7 +9147,11 @@
           ]
         }
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "Blink",
+        "Charge"
+      ]
     },
     {
       "id": "sc2-trn-n10-zvt-nydus-swarmhost-lurker-evac",
@@ -8910,10 +9169,12 @@
       ],
       "p1_upgrades": [
         "Burrow",
-        "LurkerRange"
+        "LurkerRange",
+        "AdaptiveTalons"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "description": "Nydus Swarm Host / Lurker Unload (ZvT): Pre-loaded Nydus Canal deploying 4 Swarm Hosts + 2 Lurkers + 4 Roaches vs 12 Marines + 3 Tanks + 1 Medivac",
       "p1_units": [
@@ -8986,26 +9247,26 @@
         [
           "zealot",
           4,
-          3.8,
+          3.0,
           0.0
         ],
         [
           "sentry",
           1,
-          4.6,
+          3.8,
           0.0
         ],
         [
           "stalker",
           8,
-          5.4,
+          4.5,
           0.0
         ]
       ],
       "p1_loaded_transports": [
         {
           "transport": "nydus-canal",
-          "dx": -4.8,
+          "dx": 8.2,
           "dy": 0.0,
           "cargo": [
             [
@@ -9019,7 +9280,12 @@
           ]
         }
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "use_p2_main_base": true,
+      "p2_upgrades": [
+        "Blink",
+        "Charge"
+      ]
     },
     {
       "id": "sc2-trn-n12-zvt-dropperlord-baneling-rain-bio",
@@ -9042,7 +9308,8 @@
       ],
       "p2_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "description": "Dropperlord Baneling Rain (ZvT): 2 Speed Dropperlords raining 8 Speed Banelings + 16 Speedlings onto 18 Stim Marines + 4 Marauders + 2 Medivacs",
       "p1_units": [
@@ -9120,7 +9387,8 @@
         "MetabolicBoost"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "description": "Dropperlord Ravager Cliff Drop (ZvT): 2 Speed Dropperlords dropping 4 Ravagers + 4 Roaches behind high-ground 10 Marines + 2 Sieged Tanks + 1 Medivac",
       "p1_units": [
@@ -9205,7 +9473,8 @@
         "GlialReconstitution"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "description": "Roach Tunneling Claws Under Tanks (ZvT): 12 Tunneling-Claws Speed Roaches + 2 Ravagers burrowing to heal & close under 3 Sieged Tanks + 10 Marines",
       "p1_units": [
@@ -9325,7 +9594,8 @@
       ],
       "p2_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "description": "Baneling Landmine Ambush (ZvT): 6 Burrowed Banelings + 20 Speedlings + 6 Banelings detonating under 20 Stim Marines + 4 Marauders + 2 Medivacs",
       "p1_units": [
@@ -9538,10 +9808,13 @@
       "p1_upgrades": [
         "Burrow",
         "NeuralParasite",
-        "GroovedSpines"
+        "GroovedSpines",
+        "GlialReconstitution",
+        "MuscularAugments"
       ],
       "p2_upgrades": [
-        "ThermalLance"
+        "ThermalLance",
+        "Blink"
       ],
       "description": "Burrowed Infestor Neural Ambush (ZvP): 3 Burrowed Infestors + 10 Hydralisks + 8 Roaches Neuraling 2 Colossi + 2 Archons + 8 Stalkers",
       "p1_units": [
@@ -9607,7 +9880,8 @@
       "p1_upgrades": [
         "LurkerRange",
         "AdaptiveTalons",
-        "GroovedSpines"
+        "GroovedSpines",
+        "MuscularAugments"
       ],
       "p2_upgrades": [
         "Blink"
@@ -9682,7 +9956,8 @@
       "p1_upgrades": [
         "LurkerRange",
         "AdaptiveTalons",
-        "GroovedSpines"
+        "GroovedSpines",
+        "MuscularAugments"
       ],
       "p2_upgrades": [
         "Stim",
@@ -9751,10 +10026,12 @@
       "p1_upgrades": [
         "LurkerRange",
         "AdaptiveTalons",
-        "GroovedSpines"
+        "GroovedSpines",
+        "MuscularAugments"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "description": "Lurker Reposition vs Tanks (ZvT): 5 Burrowed Lurkers + 8 Hydralisks + 4 Ravagers advancing into 4 Sieged Tanks + 12 Marines + 1 Raven",
       "p1_units": [
@@ -9882,7 +10159,8 @@
       "p1_upgrades": [
         "DrillingClaws",
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "p2_upgrades": [
         "Charge",
@@ -9969,7 +10247,8 @@
       "p1_upgrades": [
         "Burrow",
         "GlialReconstitution",
-        "GroovedSpines"
+        "GroovedSpines",
+        "MuscularAugments"
       ],
       "description": "Swarm Host Locust + Burrow Retreat (ZvT): 6 Burrow Swarm Hosts + 6 Roaches + 6 Hydralisks launching Locust wave & burrowing safely vs 3 Sieged Tanks + 2 Thors + 8 Hellbats",
       "p1_units": [
@@ -10076,6 +10355,9 @@
       "expected_abilities": [
         1526,
         76
+      ],
+      "p1_upgrades": [
+        "Blink"
       ]
     },
     {
@@ -10099,7 +10381,8 @@
       "p2_upgrades": [
         "MetabolicBoost",
         "CentrifugalHooks",
-        "GroovedSpines"
+        "GroovedSpines",
+        "MuscularAugments"
       ],
       "description": "High Templar Psi Storm (PvZ): 3 High Templars + 2 Archons + 6 Chargelots blanketing 24 Speedlings + 8 Speed Banelings + 10 Hydralisks",
       "p1_units": [
@@ -10165,7 +10448,9 @@
       ],
       "p2_upgrades": [
         "LurkerRange",
-        "GroovedSpines"
+        "GroovedSpines",
+        "MuscularAugments",
+        "AdaptiveTalons"
       ],
       "description": "Disruptor Purification Nova (PvZ): 3 Disruptors + 8 Blink Stalkers + 1 Observer shelling 5 Burrowed Lurkers + 10 Hydralisks",
       "p1_units": [
@@ -10223,7 +10508,8 @@
       ],
       "p1_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "p2_upgrades": [
         "Charge",
@@ -10299,7 +10585,8 @@
         "ConcussiveShells"
       ],
       "p2_upgrades": [
-        "ChitinousPlating"
+        "ChitinousPlating",
+        "AnabolicSynthesis"
       ],
       "description": "Ghost Steady Targeting Snipe (TvZ): 5 Ghosts + 6 Vikings + 8 Marauders + 2 Medivacs Sniping 3 Brood Lords + 2 Ultralisks + 2 Infestors",
       "p1_units": [
@@ -10495,7 +10782,8 @@
       ],
       "p1_upgrades": [
         "GroovedSpines",
-        "MuscularAugments"
+        "MuscularAugments",
+        "GlialReconstitution"
       ],
       "p2_upgrades": [
         "ThermalLance",
@@ -10561,7 +10849,8 @@
         "anti-voidray-sustain"
       ],
       "p1_upgrades": [
-        "GroovedSpines"
+        "GroovedSpines",
+        "MuscularAugments"
       ],
       "description": "Queen Transfuse Sustain (ZvP): 4 Queens + 10 Hydralisks + 2 Brood Lords transfusing focus-fired units vs 5 Void Rays + 6 Stalkers",
       "p1_units": [
@@ -10582,6 +10871,12 @@
           2,
           -6.2,
           0.0
+        ],
+        [
+          "creep-tumor-burrowed",
+          1,
+          -4.5,
+          0.0
         ]
       ],
       "p2_units": [
@@ -10601,6 +10896,9 @@
       "max_loops": 960,
       "expected_abilities": [
         1664
+      ],
+      "p2_upgrades": [
+        "Blink"
       ]
     },
     {
@@ -10648,6 +10946,9 @@
       "max_loops": 960,
       "expected_abilities": [
         2350
+      ],
+      "p2_upgrades": [
+        "Blink"
       ]
     },
     {
@@ -10991,11 +11292,13 @@
       ],
       "p1_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "p2_upgrades": [
         "ThermalLance",
-        "Blink"
+        "Blink",
+        "Charge"
       ],
       "description": "2-Prong Terran Concave Flank (TvP): 16 Stim Marines + 6 Marauders + 6 Hellbats + 2 Medivacs wrapping 2 Colossi + 10 Stalkers + 4 Zealots",
       "p1_units": [
@@ -11086,7 +11389,9 @@
       "p1_upgrades": [
         "ChitinousPlating",
         "MetabolicBoost",
-        "CentrifugalHooks"
+        "CentrifugalHooks",
+        "AdrenalGlands",
+        "AnabolicSynthesis"
       ],
       "p2_upgrades": [
         "Blink"
@@ -11170,7 +11475,8 @@
       ],
       "p2_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "description": "2-Prong Roach/Ravager Flank (ZvT): 12 Speed Roaches + 6 Ravagers pinching 3 Sieged Tanks + 14 Marines + 4 Marauders",
       "p1_units": [
@@ -11217,6 +11523,12 @@
           3,
           0.0,
           1.8
+        ],
+        [
+          "medivac",
+          1,
+          6.4,
+          0.0
         ]
       ],
       "max_loops": 960
@@ -11241,7 +11553,8 @@
       ],
       "p2_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "ConcussiveShells"
       ],
       "description": "Single-Spawn Ling/Roach Wrap (ZvT): 24 Speedlings + 10 Speed Roaches starting in ONE cohesive clump dynamically wrapping 2 Sieged Tanks + 14 Marines + 4 Marauders",
       "p1_units": [
@@ -11276,6 +11589,12 @@
           2,
           6.2,
           0.0
+        ],
+        [
+          "medivac",
+          1,
+          6.4,
+          0.0
         ]
       ],
       "max_loops": 960
@@ -11301,7 +11620,8 @@
       ],
       "p2_upgrades": [
         "MetabolicBoost",
-        "CentrifugalHooks"
+        "CentrifugalHooks",
+        "GlialReconstitution"
       ],
       "description": "Single-Spawn Bio Split-Arc (TvZ): 16 Stim Marines + 6 Marauders + 2 Medivacs starting in ONE clump dynamically fanning into an anti-splash arc vs 8 Speed Banelings + 18 Speedlings + 6 Roaches + 3 Ravagers",
       "p1_units": [
@@ -11372,7 +11692,8 @@
         "Charge"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "description": "Uphill Ramp Break (PvT): 12 Blink Stalkers + 4 Chargelots + 1 Observer breaking high-ground 3 Sieged Tanks + 10 Marines",
       "p1_units": [
@@ -11464,7 +11785,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p1_upgrades": [
+        "Blink"
+      ]
     },
     {
       "id": "sc2-rmp-h03-tvz-hg-liberator-tank-hold-vs-hydra-lurker",
@@ -11486,7 +11810,9 @@
       ],
       "p2_upgrades": [
         "LurkerRange",
-        "GroovedSpines"
+        "GroovedSpines",
+        "MuscularAugments",
+        "AdaptiveTalons"
       ],
       "description": "High-Ground Ramp Hold (TvZ): 2 Sieged Liberators + 3 Sieged Tanks + 10 Stim Marines + 1 Raven defending ramp vs 4 Lurkers + 12 Hydralisks + 1 Overseer",
       "p1_units": [
@@ -11613,10 +11939,12 @@
       ],
       "p1_upgrades": [
         "GlialReconstitution",
-        "GroovedSpines"
+        "GroovedSpines",
+        "MuscularAugments"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "description": "Uphill Ramp Break (ZvT): 10 Speed Roaches + 6 Ravagers + 6 Hydralisks biling high-ground 3 Sieged Tanks + 10 Marines + 4 Vikings",
       "p1_units": [
@@ -11821,7 +12149,10 @@
           2.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "Blink"
+      ]
     },
     {
       "id": "sc2-air-a05-tvp-viking-raven-vs-carrier-voidray",
@@ -11885,19 +12216,19 @@
         [
           "probe",
           8,
-          -2.8,
+          -3.2,
           0.0
         ],
         [
           "zealot",
           2,
-          -1.2,
+          2.8,
           0.0
         ],
         [
           "stalker",
           2,
-          -2.0,
+          2.4,
           1.5
         ]
       ],
@@ -11905,29 +12236,30 @@
         [
           "photon-cannon",
           1,
-          3.8,
+          8.0,
           -1.8
         ],
         [
           "photon-cannon",
           1,
-          3.8,
+          8.0,
           1.8
         ],
         [
           "pylon",
           1,
-          5.2,
+          9.4,
           0.0
         ],
         [
           "zealot",
           2,
-          3.0,
+          7.2,
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "use_main_base": true
     },
     {
       "id": "sc2-rsh-er02-tvt-3rax-reaper-hellion-defense",
@@ -11947,19 +12279,19 @@
         [
           "scv",
           6,
-          -2.8,
+          -3.2,
           0.0
         ],
         [
           "hellion",
           2,
-          -1.2,
+          2.6,
           -1.0
         ],
         [
           "marine",
           6,
-          -1.6,
+          2.4,
           1.0
         ]
       ],
@@ -11967,11 +12299,12 @@
         [
           "reaper",
           6,
-          5.2,
+          8.2,
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "use_main_base": true
     },
     {
       "id": "sc2-rsh-er03-pvt-proxy-marauder-stalker-probe-hold",
@@ -11994,19 +12327,19 @@
         [
           "probe",
           8,
-          -2.8,
+          -3.2,
           0.0
         ],
         [
           "zealot",
           1,
-          -1.0,
+          2.8,
           0.0
         ],
         [
           "stalker",
           3,
-          -2.2,
+          2.2,
           0.0
         ]
       ],
@@ -12014,11 +12347,12 @@
         [
           "marauder",
           5,
-          5.0,
+          8.2,
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "use_main_base": true
     },
     {
       "id": "sc2-rsh-er04-zvp-proxy-voidray-queen-spore-hold",
@@ -12039,25 +12373,25 @@
         [
           "spore-crawler",
           1,
-          -2.0,
-          -2.0
+          1.5,
+          -3.5
         ],
         [
           "spore-crawler",
           1,
-          -2.0,
-          2.0
+          1.5,
+          3.5
         ],
         [
           "queen",
           4,
-          -1.2,
+          2.8,
           0.0
         ],
         [
           "hydralisk",
           6,
-          -2.8,
+          3.5,
           0.0
         ]
       ],
@@ -12065,17 +12399,18 @@
         [
           "zealot",
           2,
-          4.2,
+          8.2,
           0.0
         ],
         [
           "void-ray",
           4,
-          5.2,
+          9.2,
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "use_main_base": true
     },
     {
       "id": "sc2-rsh-er05-tvz-1base-roach-ravager-tank-hold",
@@ -12531,7 +12866,8 @@
           0.0
         ]
       ],
-      "max_loops": 2240
+      "max_loops": 2240,
+      "allow_macro": true
     },
     {
       "id": "sc2-reg-r15-tvp-full-lifecycle-vs-15-kiting-probes",
@@ -12583,7 +12919,8 @@
           0.0
         ]
       ],
-      "max_loops": 2240
+      "max_loops": 2240,
+      "allow_macro": true
     },
     {
       "id": "sc2-reg-r16-pvp-full-lifecycle-vs-15-kiting-probes",
@@ -12635,7 +12972,8 @@
           0.0
         ]
       ],
-      "max_loops": 2240
+      "max_loops": 2240,
+      "allow_macro": true
     },
     {
       "id": "sc2-ab-p01-sentry-guardian-shield-vs-marines",
@@ -12732,7 +13070,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "Stim",
+        "CombatShield"
+      ]
     },
     {
       "id": "sc2-ab-p03-ht-feedback-snipe-vs-medivac-viper-infestor",
@@ -12786,7 +13128,10 @@
           1.5
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "GlialReconstitution"
+      ]
     },
     {
       "id": "sc2-ab-p04-dry-ht-archon-merge-vs-lings",
@@ -12928,7 +13273,10 @@
           2.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "GlialReconstitution"
+      ]
     },
     {
       "id": "sc2-ab-p07-observer-surveillance-mode-watch",
@@ -13036,7 +13384,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "GlialReconstitution"
+      ]
     },
     {
       "id": "sc2-ab-p09-nexus-energy-recharge-ht-5014",
@@ -13058,7 +13409,8 @@
         "PsiStorm"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "expected_abilities": [
         4126,
@@ -13138,7 +13490,10 @@
           1.5
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "ThermalLance"
+      ]
     },
     {
       "id": "sc2-ab-t02-viking-assault-takeoff-vs-air-arrival",
@@ -13370,7 +13725,9 @@
         "CombatShield"
       ],
       "p2_upgrades": [
-        "ChitinousPlating"
+        "ChitinousPlating",
+        "GlialReconstitution",
+        "AnabolicSynthesis"
       ],
       "expected_abilities": [
         3753
@@ -13506,7 +13863,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "Blink"
+      ]
     },
     {
       "id": "sc2-ab-t10-orbital-scanner-sweep-vs-cloaked-dts",
@@ -13620,7 +13980,10 @@
         ]
       ],
       "max_loops": 960,
-      "p1_minerals": 250
+      "p1_minerals": 250,
+      "p2_upgrades": [
+        "GlialReconstitution"
+      ]
     },
     {
       "id": "sc2-ab-t12-pf-scv-repair-hold-vs-ling-bane",
@@ -13942,7 +14305,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "ThermalLance",
+        "Blink"
+      ]
     },
     {
       "id": "sc2-ab-z05-corruptor-caustic-spray-unguarded-nexus",
@@ -14178,7 +14545,11 @@
           ]
         }
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "Stim",
+        "CombatShield"
+      ]
     },
     {
       "id": "sc2-ab-z09-queen-transfusion-wounded-ultralisk",
@@ -14199,7 +14570,8 @@
       ],
       "p2_upgrades": [
         "Stim",
-        "ConcussiveShells"
+        "ConcussiveShells",
+        "CombatShield"
       ],
       "expected_abilities": [
         1664
@@ -14292,7 +14664,8 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "allow_macro": true
     },
     {
       "id": "sc2-nc-01-protoss-close-patch-mining-priority",
@@ -14786,7 +15159,8 @@
           0.0
         ]
       ],
-      "max_loops": 896
+      "max_loops": 896,
+      "allow_macro": true
     },
     {
       "id": "sc2-nc-12-protoss-natural-wall-door-hold-and-open",
@@ -14859,7 +15233,8 @@
           0.0
         ]
       ],
-      "max_loops": 784
+      "max_loops": 784,
+      "allow_macro": true
     },
     {
       "id": "sc2-nc-13-leylines-probe-only-mineral-walk-shortcut",
@@ -15068,7 +15443,8 @@
         ]
       ],
       "p2_units": [],
-      "max_loops": 1008
+      "max_loops": 1008,
+      "allow_macro": true
     },
     {
       "id": "sc2-blk-b11-pvp-waterfall-blink-front-rank-arc",
@@ -15165,7 +15541,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "Stim",
+        "CombatShield"
+      ]
     },
     {
       "id": "sc2-trn-n14-tvz-medivac-cliff-ladder-tanks",
@@ -15183,7 +15563,8 @@
         "siege-high-ground"
       ],
       "p1_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "p2_upgrades": [
         "GlialReconstitution"
@@ -15289,6 +15670,12 @@
           14,
           4.8,
           0.0
+        ],
+        [
+          "creep-tumor-burrowed",
+          1,
+          4.2,
+          0.0
         ]
       ],
       "max_loops": 960
@@ -15311,10 +15698,12 @@
       "p1_upgrades": [
         "OverlordSpeed",
         "Burrow",
-        "LurkerRange"
+        "LurkerRange",
+        "AdaptiveTalons"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "expected_abilities": [
         1406,
@@ -15687,7 +16076,8 @@
         "nydus-raid"
       ],
       "p1_upgrades": [
-        "OverlordSpeed"
+        "OverlordSpeed",
+        "GlialReconstitution"
       ],
       "p1_energy": {
         "overseer": 100.0
@@ -15749,7 +16139,11 @@
           -2.5
         ]
       ],
-      "max_loops": 1120
+      "max_loops": 1120,
+      "p2_upgrades": [
+        "Stim",
+        "CombatShield"
+      ]
     },
     {
       "id": "sc2-rmp-h06-tvp-blind-uphill-scan-tank-break",
@@ -15811,7 +16205,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "Blink"
+      ]
     },
     {
       "id": "sc2-rmp-h07-pvz-blind-uphill-halluc-phoenix-vision",
@@ -15833,7 +16230,9 @@
       ],
       "p2_upgrades": [
         "GroovedSpines",
-        "LurkerRange"
+        "LurkerRange",
+        "MuscularAugments",
+        "AdaptiveTalons"
       ],
       "p1_energy": {
         "sentry": 100.0
@@ -15896,7 +16295,8 @@
         "GlialReconstitution"
       ],
       "p2_upgrades": [
-        "Stim"
+        "Stim",
+        "CombatShield"
       ],
       "description": "Blind Uphill Retreat Without Spotter (ZvT): 10 Speed Roaches + 4 Ravagers (0 flyers) holding/retreating outside blind uphill fire from 2 Sieged Tanks + 8 Stim Marines",
       "p1_units": [
@@ -15945,38 +16345,56 @@
         "concave-spread"
       ],
       "p1_upgrades": [
-        "ThermalLance"
+        "ThermalLance",
+        "Blink"
       ],
-      "description": "Loop 79 Pro Study (PvZ Stand-Clear Locust Wave): 3 Thermal-Lance Colossi + 3 Archons + 8 Stalkers holding ground with strong anti-light splash to delete an authentic 20-Locust swoop wave and punish 10 Swarm Hosts on cooldown",
+      "description": "Loop 83 Pro Realism (PvZ Splash Stand-Clear): 2 Colossi + 2 Archons + 8 Blink Stalkers vs mixed 6 Swarm Hosts + 8 Speed Roaches + 4 Hydralisks (12t SH standoff, 8t front vision)",
       "p1_units": [
         [
           "archon",
-          3,
-          -7.8,
+          2,
+          -4.5,
           0.0
         ],
         [
           "stalker",
           8,
-          -8.8,
+          -5.2,
           0.0
         ],
         [
           "colossus",
-          3,
-          -9.8,
+          2,
+          -6.2,
           0.0
         ]
       ],
       "p2_units": [
         [
+          "roach",
+          8,
+          3.5,
+          0.0
+        ],
+        [
+          "hydralisk",
+          4,
+          4.8,
+          0.0
+        ],
+        [
           "swarm-host",
-          10,
-          8.0,
+          6,
+          7.5,
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "GlialReconstitution",
+        "MuscularAugments",
+        "GroovedSpines"
+      ]
     },
     {
       "id": "sc2-sh-d02-pvz-stalker-immortal-retreat-locusts",
@@ -15996,30 +16414,47 @@
       "p1_upgrades": [
         "Blink"
       ],
-      "description": "Loop 79 Pro Study (PvZ No-Splash Locust Retreat): 10 Blink Stalkers + 4 Immortals (zero anti-light splash) kiting/retreating out of an authentic 20-Locust swoop wave before counter-punishing 10 Swarm Hosts on cooldown",
+      "description": "Loop 83 Pro Realism (PvZ Anti-Locust Kite-Retreat): 10 Blink Stalkers + 4 Immortals vs mixed 6 Swarm Hosts + 8 Speed Roaches + 4 Hydralisks (12t SH standoff, 8t front vision)",
       "p1_units": [
         [
           "immortal",
           4,
-          -8.0,
+          -4.5,
           0.0
         ],
         [
           "stalker",
           10,
-          -9.0,
+          -5.5,
           0.0
         ]
       ],
       "p2_units": [
         [
+          "roach",
+          8,
+          3.5,
+          0.0
+        ],
+        [
+          "hydralisk",
+          4,
+          4.8,
+          0.0
+        ],
+        [
           "swarm-host",
-          10,
-          8.0,
+          6,
+          7.5,
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "GlialReconstitution",
+        "MuscularAugments",
+        "GroovedSpines"
+      ]
     },
     {
       "id": "sc2-sh-d03-tvz-hellbat-tank-clear-locusts",
@@ -16040,36 +16475,59 @@
         "Stim",
         "CombatShield"
       ],
-      "description": "Loop 79 Pro Study (TvZ GuMiho Hellbat-Tank Locust Clear): 6 Hellbats + 12 Stim/CombatShield Marines + 4 Siege Tanks deleting an authentic 20-Locust swoop wave with layered anti-light splash and punishing 10 Swarm Hosts on cooldown",
+      "description": "Loop 83 Pro Realism (TvZ Anti-Locust Splash Clear): 6 Hellbats + 12 Stim/Shield Marines + 4 Siege Tanks + 2 Medivacs vs mixed 6 Swarm Hosts + 8 Speed Roaches + 4 Hydralisks (12t SH standoff, 8t front vision)",
       "p1_units": [
         [
           "hellbat",
           6,
-          -7.6,
+          -4.5,
           0.0
         ],
         [
           "marine",
           12,
-          -8.6,
+          -5.2,
           0.0
         ],
         [
           "siege-tank",
           4,
-          -9.8,
+          -6.2,
+          0.0
+        ],
+        [
+          "medivac",
+          2,
+          -6.8,
           0.0
         ]
       ],
       "p2_units": [
         [
+          "roach",
+          8,
+          3.5,
+          0.0
+        ],
+        [
+          "hydralisk",
+          4,
+          4.8,
+          0.0
+        ],
+        [
           "swarm-host",
-          10,
-          8.0,
+          6,
+          7.5,
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "GlialReconstitution",
+        "MuscularAugments",
+        "GroovedSpines"
+      ]
     },
     {
       "id": "sc2-lib-m01-tvz-dual-liberator-deadspace-harass",
@@ -16168,7 +16626,7 @@
         2542
       ],
       "p1_energy": 160.0,
-      "description": "Loop 79 Pro Study (ZvP Serral Interceptor-Burn): 24 Speed/Range Hydralisks + 2 Vipers vs 6 Carriers committing strictly to pure Interceptor burn + Parasitic Bomb instead of split targeting",
+      "description": "Loop 83 Pro Realism (ZvP Serral Interceptor-Burn vs Skytoss): 24 Speed/Range Hydralisks + 2 Vipers vs 5 Carriers + 2 Archons + 2 PsiStorm High Templar committing strictly to Interceptor burn + Parasitic Bomb",
       "p1_units": [
         [
           "hydralisk",
@@ -16185,13 +16643,28 @@
       ],
       "p2_units": [
         [
+          "archon",
+          2,
+          3.8,
+          0.0
+        ],
+        [
+          "high-templar",
+          2,
+          4.6,
+          0.0
+        ],
+        [
           "carrier",
-          6,
-          5.2,
+          5,
+          5.4,
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "p2_upgrades": [
+        "PsiStorm"
+      ]
     },
     {
       "id": "sc2-car-b02-tvp-bio-viking-binary-carrier-snipe",
@@ -16212,11 +16685,11 @@
         "Stim",
         "CombatShield"
       ],
-      "description": "Loop 79 Pro Study (TvP Binary Carrier-Snipe): 14 Vikings + 12 Stim/CombatShield Marines + 2 Medivacs vs 6 Carriers committing strictly to pure Carrier hull focus-fire (zero mixed Interceptor splitting)",
+      "description": "Loop 83 Pro Realism (TvP Binary Carrier-Snipe vs Skytoss): 14 Vikings + 16 Stim/CombatShield Marines + 2 Medivacs vs 5 Carriers + 2 Archons + 2 PsiStorm High Templar executing pure Carrier hull focus-fire under Storm/Archon pressure",
       "p1_units": [
         [
           "marine",
-          12,
+          16,
           -4.2,
           0.0
         ],
@@ -16235,13 +16708,626 @@
       ],
       "p2_units": [
         [
+          "archon",
+          2,
+          3.8,
+          0.0
+        ],
+        [
+          "high-templar",
+          2,
+          4.6,
+          0.0
+        ],
+        [
           "carrier",
+          5,
+          5.4,
+          0.0
+        ]
+      ],
+      "max_loops": 960,
+      "p2_upgrades": [
+        "PsiStorm"
+      ]
+    },
+    {
+      "id": "sc2-zvz-m01-ling-bane-micro-war",
+      "our_race": "Zerg",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "kiting-concave",
+      "fast_core": true,
+      "source": "pro-db",
+      "terrain": "open",
+      "patterns": [
+        "zvz-ling-bane-micro",
+        "baneling-split",
+        "single-ling-sac",
+        "concave-spread"
+      ],
+      "p1_upgrades": [
+        "MetabolicBoost",
+        "CentrifugalHooks"
+      ],
+      "p2_upgrades": [
+        "MetabolicBoost",
+        "CentrifugalHooks"
+      ],
+      "description": "Loop 83 Pro Mirror (ZvZ Ling-Bane War): 18 Speedlings + 6 Speed Banelings mirror testing anti-bane split, target focus, and efficient detonate trades",
+      "p1_units": [
+        [
+          "zergling",
+          18,
+          -3.5,
+          0.0
+        ],
+        [
+          "baneling",
           6,
-          5.2,
+          -4.6,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "zergling",
+          18,
+          3.5,
+          0.0
+        ],
+        [
+          "baneling",
+          6,
+          4.6,
+          0.0
+        ]
+      ],
+      "max_loops": 720
+    },
+    {
+      "id": "sc2-zvz-m02-roach-ravager-bile-concave",
+      "our_race": "Zerg",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "kiting-concave",
+      "fast_core": true,
+      "source": "pro-db",
+      "terrain": "open",
+      "patterns": [
+        "zvz-roach-ravager",
+        "corrosive-bile",
+        "bile-dodge",
+        "concave-spread"
+      ],
+      "p1_upgrades": [
+        "GlialReconstitution"
+      ],
+      "p2_upgrades": [
+        "GlialReconstitution"
+      ],
+      "expected_abilities": [
+        2338
+      ],
+      "description": "Loop 83 Pro Mirror (ZvZ Roach-Ravager Timing): 12 Speed Roaches + 4 Ravagers mirror testing concave arc width, Corrosive Bile targeting, and dodge micro",
+      "p1_units": [
+        [
+          "roach",
+          12,
+          -3.8,
+          0.0
+        ],
+        [
+          "ravager",
+          4,
+          -5.0,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "roach",
+          12,
+          3.8,
+          0.0
+        ],
+        [
+          "ravager",
+          4,
+          5.0,
+          0.0
+        ]
+      ],
+      "max_loops": 840
+    },
+    {
+      "id": "sc2-zvz-m03-muta-ling-bane-vs-hydra-lurker",
+      "our_race": "Zerg",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "air-superiority",
+      "fast_core": true,
+      "source": "pro-db",
+      "terrain": "open",
+      "patterns": [
+        "zvz-muta-vs-hydra-lurker",
+        "muta-air-control",
+        "baneling-crash",
+        "detector-escort"
+      ],
+      "p1_upgrades": [
+        "MetabolicBoost",
+        "CentrifugalHooks"
+      ],
+      "p2_upgrades": [
+        "MuscularAugments",
+        "GroovedSpines",
+        "AdaptiveTalons",
+        "LurkerRange"
+      ],
+      "description": "Loop 83 Pro Mirror (ZvZ Mid/Late Muta-Ling-Bane vs Hydra-Lurker): 10 Mutalisks + 16 Speedlings + 6 Speed Banes + 1 Overseer vs 12 Hydralisks + 3 Lurkers + 1 Spore Crawler on creep",
+      "p1_units": [
+        [
+          "zergling",
+          16,
+          -3.5,
+          0.0
+        ],
+        [
+          "baneling",
+          6,
+          -4.5,
+          0.0
+        ],
+        [
+          "mutalisk",
+          10,
+          -5.2,
+          -1.8
+        ],
+        [
+          "overseer",
+          1,
+          -5.8,
+          1.5
+        ]
+      ],
+      "p2_units": [
+        [
+          "hydralisk",
+          12,
+          4.0,
+          0.0
+        ],
+        [
+          "lurker-mp",
+          3,
+          4.8,
+          0.0
+        ],
+        [
+          "spore-crawler",
+          1,
+          5.4,
+          0.0
+        ],
+        [
+          "creep-tumor-burrowed",
+          1,
+          4.6,
           0.0
         ]
       ],
       "max_loops": 960
+    },
+    {
+      "id": "sc2-tvt-m01-marine-tank-viking-leapfrog",
+      "our_race": "Terran",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "high-ground-ramp",
+      "fast_core": true,
+      "source": "pro-db",
+      "terrain": "high-ground-ramp",
+      "high_ground_side": "p1",
+      "patterns": [
+        "tvt-marine-tank-viking",
+        "viking-air-control",
+        "siege-tank-leapfrog",
+        "high-ground-hold"
+      ],
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "p2_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "description": "Loop 83 Pro Mirror (TvT Air-Control & Siege Leapfrog): 12 Stim/Shield Marines + 4 Sieged Tanks + 6 Vikings + 2 Medivacs holding high-ground ramp vs mirror siege push",
+      "p1_units": [
+        [
+          "marine",
+          12,
+          -3.2,
+          0.0
+        ],
+        [
+          "siege-tank-sieged",
+          4,
+          -4.6,
+          0.0
+        ],
+        [
+          "viking-fighter",
+          6,
+          -3.8,
+          0.0
+        ],
+        [
+          "medivac",
+          2,
+          -5.6,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "marine",
+          12,
+          4.0,
+          0.0
+        ],
+        [
+          "siege-tank",
+          4,
+          5.2,
+          0.0
+        ],
+        [
+          "viking-fighter",
+          6,
+          4.4,
+          0.0
+        ],
+        [
+          "medivac",
+          2,
+          6.2,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-tvt-m02-reaper-hellion-early-skirmish",
+      "our_race": "Terran",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "kiting-concave",
+      "fast_core": true,
+      "source": "pro-db",
+      "terrain": "open",
+      "patterns": [
+        "tvt-reaper-hellion",
+        "kd8-charge",
+        "reaper-kite-regen",
+        "focus-fire"
+      ],
+      "description": "Loop 83 Pro Mirror (TvT 2:30-4:00 Opener): 3 Reapers + 2 Hellions mirror skirmish testing Reaper focus-fire, KD8 grenade disruption, and low-HP regen kite",
+      "p1_units": [
+        [
+          "reaper",
+          3,
+          -3.5,
+          0.0
+        ],
+        [
+          "hellion",
+          2,
+          -4.4,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "reaper",
+          3,
+          3.5,
+          0.0
+        ],
+        [
+          "hellion",
+          2,
+          4.4,
+          0.0
+        ]
+      ],
+      "max_loops": 720
+    },
+    {
+      "id": "sc2-pvp-m01-blink-immortal-disruptor-skirmish",
+      "our_race": "Protoss",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "spellcasters",
+      "fast_core": true,
+      "source": "pro-db",
+      "terrain": "open",
+      "patterns": [
+        "pvp-blink-disruptor",
+        "purification-nova",
+        "nova-split-dodge",
+        "warp-prism-juggle"
+      ],
+      "p1_upgrades": [
+        "Blink",
+        "GraviticDrive"
+      ],
+      "p2_upgrades": [
+        "Blink",
+        "GraviticDrive"
+      ],
+      "expected_abilities": [
+        2346
+      ],
+      "description": "Loop 83 Pro Mirror (PvP Midgame): 10 Blink Stalkers + 3 Immortals + 2 Disruptors + 1 Speed Warp Prism mirror testing Purification Nova firing, Nova split/dodge, and Prism juggle",
+      "p1_units": [
+        [
+          "stalker",
+          10,
+          -3.8,
+          0.0
+        ],
+        [
+          "immortal",
+          3,
+          -4.6,
+          0.0
+        ],
+        [
+          "disruptor",
+          2,
+          -5.6,
+          0.0
+        ],
+        [
+          "warp-prism",
+          1,
+          -6.2,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "stalker",
+          10,
+          3.8,
+          0.0
+        ],
+        [
+          "immortal",
+          3,
+          4.6,
+          0.0
+        ],
+        [
+          "disruptor",
+          2,
+          5.6,
+          0.0
+        ],
+        [
+          "warp-prism",
+          1,
+          6.2,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-pvp-m02-shield-battery-overcharge-hold",
+      "our_race": "Protoss",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "early-rush-defense",
+      "fast_core": true,
+      "source": "pro-db",
+      "terrain": "mineral-line-harass",
+      "use_main_base": true,
+      "patterns": [
+        "pvp-battery-defense",
+        "blink-back",
+        "defender-anchor",
+        "worker-evac"
+      ],
+      "p1_upgrades": [
+        "Blink"
+      ],
+      "p2_upgrades": [
+        "Blink"
+      ],
+      "description": "Loop 83 Pro Mirror (PvP Battery Hold): 4 Blink Stalkers + 2 powered Shield Batteries + 12 Probes at main Nexus defending vs 6 Blink Stalkers + 1 Immortal pressure",
+      "p1_units": [
+        [
+          "probe",
+          12,
+          -3.2,
+          0.0
+        ],
+        [
+          "pylon",
+          1,
+          2.8,
+          -2.2
+        ],
+        [
+          "shield-battery",
+          1,
+          3.2,
+          -1.0
+        ],
+        [
+          "shield-battery",
+          1,
+          3.2,
+          1.0
+        ],
+        [
+          "stalker",
+          4,
+          3.6,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "stalker",
+          6,
+          8.6,
+          0.0
+        ],
+        [
+          "immortal",
+          1,
+          9.4,
+          0.0
+        ]
+      ],
+      "max_loops": 840
+    },
+    {
+      "id": "sc2-pvz-m01-2adept-shade-harass-vs-queen-ling",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "econ-harass",
+      "category": "runby-offense",
+      "fast_core": true,
+      "source": "pro-db",
+      "terrain": "mineral-line-harass",
+      "scoring_mode": "worker-runby",
+      "use_p2_main_base": true,
+      "pass_workers_killed_min": 4,
+      "patterns": [
+        "pvz-2adept-shade",
+        "adept-shade-harass",
+        "worker-snipe",
+        "kite-escape"
+      ],
+      "p1_upgrades": [
+        "ResonatingGlaives"
+      ],
+      "p2_upgrades": [
+        "MetabolicBoost"
+      ],
+      "expected_abilities": [
+        2544
+      ],
+      "description": "Loop 83 Pro Opener (PvZ 2-Adept Shade Harass): 2 Glaive Adepts shading into Zerg main mineral line vs 16 mining Drones + 2 Queens + 6 Speedlings",
+      "p1_units": [
+        [
+          "adept",
+          2,
+          8.2,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "drone",
+          16,
+          -3.2,
+          0.0
+        ],
+        [
+          "queen",
+          2,
+          2.6,
+          0.0
+        ],
+        [
+          "zergling",
+          6,
+          3.6,
+          0.0
+        ]
+      ],
+      "max_loops": 720
+    },
+    {
+      "id": "sc2-pvz-m02-speedling-flood-incomplete-wall-hold",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "early-rush-defense",
+      "fast_core": true,
+      "source": "pro-db",
+      "terrain": "mineral-line-harass",
+      "use_main_base": true,
+      "patterns": [
+        "pvz-wall-door-hold",
+        "speedling-flood-defense",
+        "shield-battery-hold",
+        "probe-defense"
+      ],
+      "p2_upgrades": [
+        "MetabolicBoost"
+      ],
+      "description": "Loop 83 Pro Survival (PvZ Speedling Flood Wall-Gap Hold): 1 Adept + 2 Stalkers + 1 Shield Battery + 12 Probes behind Gateway/Core choke holding vs 18 Speedlings",
+      "p1_units": [
+        [
+          "probe",
+          12,
+          -3.2,
+          0.0
+        ],
+        [
+          "pylon",
+          1,
+          2.2,
+          -2.5
+        ],
+        [
+          "gateway",
+          1,
+          4.2,
+          -2.2
+        ],
+        [
+          "cybernetics-core",
+          1,
+          4.2,
+          2.2
+        ],
+        [
+          "shield-battery",
+          1,
+          2.6,
+          0.0
+        ],
+        [
+          "adept",
+          1,
+          4.0,
+          0.0
+        ],
+        [
+          "stalker",
+          2,
+          2.8,
+          0.5
+        ]
+      ],
+      "p2_units": [
+        [
+          "zergling",
+          18,
+          9.0,
+          0.0
+        ]
+      ],
+      "max_loops": 720
     }
   ]
 }

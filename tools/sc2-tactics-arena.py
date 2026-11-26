@@ -37,6 +37,7 @@ import asyncio
 import concurrent.futures
 import json
 import math
+import os
 import subprocess
 import sys
 import tempfile
@@ -348,6 +349,147 @@ STALEMATE_NO_DAMAGE_LOOPS = 168  # 7.5s with zero HP/shield damage or unit death
 POINTS_WIN_TRADE = 1.25          # trade >= 1.25x on timeout/stalemate -> Points Win
 POINTS_LOSS_TRADE = 0.80         # trade <= 0.80x on timeout/stalemate -> Points Loss
 MAX_SCENARIOS_PER_BATCH = 10     # cap monotonic upgrade chain batch length to keep containers crisp
+
+# Loop 83: Macro-leak telemetry ability sets (strictly excludes tactical abilities like Prism Warp-In
+# 1413..1419, Carrier Interceptor 1042, Nydus Worm 1768, Auto-Turret 1764, Stasis Ward 2505,
+# Creep Tumor 1694/3691, Queen Inject 251, Mass Recall 3757, Energy Recharge 4126/4107).
+MACRO_WORKER_TRAIN_ABILITY_IDS: set[int] = {524, 1006, 1342}  # TrainSCV, TrainProbe, TrainDrone
+MACRO_BUILD_ABILITY_IDS: set[int] = {
+    318, 319, 320, 321, 322, 323, 324, 326, 327, 328, 329, 331, 333,
+    421, 422, 454, 455, 487, 488, 3682, 3683,
+    880, 881, 882, 883, 884, 885, 886, 887, 889, 890, 891, 892, 893, 894, 895,
+    1152, 1154, 1155, 1156, 1157, 1158, 1159, 1160, 1161, 1162, 1163, 1165, 1166, 1167,
+    1216, 1218, 1220, 1450, 1516,
+}
+MACRO_OTHER_ABILITY_IDS: set[int] = {
+    110, 171, 255,
+    560, 561, 562, 563, 591, 594, 595, 596, 597, 614, 620, 621, 622, 623, 624, 626,
+    916, 917, 919, 920, 921, 922, 946, 948, 950, 954, 955, 976, 977, 978, 979, 994,
+    1343, 1344, 1345, 1346, 1348, 1351, 1352, 1353, 1354, 1356, 1632, 3755,
+}
+MACRO_ALL_ABILITY_IDS: set[int] = (
+    MACRO_WORKER_TRAIN_ABILITY_IDS | MACRO_BUILD_ABILITY_IDS | MACRO_OTHER_ABILITY_IDS
+)
+# Abilities absent on Blizzard 4.10 (`Base75689`) that require SC2 5.0.14+
+PATCH_5014_ONLY_ABILITIES: set[int] = {4111, 4126, 4107}
+
+
+def compute_macro_leak_metrics(ability_accepted: dict[str, int]) -> dict[str, Any]:
+    """Compute accepted L2 macro commands emitted during a Tactics Arena duel (`fighting` phase)."""
+    buildings = 0
+    workers = 0
+    other = 0
+    breakdown: dict[str, int] = {}
+    for ab_k, raw_cnt in (ability_accepted or {}).items():
+        try:
+            ab_id = int(ab_k)
+            cnt = int(raw_cnt)
+        except (TypeError, ValueError):
+            continue
+        if cnt <= 0 or ab_id not in MACRO_ALL_ABILITY_IDS:
+            continue
+        breakdown[str(ab_id)] = cnt
+        if ab_id in MACRO_BUILD_ABILITY_IDS:
+            buildings += cnt
+        elif ab_id in MACRO_WORKER_TRAIN_ABILITY_IDS:
+            workers += cnt
+        else:
+            other += cnt
+    return {
+        "macro_buildings_built": buildings,
+        "macro_workers_trained": workers,
+        "macro_ability_cmds": buildings + workers + other,
+        "macro_ability_breakdown": dict(sorted(breakdown.items(), key=lambda kv: -kv[1])),
+    }
+
+
+def evaluate_spell_verification(
+    exp_ab_ids: list[int],
+    min_expected_casts: int,
+    ability_accepted: dict[str, int],
+    requires_5014: bool = False,
+    engine_is_5014: bool = False,
+) -> tuple[bool | None, bool]:
+    """Return `(spell_verified, spell_patch_gated)` cleanly handling 5.0.14-only spells on Base75689."""
+    if not exp_ab_ids:
+        return None, False
+    acc_total = sum(int((ability_accepted or {}).get(str(int(ab)), 0)) for ab in exp_ab_ids)
+    passed = acc_total >= max(1, int(min_expected_casts or 1))
+    if passed:
+        return True, False
+    if requires_5014 and not engine_is_5014 and any(int(ab) in PATCH_5014_ONLY_ABILITIES for ab in exp_ab_ids):
+        return None, True
+    return False, False
+
+
+BOT_MAP: dict[str, tuple[str, str]] = {
+    "Protoss": ("Mothman-P", "/mothman-repo/bots/Mothman-P.rkt"),
+    "Terran": ("Mothman-T", "/mothman-repo/bots/Mothman-T.rkt"),
+    "Zerg": ("Mothman-Z", "/mothman-repo/bots/Mothman-Z.rkt"),
+}
+
+
+def build_mothman_bot_cmd(
+    bot_name: str,
+    proxy_port: int,
+    start_port: int,
+    opponent_id: str,
+    allow_macro: bool = False,
+) -> list[str]:
+    """Build exact Racket CLI invocation for Mothman inside a Tactics Arena container."""
+    cmd = [
+        "/usr/local/bin/racket", "-U", "-X", "/usr/share/racket/collects",
+        "-G", "/etc/racket-portable",
+        "/mothman-repo/sim/racket-sc2-ladder-main.rkt",
+        "--BotName", bot_name,
+        "--GamePort", str(proxy_port),
+        "--LadderServer", "127.0.0.1",
+        "--StartPort", str(start_port),
+        "--OpponentId", opponent_id,
+    ]
+    if not allow_macro:
+        cmd.append("--no-macro")
+    return cmd
+
+
+def strip_hidden_enemy_townhall_from_obs(
+    obs_msg: Any,
+    enemy_orig_th_tag: int | None,
+    keep_enemy_th: bool,
+    enemy_orig_th_pos: tuple[float, float] | None = None,
+) -> int:
+    """Strip the opponent's distant anchor TownHall (live or fog snapshot) from raw_data.units.
+
+    Prevents Mothman from ever seeing or marching across the map toward the harness's anchor TownHall
+    kept alive only to stop SC2 instant victory. Returns the number of units removed.
+    """
+    if keep_enemy_th or (enemy_orig_th_tag is None and enemy_orig_th_pos is None):
+        return 0
+    raw = getattr(obs_msg, "raw_data", None)
+    units = getattr(raw, "units", None)
+    if units is None:
+        return 0
+    rm_idxs: list[int] = []
+    for idx, u in enumerate(units):
+        if int(getattr(u, "alliance", 0)) != 4:
+            continue
+        tag_match = (
+            enemy_orig_th_tag is not None
+            and int(getattr(u, "tag", -1)) == int(enemy_orig_th_tag)
+        )
+        snap_match = False
+        if not tag_match and enemy_orig_th_pos is not None and int(getattr(u, "unit_type", 0)) in TOWNHALL_IDS:
+            pos = getattr(u, "pos", None)
+            if pos is not None:
+                dx = float(getattr(pos, "x", 0.0)) - float(enemy_orig_th_pos[0])
+                dy = float(getattr(pos, "y", 0.0)) - float(enemy_orig_th_pos[1])
+                if (dx * dx + dy * dy) <= 9.0:
+                    snap_match = True
+        if tag_match or snap_match:
+            rm_idxs.append(idx)
+    for idx in reversed(rm_idxs):
+        del units[idx]
+    return len(rm_idxs)
 
 TOWNHALL_IDS = {18, 59, 86, 100, 101, 130, 132}
 STRUCTURE_IDS = {
@@ -1079,6 +1221,7 @@ class SkirmishSpec:
     map: str = ""                        # optional per-scenario SC2Map filename override (empty -> CLI --map)
     non_combat_objective: str = ""       # required when scoring_mode == "non-combat"
     non_combat_params: dict[str, Any] = field(default_factory=dict)  # rubric thresholds / wave timings / goal offsets
+    allow_macro: bool = False            # True ONLY for explicit building/walling/lifecycle scenarios (omits --no-macro)
 
 
 @dataclass
@@ -1590,6 +1733,7 @@ def load_scenarios(scenarios_path: str = "", repo_dir: Path | None = None) -> li
             map=scen_map,
             non_combat_objective=nc_obj,
             non_combat_params=nc_params,
+            allow_macro=bool(sc.get("allow_macro", False)),
         ))
     return specs
 
@@ -1797,9 +1941,10 @@ def filter_scenarios(
 
 
 def _needs_isolated_batch(s: SkirmishSpec) -> bool:
-    """Return True when a scenario requires a clean fresh match (exact starting bank, map features, & fresh game_loop)."""
+    """Return True when a scenario requires a clean fresh match (exact starting bank, map features, macro lifecycle, & fresh game_loop)."""
     return bool(
         s.scoring_mode == "non-combat"
+        or s.allow_macro
         or s.p1_minerals > 0
         or s.p1_vespene > 0
         or s.p1_starter_buildings
@@ -1812,29 +1957,28 @@ def partition_duel_batches(
     max_batch_size: int = MAX_SCENARIOS_PER_BATCH,
     default_map: str = DEFAULT_MAP,
 ) -> list[tuple[str, str, str, int, list[SkirmishSpec]]]:
-    """Partition scenarios by (effective_map, our_race, enemy_race) into minimal monotonic upgrade chains.
+    """Partition scenarios by (effective_map, our_race, enemy_race, allow_macro) into minimal monotonic upgrade chains.
 
     Because SC2 upgrades persist for the entire match, every batch guarantees
     p1_upgrades(s_i) <= p1_upgrades(s_{i+1}) and p2_upgrades(s_i) <= p2_upgrades(s_{i+1}),
-    ensuring 100% exact per-scenario upgrades with zero cross-duel leakage. Chains longer
-    than `max_batch_size` are split into bounded sub-batches for fast parallel execution.
-    Full-lifecycle econ/kiting & non-combat map-feature drills always get their own isolated
-    fresh match container so P1 starts clean with intact mineral walls/rocks/banks.
+    ensuring 100% exact per-scenario upgrades with zero cross-duel leakage. `allow_macro` scenarios
+    are strictly partitioned away from `--no-macro` scenarios so they never share a bot process.
     """
-    by_key: dict[tuple[str, str, str], list[tuple[int, SkirmishSpec]]] = {}
-    key_order: list[tuple[str, str, str]] = []
+    by_key: dict[tuple[str, str, str, bool], list[tuple[int, SkirmishSpec]]] = {}
+    key_order: list[tuple[str, str, str, bool]] = []
     for idx, s in enumerate(matched_specs):
         eff_map = s.map or default_map
-        key = (eff_map, s.our_race, s.enemy_race)
+        key = (eff_map, s.our_race, s.enemy_race, bool(s.allow_macro))
         if key not in by_key:
             by_key[key] = []
             key_order.append(key)
         by_key[key].append((idx, s))
 
     batches: list[tuple[str, str, str, int, list[SkirmishSpec]]] = []
-    for eff_map, r1, r2 in key_order:
+    next_bidx: dict[tuple[str, str, str], int] = {}
+    for eff_map, r1, r2, allow_m in key_order:
         items = sorted(
-            by_key[(eff_map, r1, r2)],
+            by_key[(eff_map, r1, r2, allow_m)],
             key=lambda it: (
                 len(it[1].p1_upgrades) + len(it[1].p2_upgrades),
                 1 if it[1].scoring_mode in ("mineral-defense", "worker-runby", "non-combat") else 0,
@@ -1866,8 +2010,12 @@ def partition_duel_batches(
                 chains[best_ci].append(s)
             else:
                 chains.append([s])
-        for b_idx, ch in enumerate(chains + isolated):
-            batches.append((eff_map, r1, r2, b_idx, ch))
+        bkey3 = (eff_map, r1, r2)
+        cur_bidx = next_bidx.get(bkey3, 0)
+        for ch in chains + isolated:
+            batches.append((eff_map, r1, r2, cur_bidx, ch))
+            cur_bidx += 1
+        next_bidx[bkey3] = cur_bidx
     return batches
 
 
@@ -2124,7 +2272,7 @@ def _build_aggregate_report(
             "detectors_destroyed": sum(int(s.get("detectors_destroyed", 0)) for s in cs),
             "enemy_workers_killed": sum(int(s.get("enemy_workers_killed", 0)) for s in cs),
         }
-        c_spell_rows = [s for s in cs if s.get("expected_abilities")]
+        c_spell_rows = [s for s in cs if s.get("expected_abilities") and not s.get("spell_patch_gated")]
         if c_spell_rows:
             c_sv = sum(1 for s in c_spell_rows if s.get("spell_verified") is True)
             c_entry["spell_checks_total"] = len(c_spell_rows)
@@ -2143,9 +2291,16 @@ def _build_aggregate_report(
             c_entry["avg_dps_active_pct"] = round(sum(float(s.get("dps_active_pct", 0.0)) for s in c_pos_rows) / len(c_pos_rows), 1)
         by_category[cname] = c_entry
 
-    spell_rows = [s for s in all_scens if s.get("expected_abilities")]
+    spell_patch_gated_rows = [s for s in all_scens if s.get("expected_abilities") and s.get("spell_patch_gated")]
+    spell_rows = [s for s in all_scens if s.get("expected_abilities") and not s.get("spell_patch_gated")]
     spell_verified_cnt = sum(1 for s in spell_rows if s.get("spell_verified") is True)
     spell_unverified_ids = [str(s.get("id")) for s in spell_rows if s.get("spell_verified") is not True]
+    spell_patch_gated_ids = [str(s.get("id")) for s in spell_patch_gated_rows]
+    tot_macro_bldgs = sum(int(s.get("macro_buildings_built", 0)) for s in all_scens)
+    tot_macro_workers = sum(int(s.get("macro_workers_trained", 0)) for s in all_scens)
+    tot_macro_cmds = sum(int(s.get("macro_ability_cmds", 0)) for s in all_scens)
+    nomacro_rows = [s for s in all_scens if not s.get("allow_macro", False)]
+    nomacro_leak_ids = [str(s.get("id")) for s in nomacro_rows if int(s.get("macro_ability_cmds", 0)) > 0]
     trades_sorted = sorted(float(s.get("trade_ratio", 0.0)) for s in all_scens)
     med_trade = round(
         trades_sorted[len(trades_sorted) // 2]
@@ -2172,6 +2327,14 @@ def _build_aggregate_report(
         "spell_verified_count": spell_verified_cnt,
         "spell_verified_pct": round(100.0 * spell_verified_cnt / len(spell_rows), 1) if spell_rows else 0.0,
         "spell_unverified_ids": spell_unverified_ids,
+        "spell_patch_gated_count": len(spell_patch_gated_ids),
+        "spell_patch_gated_ids": spell_patch_gated_ids,
+        "total_macro_buildings_built": tot_macro_bldgs,
+        "total_macro_workers_trained": tot_macro_workers,
+        "total_macro_ability_cmds": tot_macro_cmds,
+        "nomacro_scenarios_total": len(nomacro_rows),
+        "nomacro_leak_count": len(nomacro_leak_ids),
+        "nomacro_leak_scenarios": nomacro_leak_ids,
         "by_race": by_race,
         "by_tier": by_tier,
         "by_category": by_category,
@@ -2682,12 +2845,21 @@ def run_host_driver(args: argparse.Namespace) -> int:
     if rsum.get("record_str"):
         sp_tot = int(rsum.get("spell_checks_total", 0) or 0)
         sp_ok = int(rsum.get("spell_verified_count", 0) or 0)
-        sp_str = f" | Spells={sp_ok}/{sp_tot} ({rsum.get('spell_verified_pct')}%)" if sp_tot > 0 else ""
+        sp_pg = int(rsum.get("spell_patch_gated_count", 0) or 0)
+        sp_pg_s = f", +{sp_pg} 5.0.14-gated" if sp_pg > 0 else ""
+        sp_str = f" | Spells={sp_ok}/{sp_tot} ({rsum.get('spell_verified_pct')}%{sp_pg_s})" if (sp_tot > 0 or sp_pg > 0) else ""
         print(
             f"[ARENA 3.1 {opp_mode}] {rsum['record_str']} | Trade={rsum.get('agg_trade_ratio')}x (med={rsum.get('median_trade_ratio')}x) | "
             f"A:M={rsum.get('am_ratio')}{sp_str} | wall={report.get('total_wall_ms')}ms",
             file=sys.stderr,
         )
+        if "nomacro_scenarios_total" in rsum:
+            print(
+                f"[ARENA 3.1 macro] nomacro_leaks={rsum.get('nomacro_leak_count', 0)}/{rsum.get('nomacro_scenarios_total', 0)} | "
+                f"bldgs={rsum.get('total_macro_buildings_built', 0)} | workers={rsum.get('total_macro_workers_trained', 0)} | "
+                f"macro_cmds={rsum.get('total_macro_ability_cmds', 0)}",
+                file=sys.stderr,
+            )
         if "avg_concave_arc_width" in rsum:
             print(
                 f"[ARENA 3.1 pos] arc={rsum.get('avg_concave_arc_width')}t | "
@@ -3816,11 +3988,6 @@ async def run_in_container(args: argparse.Namespace) -> int:
         "Terran": common_pb2.Terran,
         "Zerg": common_pb2.Zerg,
     }
-    BOT_MAP = {
-        "Protoss": ("Mothman-P", "/mothman-repo/bots/mothman-protoss.rkt"),
-        "Terran": ("Mothman-T", "/mothman-repo/bots/mothman-terran.rkt"),
-        "Zerg": ("Mothman-Z", "/mothman-repo/bots/mothman-zerg.rkt"),
-    }
 
     t_start = time.monotonic()
     sc2_tmp = tempfile.mkdtemp(prefix="sc2_tactics_")
@@ -3901,7 +4068,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                     cg2 = sc2api_pb2.RequestCreateGame(
                         local_map=sc2api_pb2.LocalMap(map_path=args.map),
                         realtime=False,
-                        disable_fog=True,
+                        disable_fog=False,
                     )
                     pa = cg2.player_setup.add()
                     pa.type = sc2api_pb2.Participant
@@ -3961,6 +4128,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         "p1_bc_alive_cnt": 0,
                         "orig_th_positions": [],
                         "mineral_refined": False,
+                        "show_map_active": False,
                         "scen_idx": 0,
                         # wait_init -> clearing -> upgrade_* -> preload_* -> spawning -> fighting -> done
                         "phase": "wait_init",
@@ -4978,6 +5146,14 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         scen_p2_cur = scenarios[min(dstate["scen_idx"], len(scenarios) - 1)]
                                         if is_p2_worker_rush_spec(scen_p2_cur):
                                             await _drive_p2_worker_rush(resp.observation.observation, scen_p2_cur)
+                                    cur_scen_p2_obs = scenarios[min(dstate["scen_idx"], len(scenarios) - 1)] if scenarios else None
+                                    keep_p1_th = bool(cur_scen_p2_obs is not None and cur_scen_p2_obs.use_main_base)
+                                    strip_hidden_enemy_townhall_from_obs(
+                                        resp.observation.observation,
+                                        dstate["p1_orig_th_tag"],
+                                        keep_enemy_th=keep_p1_th,
+                                        enemy_orig_th_pos=dstate["p1_orig_th_pos"],
+                                    )
 
                                 await bot_ws2.send_bytes(resp.SerializeToString())
                                 if dstate["done"].is_set():
@@ -5138,14 +5314,21 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         exp_ab_ids = [int(x) for x in (scen.expected_abilities or [])]
                         exp_acc_map = {str(ab): int(dstate["ability_accepted"].get(str(ab), 0)) for ab in exp_ab_ids}
                         exp_att_map = {str(ab): int(dstate["ability_counts"].get(str(ab), 0)) for ab in exp_ab_ids}
-                        spell_ver: bool | None = (
-                            (sum(exp_acc_map.values()) >= int(scen.min_expected_casts))
-                            if exp_ab_ids else None
+                        engine_is_5014 = ("5014" in str(SC2_BIN) or "Base9" in str(SC2_BIN))
+                        spell_ver, spell_patch_gated = evaluate_spell_verification(
+                            exp_ab_ids,
+                            int(scen.min_expected_casts),
+                            dstate["ability_accepted"],
+                            requires_5014=bool(scen.requires_5014),
+                            engine_is_5014=engine_is_5014,
                         )
-                        spell_ctx = (
-                            f" | Spell={'OK' if spell_ver else 'MISS'}({exp_acc_map})"
-                            if exp_ab_ids else ""
-                        )
+                        if not exp_ab_ids:
+                            spell_ctx = ""
+                        elif spell_patch_gated:
+                            spell_ctx = f" | Spell=PATCH_5014_GATED({exp_acc_map})"
+                        else:
+                            spell_ctx = f" | Spell={'OK' if spell_ver else 'MISS'}({exp_acc_map})"
+                        macro_metrics = compute_macro_leak_metrics(acc_ab_breakdown)
                         pos_agg = aggregate_positioning_metrics(dstate.get("pos_samples") or [])
                         pos_ctx = (
                             f" | Pos(arc={pos_agg['concave_arc_width']:.2f}t, inv={pos_agg['role_inversion_pct']:.1f}%, "
@@ -5213,6 +5396,11 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             "mothman_ability_breakdown": spell_ab_breakdown,
                             "p1_ability_accepted": acc_ab_breakdown,
                             "p1_ability_rejected": rej_ab_breakdown,
+                            "allow_macro": bool(scen.allow_macro),
+                            "macro_buildings_built": macro_metrics["macro_buildings_built"],
+                            "macro_workers_trained": macro_metrics["macro_workers_trained"],
+                            "macro_ability_cmds": macro_metrics["macro_ability_cmds"],
+                            "macro_ability_breakdown": macro_metrics["macro_ability_breakdown"],
                             "concave_arc_width": pos_agg["concave_arc_width"],
                             "role_inversion_pct": pos_agg["role_inversion_pct"],
                             "anti_splash_clump_score": pos_agg["anti_splash_clump_score"],
@@ -5228,7 +5416,9 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             rec["min_expected_casts"] = int(scen.min_expected_casts)
                             rec["expected_ability_accepted"] = exp_acc_map
                             rec["expected_ability_attempted"] = exp_att_map
-                            rec["spell_verified"] = bool(spell_ver)
+                            rec["spell_verified"] = spell_ver
+                            if spell_patch_gated:
+                                rec["spell_patch_gated"] = True
                         if scen.requires_5014:
                             rec["requires_5014"] = True
                         if scen.origin_match_id:
@@ -5376,6 +5566,14 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             dstate["p2_orig_th_pos"],
                                         )
                                         dstate["features_refined"] = True
+                                        # Immediately restore real SC2 Fog-of-War once map features are indexed!
+                                        if dstate.get("show_map_active"):
+                                            await rpc(sc2_ws, sc2api_pb2.Request(
+                                                debug=sc2api_pb2.RequestDebug(
+                                                    debug=[debug_pb2.DebugCommand(game_state=debug_pb2.show_map)]
+                                                )
+                                            ))
+                                            dstate["show_map_active"] = False
 
                                     def _needs_warmup(sc_w: SkirmishSpec) -> bool:
                                         p1_has_w = sc_w.use_main_base and any(UNIT_IDS[u] in WORKER_IDS for u, _, _, _ in sc_w.p1_units)
@@ -5457,6 +5655,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         if kill_tags:
                                             dbg.append(debug_pb2.DebugCommand(kill_unit=debug_pb2.DebugKillUnit(tag=kill_tags)))
                                         await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=dbg)))
+                                        dstate["show_map_active"] = True
                                         dstate["p2_clear_ok"] = False
                                         dstate["phase"] = "clearing"
                                         dstate["phase_start_loop"] = gl
@@ -6403,6 +6602,9 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 dbg.append(debug_pb2.DebugCommand(game_state=debug_pb2.all_resources))
                                             else:
                                                 dbg.append(debug_pb2.DebugCommand(game_state=debug_pb2.gas))
+                                        if dstate.get("show_map_active"):
+                                            dbg.append(debug_pb2.DebugCommand(game_state=debug_pb2.show_map))
+                                            dstate["show_map_active"] = False
                                         if dbg:
                                             await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=dbg)))
                                         has_carriers = any(u == "carrier" for u, _, _, _ in (scen.p1_units + scen.p2_units))
@@ -7058,6 +7260,16 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                     dstate["phase"] = "clearing"
                                                     dstate["phase_start_loop"] = gl
 
+                                if req.HasField("observation") and resp.HasField("observation"):
+                                    cur_scen_obs = scenarios[min(dstate["scen_idx"], len(scenarios) - 1)] if scenarios else None
+                                    keep_p2_th = bool(cur_scen_obs is not None and cur_scen_obs.use_p2_main_base)
+                                    strip_hidden_enemy_townhall_from_obs(
+                                        resp.observation.observation,
+                                        dstate["p2_orig_th_tag"],
+                                        keep_enemy_th=keep_p2_th,
+                                        enemy_orig_th_pos=dstate["p2_orig_th_pos"],
+                                    )
+
                                 await bot_ws.send_bytes(resp.SerializeToString())
                                 if dstate["done"].is_set():
                                     break
@@ -7080,6 +7292,11 @@ async def run_in_container(args: argparse.Namespace) -> int:
                     bot_proc2: subprocess.Popen[bytes] | None = None
                     bot_log2 = None
 
+                    batch_allow_macro = any(s.allow_macro for s in scenarios)
+                    bot_env = dict(os.environ)
+                    if not batch_allow_macro:
+                        bot_env["MOTHMAN_SKIP_BUILD_ORDER"] = "1"
+
                     if opp_mode == "self":
                         app2 = web.Application()
                         app2.router.add_get("/sc2api", duel_ws_handler_p2)
@@ -7087,34 +7304,34 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         await runner2.setup()
                         site2 = web.TCPSite(runner2, "127.0.0.1", PROXY_PORT_2)
                         await site2.start()
-                        bot_cmd2 = [
-                            "/usr/local/bin/racket", "-U", "-X", "/usr/share/racket/collects",
-                            "-G", "/etc/racket-portable",
-                            "/mothman-repo/sim/racket-sc2-ladder-main.rkt",
-                            "--BotName", bname2,
-                            "--GamePort", str(PROXY_PORT_2),
-                            "--LadderServer", "127.0.0.1",
-                            "--StartPort", "8190",
-                            "--OpponentId", bname1,
-                        ]
+                        bot_cmd2 = build_mothman_bot_cmd(
+                            bot_name=bname2,
+                            proxy_port=PROXY_PORT_2,
+                            start_port=8190,
+                            opponent_id=bname1,
+                            allow_macro=batch_allow_macro,
+                        )
                         assert bot_dir2 is not None
                         bot_log2 = (bot_dir2 / "bot.log").open("wb")
-                        bot_proc2 = subprocess.Popen(bot_cmd2, cwd=str(bot_dir2), stdout=bot_log2, stderr=subprocess.STDOUT)
+                        bot_proc2 = subprocess.Popen(
+                            bot_cmd2, cwd=str(bot_dir2), env=bot_env,
+                            stdout=bot_log2, stderr=subprocess.STDOUT,
+                        )
                     else:
                         p2_task = asyncio.create_task(p2_aggressive_micro_loop())
 
-                    bot_cmd1 = [
-                        "/usr/local/bin/racket", "-U", "-X", "/usr/share/racket/collects",
-                        "-G", "/etc/racket-portable",
-                        "/mothman-repo/sim/racket-sc2-ladder-main.rkt",
-                        "--BotName", bname1,
-                        "--GamePort", str(PROXY_PORT_1),
-                        "--LadderServer", "127.0.0.1",
-                        "--StartPort", "8090",
-                        "--OpponentId", p2_label,
-                    ]
+                    bot_cmd1 = build_mothman_bot_cmd(
+                        bot_name=bname1,
+                        proxy_port=PROXY_PORT_1,
+                        start_port=8090,
+                        opponent_id=p2_label,
+                        allow_macro=batch_allow_macro,
+                    )
                     bot_log1 = (bot_dir1 / "bot.log").open("wb")
-                    bot_proc1 = subprocess.Popen(bot_cmd1, cwd=str(bot_dir1), stdout=bot_log1, stderr=subprocess.STDOUT)
+                    bot_proc1 = subprocess.Popen(
+                        bot_cmd1, cwd=str(bot_dir1), env=bot_env,
+                        stdout=bot_log1, stderr=subprocess.STDOUT,
+                    )
                     async def _watch_done_or_crash() -> None:
                         wall_budget = max(240.0, 35.0 * max(1, len(scenarios)))
                         deadline = time.monotonic() + wall_budget

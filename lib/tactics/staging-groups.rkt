@@ -570,7 +570,8 @@
          #:prev-pt [prev-pt #f]
          #:bfs-dist-fn [bfs-dist-fn #f]
          #:enemy-capital-air? [enemy-cap-air? #f]
-         #:group-z [group-z #f])
+         #:group-z [group-z #f]
+         #:has-home-base? [has-home-base? #t])
   (define mw (flmax 64.0 (fl->safe map-w 200.0)))
   (define mh (flmax 64.0 (fl->safe map-h 200.0)))
   (define air-domain? (or (eq? domain 'air) (eq? domain 'drop)))
@@ -585,11 +586,13 @@
   (define fny (fl->safe nat-y fby))
 
   (define th-recs
-    (if (pair? ally-townhalls)
-        (filter (lambda (b) (and (rec-xy? b) (not (rec-snapshot? b)))) ally-townhalls)
-        (filter (lambda (b) (and (rec-xy? b) (not (rec-snapshot? b)) (memq (rec-type-sym b) TOWNHALL-SYMS)))
-                (or ally-buildings '()))))
-  (define has-owned-th? (pair? th-recs))
+    (if (not has-home-base?)
+        '()
+        (if (pair? ally-townhalls)
+            (filter (lambda (b) (and (rec-xy? b) (not (rec-snapshot? b)))) ally-townhalls)
+            (filter (lambda (b) (and (rec-xy? b) (not (rec-snapshot? b)) (memq (rec-type-sym b) TOWNHALL-SYMS)))
+                    (or ally-buildings '())))))
+  (define has-owned-th? (and has-home-base? (pair? th-recs)))
   ;; Loop 76 P0: When 0 owned TownHalls exist (skirmish / base-eliminated), NEVER fall back
   ;; to distant corner `(base-x, base-y)` (`32.5, 32.5`). Compute a bounded `6.5t` disengage
   ;; away from `(threat-x, threat-y)` blended tangentially away from arena edges `[10, mw-10]`.
@@ -987,7 +990,8 @@
          #:ally-combat-supply [ally-combat-supply 0]
          #:enemy-believed-supply [enemy-believed-supply 0]
          #:in-production-counts [in-prod-counts (hasheq)]
-         #:defensive-muster-active? [defensive-muster-active? #f])
+         #:defensive-muster-active? [defensive-muster-active? #f]
+         #:skip-build-order? [skip-build-order? #f])
   ;; Reset cleanly on new match / frame rewind
   (when (or (<= frame 4) (< frame (unbox (staging-group-manager-last-frame mgr))))
     (staging-group-manager-reset! mgr))
@@ -995,12 +999,13 @@
 
   ;; Hard Safety Override #4: Live Full-Match Gate Only (Arena / isolated skirmishes bypass)
   (define eligible?
-    (staging-live-full-match-eligible?
-     #:live-obs? live-obs?
-     #:ally-buildings ally-buildings
-     #:ally-units ally-units
-     #:mineral-harvesters mineral-harvesters
-     #:vespene-harvesters vespene-harvesters))
+    (and (not skip-build-order?)
+         (staging-live-full-match-eligible?
+          #:live-obs? live-obs?
+          #:ally-buildings ally-buildings
+          #:ally-units ally-units
+          #:mineral-harvesters mineral-harvesters
+          #:vespene-harvesters vespene-harvesters)))
 
   (cond
     [(or (not eligible?) (null? combat-units))

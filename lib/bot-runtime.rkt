@@ -65,6 +65,8 @@
          (only-in "plan/wall-and-block.rkt"
                   plan-protoss-emergency-walloff-and-cancel
                   plan-pro-offensive-expansion-block)
+         (only-in "plan/multitask-harass-and-proxy.rkt"
+                  reset-adept-shade-birth-table!)
          "plan/macro-ability-policy.rkt"
          "engine/arbiter.rkt"
          "tactics/staging-groups.rkt"
@@ -137,6 +139,9 @@
  rt-spell-claims
  rt-unit-mode-tracker
  rt-transport-tracker
+ rt-skip-build-order?
+ set-rt-skip-build-order?!
+ reset-tactics-arena-runtime-state!
  reset-wave3-tactical-state!
  bayesian-posterior-from-likelihoods
  compute-bayesian-pad-camped-posterior
@@ -189,16 +194,20 @@
 (define-rt-weak-state rt-enemy-race-box     (box 'Unknown))
 (define-rt-weak-state rt-initial-enemy-race-box (box #f))
 (define-rt-weak-state rt-experiment-box     (box #f))
-(define-rt-weak-state rt-creep-tracker      (make-creep-spread-tracker))
-(define-rt-weak-state rt-burrow-tracker     (make-burrow-dodge-tracker))
+(define-values (rt-creep-tracker reset-rt-creep-tracker!)
+  (make-resettable-rt-weak-state make-creep-spread-tracker))
+(define-values (rt-burrow-tracker reset-rt-burrow-tracker!)
+  (make-resettable-rt-weak-state make-burrow-dodge-tracker))
 (define-rt-weak-state rt-bayes-cache        (make-vector 30 #f))
-(define-rt-weak-state rt-map-elem-tracker   (make-map-element-tracker))
+(define-values (rt-map-elem-tracker reset-rt-map-elem-tracker!)
+  (make-resettable-rt-weak-state make-map-element-tracker))
 (define-rt-weak-state rt-simcity-cache      (make-hash))
 (define-rt-weak-state rt-sit-plan-cache     (box #f))
 (define-rt-weak-state rt-wall-state         (make-hasheq))
 (define-rt-weak-state rt-rush-defense-state (make-hasheqv))
 (define-rt-weak-state rt-wave3-frame-box    (box -1))
-(define-rt-weak-state rt-macro-policy-latch (make-macro-policy-latch))
+(define-values (rt-macro-policy-latch reset-rt-macro-policy-latch!)
+  (make-resettable-rt-weak-state make-macro-policy-latch))
 (define-rt-weak-state rt-l2-scratch         (make-hasheq))
 (define-rt-weak-state rt-macro-bundle-cache (box #f))
 (define-rt-weak-state rt-l34-scratch        (make-hasheq))
@@ -214,6 +223,23 @@
 (define-rt-weak-state rt-arbiter-ledger (make-arbiter-ledger))
 (define-rt-weak-state rt-multiprong-state (make-multiprong-state))
 (define-rt-weak-state rt-prev-unit-ehp (make-hasheqv))
+(define-rt-weak-state rt-skip-build-order-box (box #f))
+;; Vector `#(prev-frame prev-ally-combat-tag-set prev-ally-worker-tag-set)` for inter-scenario reset in `--no-macro` batches.
+(define-rt-weak-state rt-arena-batch-tracker (vector -1 (seteqv) (seteqv)))
+
+(define (rt-skip-build-order? rt)
+  (and (live-bot-runtime? rt) (unbox (rt-skip-build-order-box rt)) #t))
+
+(define (set-rt-skip-build-order?! rt val)
+  (when (live-bot-runtime? rt)
+    (set-box! (rt-skip-build-order-box rt) (and val #t))))
+
+;; True ONLY when a real home-base macro economy exists to rally/pull back to.
+;; Returns `#t` on normal ladder (`skip-build-order? = #f` AND `live-th-cnt >= 1`, ZERO diff!),
+;; and `#f` in Tactics Arena (`--no-macro`) as well as 0-TH unit tests / base-trade last stands.
+(define (l34-has-home-economy-base? rt live-th-cnt)
+  (and (not (rt-skip-build-order? rt))
+       (> (or live-th-cnt 0) 0)))
 
 (define (pooled-hasheq! scratch key)
   (let ([ht (hash-ref scratch key #f)])
@@ -319,6 +345,118 @@
                             tank-dwell-ht)))
           (hash-remove! st k)))))
   (void))
+
+;; Loop 83: Complete inter-scenario runtime state reset for Tactics Arena `--no-macro` batches.
+;; Preserves `bot-name`, `configured-race`, `actual-race`, `doctrine`, and `rt-skip-build-order?`,
+;; while wiping all cross-scenario mutable memory (wave-loss pullback, bistable latches, mirror-mind
+;; enemy-tech cache, tactical-brain, arbiter-ledger, door-state/l65f-last-contact-frame, cortex
+;; EPM/APM buckets, cooldowns, order-ledger, staging-groups, adept-shade-birth-table, etc.).
+(define (reset-tactics-arena-runtime-state! rt)
+  (when (live-bot-runtime? rt)
+    (define cfg-race (live-bot-runtime-configured-race rt))
+    (define eff-race
+      (let ([ar (live-bot-runtime-actual-race rt)])
+        (if (memq ar '(Zerg Terran Protoss))
+            ar
+            (if (eq? cfg-race 'Random) 'Zerg cfg-race))))
+    (define def-post (default-posture-for-race cfg-race))
+    (define old-mstate (live-bot-runtime-mastermind rt))
+    (define eff-pers
+      (or (and (mastermind-state? old-mstate) (mastermind-state-personality old-mstate))
+          (default-personality-for-race eff-race)))
+    (define old-cortex (live-bot-runtime-cortex rt))
+    (define prof-sym
+      (if (human-cortex? old-cortex)
+          (human-cortex-profile-name old-cortex)
+          'Serral))
+    (define epm-cap
+      (if (human-cortex? old-cortex)
+          (human-cortex-epm-cap old-cortex)
+          420))
+    (set-live-bot-runtime-posture! rt def-post)
+    (set-live-bot-runtime-posture-history! rt (list def-post))
+    (set-live-bot-runtime-perception! rt (make-perception-grid))
+    (set-live-bot-runtime-mastermind! rt (make-mastermind-state eff-race eff-pers))
+    (set-live-bot-runtime-mirror-mind! rt (make-mirror-mind-state #:our-race eff-race))
+    (set-live-bot-runtime-ledger! rt
+      (make-symbiotic-ledger SC2-STARTING-MINERALS SC2-STARTING-GAS SC2-STARTING-WORKERS))
+    (set-live-bot-runtime-cast-limiter! rt
+      (make-ability-cast-limiter #:max-per-frame 2 #:refractory-frames 16))
+    (set-live-bot-runtime-cortex! rt
+      (make-human-cortex #:profile prof-sym
+                         #:cam-x SC2-DEFAULT-HOME-BASE-X
+                         #:cam-y SC2-DEFAULT-HOME-BASE-Y
+                         #:epm-cap epm-cap
+                         #:max-tokens 32))
+    (let ([uct (live-bot-runtime-used-creep-tumors rt)])
+      (when (set-mutable? uct) (set-clear! uct)))
+    (set-live-bot-runtime-cooldown-tracker! rt (make-refractory-cooldown-tracker))
+    (set-live-bot-runtime-bookmarks-initialized?! rt #f)
+    (set-live-bot-runtime-last-telemetry! rt (hash))
+    (set-live-bot-runtime-order-ledger! rt (make-order-ledger))
+    (set-live-bot-runtime-tactical-brain! rt (make-tactical-mirror-brain))
+    (reset-wave3-tactical-state! rt)
+    (reset-rt-creep-tracker! rt)
+    (reset-rt-burrow-tracker! rt)
+    (reset-rt-map-elem-tracker! rt)
+    (reset-rt-macro-policy-latch! rt)
+    (staging-group-manager-reset! (rt-staging-groups rt))
+    (for ([h (in-list (list (rt-enemy-pos-cache rt)
+                            (rt-role-leases rt)
+                            (rt-bistable-states rt)
+                            (rt-scout-state rt)
+                            (rt-spotter-lings rt)
+                            (rt-tumor-state rt)
+                            (rt-door-state rt)
+                            (rt-splash-state rt)
+                            (rt-simcity-cache rt)
+                            (rt-wall-state rt)
+                            (rt-rush-defense-state rt)
+                            (rt-wave-loss-state rt)
+                            (rt-loss-recovery-state rt)))])
+      (when (hash? h) (hash-clear! h)))
+    (let ([vt (rt-valid-tags-cache rt)])
+      (when (vector? vt)
+        (vector-set! vt 0 #f)
+        (when (hash? (vector-ref vt 1)) (hash-clear! (vector-ref vt 1)))
+        (vector-set! vt 2 #f)
+        (vector-set! vt 3 #f)
+        (vector-set! vt 4 -1)))
+    (let ([bc (rt-bayes-cache rt)])
+      (when (vector? bc) (vector-fill! bc #f)))
+    (let ([pc (rt-combat-pred-cache rt)])
+      (when (vector? pc)
+        (vector-fill! pc #f)
+        (vector-set! pc 5 -9999)))
+    (set-box! (rt-wall-aabbs-box rt) '())
+    (set-box! (rt-enemy-race-box rt) 'Unknown)
+    (set-box! (rt-initial-enemy-race-box rt) #f)
+    (set-box! (rt-experiment-box rt) #f)
+    (set-box! (rt-sit-plan-cache rt) #f)
+    (let ([tr (rt-arena-batch-tracker rt)])
+      (when (vector? tr)
+        (vector-set! tr 0 -1)
+        (vector-set! tr 1 (seteqv))
+        (vector-set! tr 2 (seteqv))))
+    (reset-adept-shade-birth-table!)
+    (reset-sc2-nexus-recharge-cooldown!))
+  (void))
+
+(define (extract-alive-ally-unit-tag-sets obs)
+  (for/fold ([combat-s (seteqv)] [worker-s (seteqv)])
+            ([u (in-list (hash-ref obs 'ally-units '()))]
+             #:when (and (hash? u)
+                         (not (eq? (hash-ref u 'snapshot? #f) #t))))
+    (define uid (hash-ref u 'id #f))
+    (cond
+      [(not (and (exact-integer? uid) (> uid 0)))
+       (values combat-s worker-s)]
+      [(combat-unit-record? u)
+       (values (set-add combat-s uid) worker-s)]
+      [(memq (unit-type-sym u) '(probe scv drone))
+       (values combat-s (set-add worker-s uid))]
+      [else
+       (values combat-s worker-s)])))
 
 (define ORDER-PROT-CACHE (make-hasheqv))
 (define CAN-ATK-AIR-CACHE (make-hasheq))
@@ -1172,7 +1310,8 @@
                                #:state-machine [_sm #f]
                                #:doctrine [doctrine #f]
                                #:epm-cap [epm-cap 420]
-                               #:initial-posture [init-posture #f])
+                               #:initial-posture [init-posture #f]
+                               #:skip-build-order? [skip-build-order? #f])
   (define norm-race (normalize-race-sym race))
   (define eff-race (if (eq? norm-race 'Random) 'Zerg norm-race))
   (define pers (or personality (default-personality-for-race norm-race)))
@@ -1181,30 +1320,34 @@
     (cond
       [(symbol? cortex-profile) cortex-profile]
       [else 'Serral]))
-  (live-bot-runtime
-   bot-name
-   norm-race
-   eff-race
-   post
-   (list post)
-   (make-perception-grid)
-   (make-mastermind-state eff-race pers)
-   (make-mirror-mind-state #:our-race eff-race)
-   doctrine
-   (make-symbiotic-ledger SC2-STARTING-MINERALS SC2-STARTING-GAS SC2-STARTING-WORKERS)
-   (make-ability-cast-limiter #:max-per-frame 2 #:refractory-frames 16)
-   (make-human-cortex #:profile prof-sym
-                      #:cam-x SC2-DEFAULT-HOME-BASE-X
-                      #:cam-y SC2-DEFAULT-HOME-BASE-Y
-                      #:epm-cap epm-cap
-                      #:max-tokens 32)
-   (mutable-set)
-   (make-refractory-cooldown-tracker)
-   #f
-   0
-   (hash)
-   (make-order-ledger)
-   (make-tactical-mirror-brain)))
+  (define rt
+    (live-bot-runtime
+     bot-name
+     norm-race
+     eff-race
+     post
+     (list post)
+     (make-perception-grid)
+     (make-mastermind-state eff-race pers)
+     (make-mirror-mind-state #:our-race eff-race)
+     doctrine
+     (make-symbiotic-ledger SC2-STARTING-MINERALS SC2-STARTING-GAS SC2-STARTING-WORKERS)
+     (make-ability-cast-limiter #:max-per-frame 2 #:refractory-frames 16)
+     (make-human-cortex #:profile prof-sym
+                        #:cam-x SC2-DEFAULT-HOME-BASE-X
+                        #:cam-y SC2-DEFAULT-HOME-BASE-Y
+                        #:epm-cap epm-cap
+                        #:max-tokens 32)
+     (mutable-set)
+     (make-refractory-cooldown-tracker)
+     #f
+     0
+     (hash)
+     (make-order-ledger)
+     (make-tactical-mirror-brain)))
+  (when skip-build-order?
+    (set-rt-skip-build-order?! rt #t))
+  rt)
 
 (struct random-stealth-harass-plan
   (active?
@@ -2826,10 +2969,10 @@
        (hash-set! wstate 'peak-wave-supply combat-army-supply))
      (define cur-peak (max prev-peak combat-army-supply))
      (hash-set! wstate 'peak-wave-supply cur-peak)
-     ;; Loop 76B P0 (A1 `#2388`): Never arm 10s pullback when we own 0 TownHalls
-     ;; (arena/base-trade must fight!), while restoring 100% of `> 0`-TH ladder
-     ;; `< 0.85x est-enemy-army-supply` & `35%` wave-loss pullback even under partial Fog!
-     (when (and (> live-th-cnt-pb 0)
+     ;; Loop 76B P0 (A1 `#2388`) + Loop 83: Never arm 10s wave-loss pullback when no real
+     ;; home-base economy exists (`0` THs OR `--no-macro` Arena with hidden anchor TH!),
+     ;; while preserving 100% of normal ladder (`>= 1`-TH, `skip-build-order? = #f`) pullback!
+     (when (and (l34-has-home-economy-base? rt live-th-cnt-pb)
                 (or (and (> est-enemy-army-sup 0.0)
                          (< combat-army-supply (* 0.85 est-enemy-army-sup)))
                     (and (>= cur-peak 16.0)
@@ -28267,33 +28410,306 @@
   (reverse (l2-ctx-actions ctx))
   (reverse (l2-ctx-actions ctx)))
 
+;; Loop 83 (`--no-macro` / `MOTHMAN_SKIP_BUILD_ORDER=1`): Combat-cast-only Layer 2 tail.
+;; Preserves Protoss Nexus Energy Recharge (`4126`, no Chrono Boost) and Terran Supply Depot
+;; wall-door raise/lower (`558`/`556`) while skipping all build-order, expansion, unit training,
+;; upgrade research, macro-escrow, and macro-chrono phases.
+(define (l2-run-nomacro-combat-micro! ctx)
+  (define rt (l2-ctx-rt ctx))
+  (define obs (l2-ctx-obs ctx))
+  (define frame (l2-ctx-frame ctx))
+  (define race (l2-ctx-race ctx))
+  (define ally-units (l2-ctx-ally-units ctx))
+  (define ally-bldgs (l2-ctx-ally-bldgs ctx))
+  (define enemy-units (l2-ctx-enemy-units ctx))
+  (define base-x (l2-ctx-base-x ctx))
+  (define base-y (l2-ctx-base-y ctx))
+  (define nat-x (l2-ctx-nat-x ctx))
+  (define nat-y (l2-ctx-nat-y ctx))
+  (define cd-tracker (l2-ctx-cd-tracker ctx))
+  (define oledger (live-bot-runtime-order-ledger rt))
+  (define live-game? (l2-ctx-live-obs-harvesters? ctx))
+  (case race
+    [(Protoss)
+     ;; Protoss combat-cast: Nexus Energy Recharge (`4126`) only (NO Chrono Boost `3755`).
+     (define ready-nexuses
+       (for/list ([b (in-list ally-bldgs)]
+                  #:when (and (hash? b)
+                              (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'nexus)
+                              (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
+         b))
+     (when (pair? ready-nexuses)
+       (define recharge-claims (rt-spell-claims rt))
+       (define recharge-dedup-frames 24)
+       (define recharge-cd-ready?
+         (and (= (spell-unit-claim-count recharge-claims 'nexus-energy-recharge 1 frame) 0)
+              (or (not live-game?)
+                  (sc2-nexus-recharge-cooldown-ready? frame))))
+       (define recharge-nx-infos
+         (for/list ([nx (in-list ready-nexuses)]
+                    #:when (and (exact-integer? (hash-ref nx 'id -1))
+                                (> (hash-ref nx 'id -1) 0)
+                                (real? (hash-ref nx 'x #f))
+                                (real? (hash-ref nx 'y #f))))
+           (macro-nexus-info (hash-ref nx 'id -1)
+                             (exact->inexact (hash-ref nx 'x 0.0))
+                             (exact->inexact (hash-ref nx 'y 0.0))
+                             (exact->inexact (hash-ref nx 'energy 0.0))
+                             #f #f)))
+       (define recharge-caster-infos
+         (if (and recharge-cd-ready? (pair? recharge-nx-infos))
+             (for/list ([u (in-list ally-units)]
+                        #:when (and (hash? u)
+                                    (real? (hash-ref u 'x #f))
+                                    (real? (hash-ref u 'y #f))
+                                    (memq (fast-canonical-unit-sym (unit-type-sym u))
+                                          '(high-templar oracle sentry mothership))))
+               (macro-caster-info (hash-ref u 'id -1)
+                                  (fast-canonical-unit-sym (unit-type-sym u))
+                                  (exact->inexact (hash-ref u 'x 0.0))
+                                  (exact->inexact (hash-ref u 'y 0.0))
+                                  (exact->inexact (hash-ref u 'energy 100.0))
+                                  (or (eq? (hash-ref u 'is-hallucination #f) #t)
+                                      (eq? (hash-ref u 'hallucination #f) #t)
+                                      (eq? (hash-ref u 'hallucination? #f) #t))))
+             '()))
+       (define recharge-cast-range-eff
+         (+ (sc2-spell-cast-range 'nexus-energy-recharge 15.0) 2.5))
+       (define recharge-dec
+         (evaluate-protoss-nexus-recharge-policy
+          #:ready-nexuses recharge-nx-infos
+          #:ally-casters recharge-caster-infos
+          #:enemy-units-present? (pair? enemy-units)
+          #:recharge-available? (or (not live-game?) (sc2-ability-live-available? 4126))
+          #:recharge-off-cooldown? recharge-cd-ready?
+          #:cast-range recharge-cast-range-eff
+          #:approach-hold-range 22.0))
+       (define recharge-cast-nx-id (protoss-nexus-recharge-decision-cast-nexus-tag recharge-dec))
+       (define recharge-cast-tgt-id (protoss-nexus-recharge-decision-cast-target-tag recharge-dec))
+       (when (and recharge-cast-nx-id recharge-cast-tgt-id)
+         (spell-claim-unit?! recharge-claims 'nexus-energy-recharge 1 frame recharge-dedup-frames
+                             #:caster-tag recharge-cast-nx-id)
+         (l2-emit! ctx (list 'cast-spell recharge-cast-nx-id 'nexus-energy-recharge recharge-cast-tgt-id))))]
+    [(Terran)
+     ;; Terran combat-cast: Supply Depot wall raise/lower (`558`/`556`) & unit unstick only.
+     (define depot-bldgs
+       (for/list ([b (in-list ally-bldgs)]
+                  #:when (and (hash? b)
+                              (memq (unit-type-sym b) '(supply-depot supply-depot-lowered))
+                              (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
+         b))
+     (when (pair? depot-bldgs)
+       (define door-st (rt-door-state rt))
+       (define stuck-tbl (hash-ref! door-st 'stuck-counts (lambda () (make-hasheqv))))
+       (define-values (raised-depots lowered-depots)
+         (for/fold ([r-rev '()] [l-rev '()]
+                    #:result (values (reverse r-rev) (reverse l-rev)))
+                   ([d (in-list depot-bldgs)])
+           (if (eq? (unit-type-sym d) 'supply-depot)
+               (values (cons d r-rev) l-rev)
+               (values r-rev (cons d l-rev)))))
+       (define ground-enemy-pts
+         (for/list ([e (in-list enemy-units)]
+                    #:when (and (hash? e)
+                                (not (or (eq? (hash-ref e 'is-flying #f) #t)
+                                         (eq? (hash-ref e 'flying? #f) #t)))
+                                (not (hash-ref NON-COMBAT-AND-SCOUT-ENEMY-HT (unit-type-sym e) #f))))
+           (define et (unit-type-sym e))
+           (define ex (hash-ref e 'x 9999.0))
+           (define ey (hash-ref e 'y 9999.0))
+           (define fast? (not (not (memq et '(zergling baneling reaper adept hellion hellbat cyclone)))))
+           (vector (if (real? ex) (exact->inexact ex) 9999.0)
+                   (if (real? ey) (exact->inexact ey) 9999.0)
+                   (if fast? 256.0 196.0)
+                   (if fast? 289.0 225.0))))
+       (define (raised-depot-enemy-near? dx dy)
+         (for/or ([ep (in-list ground-enemy-pts)])
+           (define ddx (fl- dx (vector-ref ep 0)))
+           (define ddy (fl- dy (vector-ref ep 1)))
+           (fl<= (fl+ (fl* ddx ddx) (fl* ddy ddy)) (vector-ref ep 3))))
+       (define base-x-fl (exact->inexact base-x))
+       (define base-y-fl (exact->inexact base-y))
+       (define nat-x-fl (exact->inexact nat-x))
+       (define nat-y-fl (exact->inexact nat-y))
+       (define front-depot-xs (for/list ([fd (in-list depot-bldgs)]) (exact->inexact (hash-ref fd 'x base-x))))
+       (define front-depot-ys (for/list ([fd (in-list depot-bldgs)]) (exact->inexact (hash-ref fd 'y base-y))))
+       (define raised-depot-xs (for/list ([rd (in-list raised-depots)]) (exact->inexact (hash-ref rd 'x base-x))))
+       (define raised-depot-ys (for/list ([rd (in-list raised-depots)]) (exact->inexact (hash-ref rd 'y base-y))))
+       (define has-raised? (pair? raised-depots))
+       (define active-stuck-tags (pooled-mutable-seteqv! (rt-l2-scratch rt) 'door-active-stuck-tags))
+       (define seen-transiting-ht (pooled-hasheqv! (rt-l2-scratch rt) 'door-seen-transiting))
+       (define transiting-tags-rev '())
+       (for ([u (in-list ally-units)])
+         (define uid (hash-ref u 'id #f))
+         (when (and (exact-integer? uid)
+                    (> uid 0)
+                    (not (eq? (hash-ref u 'is-flying #f) #t))
+                    (not (eq? (hash-ref u 'flying? #f) #t)))
+           (define ux (exact->inexact (hash-ref u 'x base-x)))
+           (define uy (exact->inexact (hash-ref u 'y base-y)))
+           (when (and (not (hash-ref seen-transiting-ht uid #f))
+                      (for/or ([fx (in-list front-depot-xs)]
+                               [fy (in-list front-depot-ys)])
+                        (define ddx (fl- ux fx))
+                        (define ddy (fl- uy fy))
+                        (fl<= (fl+ (fl* ddx ddx) (fl* ddy ddy)) 17.64)))
+             (hash-set! seen-transiting-ht uid #t)
+             (set! transiting-tags-rev (cons uid transiting-tags-rev)))
+           (when (and has-raised? (not (= (hash-ref u 'order-ability-id 0) 18)))
+             (define near-raised #f)
+             (define near-dx 0.0)
+             (define near-dy 0.0)
+             (for ([rd (in-list raised-depots)]
+                   [dx (in-list raised-depot-xs)]
+                   [dy (in-list raised-depot-ys)]
+                   #:break near-raised)
+               (define ddx (fl- ux dx))
+               (define ddy (fl- uy dy))
+               (when (fl<= (fl+ (fl* ddx ddx) (fl* ddy ddy)) 12.25)
+                 (set! near-raised rd)
+                 (set! near-dx dx)
+                 (set! near-dy dy)))
+             (when (and near-raised (not (raised-depot-enemy-near? near-dx near-dy)))
+               (set-add! active-stuck-tags uid)
+               (define cnt (add1 (hash-ref stuck-tbl uid 0)))
+               (hash-set! stuck-tbl uid cnt)
+               (when (>= cnt 2)
+                 (define on-base-side?
+                   (let ([udx (fl- ux base-x-fl)]
+                         [udy (fl- uy base-y-fl)]
+                         [ddx (fl- near-dx base-x-fl)]
+                         [ddy (fl- near-dy base-y-fl)])
+                     (fl<= (fl+ (fl* udx udx) (fl* udy udy))
+                           (fl+ (fl* ddx ddx) (fl* ddy ddy)))))
+                 (define-values (tx ty)
+                   (if on-base-side?
+                       (let* ([vx (fl- nat-x-fl near-dx)]
+                              [vy (fl- nat-y-fl near-dy)]
+                              [vn (flmax 1.0 (flsqrt (fl+ (fl* vx vx) (fl* vy vy))))])
+                         (values (safe-coord (fl+ near-dx (fl* 4.5 (fl/ vx vn))) nat-x)
+                                 (safe-coord (fl+ near-dy (fl* 4.5 (fl/ vy vn))) nat-y)))
+                       (let* ([vx (fl- base-x-fl near-dx)]
+                              [vy (fl- base-y-fl near-dy)]
+                              [vn (flmax 1.0 (flsqrt (fl+ (fl* vx vx) (fl* vy vy))))])
+                         (values (safe-coord (fl+ near-dx (fl* 4.5 (fl/ vx vn))) base-x)
+                                 (safe-coord (fl+ near-dy (fl* 4.5 (fl/ vy vn))) base-y)))))
+                 (l2-emit! ctx (list 'move uid tx ty))
+                 (order-ledger-record-issued! oledger uid 'move 'depot-unstick tx ty frame))))))
+       (define transiting-tags (reverse transiting-tags-rev))
+       (define early-melee-wall-lock?
+         (and (< frame 4000)
+              (for/or ([e (in-list enemy-units)])
+                (and (hash? e)
+                     (memq (unit-type-sym e) '(zergling baneling zealot))
+                     (for/or ([fx (in-list front-depot-xs)]
+                              [fy (in-list front-depot-ys)])
+                       (define ddx (fl- (exact->inexact (hash-ref e 'x 9999.0)) fx))
+                       (define ddy (fl- (exact->inexact (hash-ref e 'y 9999.0)) fy))
+                       (fl<= (fl+ (fl* ddx ddx) (fl* ddy ddy)) 484.0))))))
+       (for ([d (in-list lowered-depots)])
+         (define did (hash-ref d 'id 0))
+         (define dx (exact->inexact (hash-ref d 'x base-x)))
+         (define dy (exact->inexact (hash-ref d 'y base-y)))
+         (define breach-threat?
+           (or early-melee-wall-lock?
+               (for/or ([ep (in-list ground-enemy-pts)])
+                 (define ddx (fl- dx (vector-ref ep 0)))
+                 (define ddy (fl- dy (vector-ref ep 1)))
+                 (fl<= (fl+ (fl* ddx ddx) (fl* ddy ddy)) (vector-ref ep 2)))))
+         (when breach-threat?
+           (define vdx (fl- base-x-fl dx))
+           (define vdy (fl- base-y-fl dy))
+           (define vd (flmax 1.0 (flsqrt (fl+ (fl* vdx vdx) (fl* vdy vdy)))))
+           (define move-tx (safe-coord (+ dx (* 3.5 (/ vdx vd))) base-x))
+           (define move-ty (safe-coord (+ dy (* 3.5 (/ vdy vd))) base-y))
+           (define any-blocking? #f)
+           (for ([u (in-list ally-units)])
+             (define uid (hash-ref u 'id #f))
+             (when (and (exact-integer? uid)
+                        (> uid 0)
+                        (not (or (eq? (hash-ref u 'is-flying #f) #t)
+                                 (eq? (hash-ref u 'flying? #f) #t))))
+               (define ddx (fl- (exact->inexact (hash-ref u 'x base-x)) dx))
+               (define ddy (fl- (exact->inexact (hash-ref u 'y base-y)) dy))
+               (when (fl<= (fl+ (fl* ddx ddx) (fl* ddy ddy)) 2.4025)
+                 (set! any-blocking? #t)
+                 (l2-emit! ctx (list 'move uid move-tx move-ty)))))
+           (when (and (not any-blocking?)
+                      (> did 0)
+                      (refractory-allow-action?! cd-tracker (list 'depot-raise did) frame 12))
+             (l2-emit! ctx (list 'cast-spell did 'morph-supply-depot-raise)))))
+       (when (and (not (null? transiting-tags))
+                  (not early-melee-wall-lock?))
+         (for ([rd (in-list raised-depots)])
+           (define did (hash-ref rd 'id 0))
+           (define dx (exact->inexact (hash-ref rd 'x base-x)))
+           (define dy (exact->inexact (hash-ref rd 'y base-y)))
+           (when (and (not (raised-depot-enemy-near? dx dy))
+                      (> did 0)
+                      (refractory-allow-action?! cd-tracker (list 'depot-lower did) frame 24))
+             (l2-emit! ctx (list 'cast-spell did 'morph-supply-depot-lower)))))
+       (when (positive? (hash-count stuck-tbl))
+         (for ([k (in-list (hash-keys stuck-tbl))])
+           (unless (set-member? active-stuck-tags k)
+             (hash-remove! stuck-tbl k))))
+       (hash-set! door-st 'transiting-tags transiting-tags)
+       (hash-set! door-st 'state
+                  (cond
+                    [(and (not (null? lowered-depots)) (null? raised-depots)) 'open]
+                    [(and (not (null? lowered-depots)) (= (set-count active-stuck-tags) 0)) 'open]
+                    [else 'closed])))]
+    [else (void)])
+  ;; Publish clean non-macro telemetry so downstream Layer 3/4/5 & logging never see stale/missing keys.
+  (define prev-tel
+    (let ([lt (live-bot-runtime-last-telemetry rt)])
+      (if (hash? lt) lt (hash))))
+  (set-live-bot-runtime-last-telemetry!
+   rt
+   (hash-set* prev-tel
+              'effective-enemy-race (or (l2-ctx-effective-enemy-race ctx)
+                                        (hash-ref obs 'enemy-race 'Unknown))
+              'rush-fighting-worker-ids (or (l2-ctx-cur-rush-fighting-wids ctx) '())
+              'nomacro-mode? #t
+              'bo-active-goal #f
+              'priority-summary (hash)
+              'priority-log-line ""
+              'target-workers 0
+              'target-army-supply 0))
+  (reverse (l2-ctx-actions ctx)))
+
 (define (step-layer2-economy! rt raw-obs #:raw-obs [orig-raw-obs #f] #:sanitized? [sanitized? #f])
   (define ctx (rt-l2-ctx rt))
   (l2-phase1-setup! ctx rt raw-obs orig-raw-obs sanitized?)
   (l2-phase2-worker-rush! ctx)
   (l2-phase3-recall-cancel-scout! ctx)
-  (l2-phase4-expansion-pads! ctx)
-  (l2-phase5-threat-proxy! ctx)
-  (l2-phase6-crisis-supply! ctx)
-  (l2-phase7-wall-counts! ctx)
-  (l2-phase8-macro-escrow! ctx)
-  (case (l2-ctx-race ctx)
-    [(Zerg)
-     (l2-zerg-phase1-inject-creep! ctx)
-     (l2-zerg-phase2-expand-tech-def! ctx)
-     (l2-zerg-phase3-units-drones! ctx)]
-    [(Protoss)
-     (l2-protoss-phase1-chrono-wall! ctx)
-     (l2-protoss-phase2-tech-expand! ctx)
-     (l2-protoss-phase3-upgrades-units! ctx)]
-    [(Terran)
-     (l2-terran-phase1-orbital-addon-expand! ctx)
-     (l2-terran-phase2-tech-starport! ctx)
-     (l2-terran-phase3-units-depots! ctx)])
-  (l2-queue-opp-cost-and-recovery-static-defense! ctx)
-  (define out-acts (l2-phase9-post-race-telemetry! ctx))
-  (l2-clear-ctx-refs! ctx)
-  out-acts)
+  (cond
+    [(rt-skip-build-order? rt)
+     (define out-acts (l2-run-nomacro-combat-micro! ctx))
+     (l2-clear-ctx-refs! ctx)
+     out-acts]
+    [else
+     (l2-phase4-expansion-pads! ctx)
+     (l2-phase5-threat-proxy! ctx)
+     (l2-phase6-crisis-supply! ctx)
+     (l2-phase7-wall-counts! ctx)
+     (l2-phase8-macro-escrow! ctx)
+     (case (l2-ctx-race ctx)
+       [(Zerg)
+        (l2-zerg-phase1-inject-creep! ctx)
+        (l2-zerg-phase2-expand-tech-def! ctx)
+        (l2-zerg-phase3-units-drones! ctx)]
+       [(Protoss)
+        (l2-protoss-phase1-chrono-wall! ctx)
+        (l2-protoss-phase2-tech-expand! ctx)
+        (l2-protoss-phase3-upgrades-units! ctx)]
+       [(Terran)
+        (l2-terran-phase1-orbital-addon-expand! ctx)
+        (l2-terran-phase2-tech-starport! ctx)
+        (l2-terran-phase3-units-depots! ctx)])
+     (l2-queue-opp-cost-and-recovery-static-defense! ctx)
+     (define out-acts (l2-phase9-post-race-telemetry! ctx))
+     (l2-clear-ctx-refs! ctx)
+     out-acts]))
 
 
 ;; =============================================================================
@@ -29924,7 +30340,8 @@
                    #:base-x (l34-ctx-base-x ctx)
                    #:base-y (l34-ctx-base-y ctx)
                    #:nat-x nat-x
-                   #:nat-y nat-y)])
+                   #:nat-y nat-y
+                   #:has-home-base? (not (rt-skip-build-order? (l34-ctx-rt ctx))))])
             (values (car fb-pt) (cdr fb-pt))))))
   (define fregroup-x (exact->inexact regroup-x))
   (define fregroup-y (exact->inexact regroup-y))
@@ -30106,6 +30523,7 @@
        (and (hash? target-enemy)
             (memq (fast-canonical-unit-sym (unit-type-sym target-enemy)) '(scv probe drone))))
      (define live-th-cnt-mf (or (l34-ctx-live-owned-townhalls ctx) 0))
+     (define has-home-base-mf? (l34-has-home-economy-base? (l34-ctx-rt ctx) live-th-cnt-mf))
      (define mid-fight-clash-engaged?
        (and has-weapon?
             can-hit-target?
@@ -30118,20 +30536,19 @@
                 (and (combat-unit-record? target-enemy)
                      (not (hash-ref target-enemy 'structure? #f))))
             (not (eq? (hash-ref target-enemy 'snapshot? #f) #t))
-            (or (= live-th-cnt-mf 0)
+            (or (not has-home-base-mf?)
                 (not (l34-ctx-fog-belief-suppress? ctx)))
-            ;; Loop 76 A2 (`k05`/`p13`/`c04`): When `live-th-cnt == 0` (no owned TownHalls:
-            ;; pure skirmish / last-stand), keep low-HP and `<= 26t` (`676.0`) units clash-engaged
-            ;; instead of triggering `outside-regroup?` passive `'move` off-map! Ladder (`>= 1` TH)
+            ;; Loop 76 A2 (`k05`/`p13`/`c04`) + Loop 83: When no home economy base exists
+            ;; (`live-th-cnt == 0` OR `--no-macro` Arena), keep low-HP and `<= 26t` (`676.0`) units
+            ;; clash-engaged instead of triggering passive `'move` off-map! Ladder (`>= 1` TH, macro on)
             ;; preserves exact `>= 30% HP` and `16t`/`18t` thresholds!
-            (or (= live-th-cnt-mf 0)
+            (or (not has-home-base-mf?)
                 (fl>= u-hp-rat-sup 0.30))
             (fl<= fedist2 (cond
-                            [(= live-th-cnt-mf 0) 676.0]
+                            [(not has-home-base-mf?) 676.0]
                             [target-is-enemy-worker? 324.0]
                             [else 256.0]))
-            (let* ([live-th-cnt live-th-cnt-mf]
-                   [sc-mf (l34-ctx-l34-sc ctx)]
+            (let* ([sc-mf (l34-ctx-l34-sc ctx)]
                    [has-owned-prod-bldg?
                     (if (and (hash? sc-mf) (hash-has-key? sc-mf 'l40-has-owned-prod-bldg?))
                         (hash-ref sc-mf 'l40-has-owned-prod-bldg?)
@@ -30146,7 +30563,7 @@
                           (when (hash? sc-mf)
                             (hash-set! sc-mf 'l40-has-owned-prod-bldg? res))
                           res))])
-              (or (= live-th-cnt 0)
+              (or (not has-home-base-mf?)
                   (not has-owned-prod-bldg?)
                   (let ([cus (or (l34-ctx-combat-units ctx) '())])
                     (and (or (>= (length cus) 3) (and target-is-enemy-worker? (>= (length cus) 1)))
@@ -30220,7 +30637,7 @@
                melee-ranged-pursuer-commit?
                (and mid-fight-clash-engaged?
                     (fl<= fedist2 (cond
-                                    [(= live-th-cnt-mf 0) 676.0]
+                                    [(not has-home-base-mf?) 676.0]
                                     [target-is-enemy-worker? 324.0]
                                     [else 196.0])))
                (and can-hit-target? eid non-free-target?
@@ -30458,24 +30875,23 @@
           ;; into fog stalemate! Preserve `kite` inside `threat-r` (Suite 49 / `novel-88`) and re-engage once past `threat-r`.
           [(and mid-fight-clash-engaged?
                 (or (fl> fedist2 threat-r2)
-                    (and (= live-th-cnt-mf 0) (fl< fw-cd kite-cd-min))))
+                    (and (not has-home-base-mf?) (fl< fw-cd kite-cd-min))))
            (emit-home-safe-atk! (list 'attack-unit uid eid))]
           [(and outside-regroup? (fl> fedist2 threat-r2))
-           ;; Loop 65F/65G (`#1922`/`#1930`/`#1938`) + Loop 76 A2: Emit `'attack-pos` (NOT passive
-           ;; `'move`) when `live-th-cnt == 0` within `<= 26t` (`676.0`, pure skirmish / last-stand) OR
+           ;; Loop 65F/65G (`#1922`/`#1930`/`#1938`) + Loop 76 A2 + Loop 83: Emit `'attack-pos`
+           ;; (NOT passive `'move`) when no home economy base exists within `<= 26t` (`676.0`) OR
            ;; for competitive/winning squads (`ratio >= 0.85`, with `l65f-sieged-tank-disengage?`
-           ;; strictly gated on `(> live-th-cnt 0)` AND `ratio < 0.95`!), keeping clean `'move`
+           ;; strictly gated on `has-home-base-mf?` AND `ratio < 0.95`!), keeping clean `'move`
            ;; disengages for ALL `< 0.85x` outgunned ladder withdrawals with `>= 1` TH!
            (define l65f-rt (l34-ctx-rt ctx))
            (define l65f-fr (l34-ctx-frame ctx))
-           (define l65f-live-th-cnt live-th-cnt-mf)
            (define l65f-ratio
              (if (hash? l34-sc-here)
                  (exact->inexact (hash-ref l34-sc-here 'l65f-strength-ratio 1.0))
                  1.0))
-           (define l65f-outgunned? (and (> l65f-live-th-cnt 0) (fl< l65f-ratio 0.85)))
+           (define l65f-outgunned? (and has-home-base-mf? (fl< l65f-ratio 0.85)))
            (define l65f-sieged-tank-disengage?
-             (and (> l65f-live-th-cnt 0)
+             (and has-home-base-mf?
                   (fl< l65f-ratio 0.95)
                   (or (pair? (or (l34-ctx-enemy-sieged-tanks-near ctx) '()))
                       (for/or ([e (in-list (or (l34-ctx-enemy-units ctx) '()))])
@@ -30500,7 +30916,7 @@
                   (>= l65f-fr l65f-last-cf)
                   (<= (- l65f-fr l65f-last-cf) 32)))
            (define l65f-regroup-cmd
-             (if (or (and (= l65f-live-th-cnt 0) (fl<= fedist2 676.0))
+             (if (or (and (not has-home-base-mf?) (fl<= fedist2 676.0))
                      (and (not l65f-outgunned?)
                           (not l65f-sieged-tank-disengage?)
                           (or (and (fl<= fedist2 484.0) (or l65f-target-is-combat? l65f-post-contact?))
@@ -32500,7 +32916,8 @@
      #:map-height l64-map-h
      #:prev-pt l64-prev-fb-pt
      #:bfs-dist-fn l64-bfs-fn-eval
-     #:enemy-capital-air? (>= l35-enemy-tempest-cnt 2)))
+     #:enemy-capital-air? (>= l35-enemy-tempest-cnt 2)
+     #:has-home-base? (not (rt-skip-build-order? rt))))
   (define l64-fb-x (car l64-fb-pt))
   (define l64-fb-y (cdr l64-fb-pt))
   (define l64-merged-def-val
@@ -32714,13 +33131,12 @@
        (and (hash-ref pred-ht 'should-engage? #f)
             (real? pred-ratio-val)
             (>= pred-ratio-val 1.15)))
-     ;; Loop 76B A1 (`#2388`, `k05`/`z02`/`t05`/`c04`): Clear `pullback-active?` strictly
-     ;; when `live-th-cnt == 0` (no owned TownHall to regroup to), restoring 100% of `> 0`-TH
-     ;; ladder `< 0.85x est-enemy-army-supply` & `35%` wave-loss pullback even under partial
-     ;; Fog visibility (existing `locally-winning-fight?` `>= 1.15x` overrides when winning)!
+     ;; Loop 76B A1 (`#2388`, `k05`/`z02`/`t05`/`c04`) + Loop 83: Clear `pullback-active?`
+     ;; when no real home-base economy exists (`live-th-cnt == 0` OR `--no-macro` Arena),
+     ;; restoring 100% of normal ladder (`>= 1`-TH, `skip-build-order? = #f`) wave-loss pullback!
      (define pullback-active?
        (and (l34-ctx-live-obs? ctx)
-            (> live-th-cnt-pb-eval 0)
+            (l34-has-home-economy-base? rt live-th-cnt-pb-eval)
             (not enemy-within-14-of-th?)
             (not locally-winning-fight?)
             (or (< frame (hash-ref wstate 'pullback-until-frame -1))
@@ -32735,20 +33151,20 @@
      (define hard-suppress?
        (and (or (not engage?) pullback-active? locust-kite-retreat?)
             (not enemy-within-14-of-th?)))
-     ;; L21-P0-3 / L25-P0-3 / L35-P0-3: Bypass cross-map mass-parity & counter-volley staging
-     ;; whenever `locally-winning-fight?` is `#t`, EXCEPT under `l35-siege-tempest-mass-hold?`
-     ;; (already gated on `not enemy-within-14-of-th?`, `not enemy-within-14-of-main?`, and
-     ;; `not army-in-direct-visible-contact?`) so a lone forward scout never tricks a small wave
-     ;; into marching across the map into 10..26 remembered Sieged Tanks or 13 Tempests!
+     ;; L21-P0-3 / L25-P0-3 / L35-P0-3 + Loop 83: Bypass cross-map mass-parity & counter-volley
+     ;; macro staging whenever `--no-macro` is active (no macro reinforcements will ever arrive)
+     ;; or `locally-winning-fight?` is `#t`! ZERO diff on normal ladder (`skip-build-order? = #f`).
      (define eff-mass-parity-suppress?
-       (or l35-siege-tempest-mass-hold?
-           l36-prod-parity-mass-hold?
-           l42-pvt-awaiting-colossus-hold?
-           l43-tvt-tank-viking-parity-hold?
-           (and mass-parity-before-attack-suppress?
-                (not locally-winning-fight?))))
+       (and (not (rt-skip-build-order? rt))
+            (or l35-siege-tempest-mass-hold?
+                l36-prod-parity-mass-hold?
+                l42-pvt-awaiting-colossus-hold?
+                l43-tvt-tank-viking-parity-hold?
+                (and mass-parity-before-attack-suppress?
+                     (not locally-winning-fight?)))))
      (define eff-l25-counter-volley-staging?
-       (and l25-counter-volley-staging?
+       (and (not (rt-skip-build-order? rt))
+            l25-counter-volley-staging?
             (not locally-winning-fight?)))
      (when (hash? (l34-ctx-l34-sc ctx))
        (hash-set! (l34-ctx-l34-sc ctx) 'l20-mass-staging-active? eff-mass-parity-suppress?)
@@ -32909,7 +33325,7 @@
       (define fnx-loc (exact->inexact nat-x))
       (define fny-loc (exact->inexact nat-y))
       (define d-nat-loc (fast-dist2d fnx-loc fny-loc loc-cx loc-cy))
-      (define has-owned-th-p2? (pair? p2-th-pts))
+      (define has-owned-th-p2? (and (not (rt-skip-build-order? rt)) (pair? p2-th-pts)))
       (define blink-ready-upg? (l34-has-upgrade? ctx 'blink))
       (define kite-to-nat-rev '())
       (for ([u (in-list combat-units)])
@@ -33848,7 +34264,8 @@
                                              (exact->inexact (hash-ref e 'y 9999.0)))
                                 28.0)))
                      enemy-units))
-            (and dl-drop-active?
+            (and (not (rt-skip-build-order? rt))
+                 dl-drop-active?
                  (= dl-cocoon-pending-cnt 0)
                  (< existing-dl-cnt (if has-loaded-dropperlord? 2 1))
                  (not dl-home-threat?)
@@ -38496,15 +38913,51 @@
                             (memq (fast-canonical-unit-sym (unit-type-sym e))
                                   '(reaper zergling adept hellion banshee oracle phoenix mutalisk dark-templar)))
                           home-es)))))
-    (define endgame-hunt-active?
-      (and hunt-posture-ok?
-           (>= sweep-combat-sup 40)
-           hunt-suppress-ok?
+    ;; Loop 83 (`--no-macro` Fog-of-War Arena contact): When running `--no-macro` with 0 visible
+    ;; enemies and combat units NOT guarding an active worker mineral line, sweep immediately across
+    ;; map center (or toward enemy base if spawned away from center) instead of marching backwards
+    ;; to our hidden starting natural! ZERO diff on normal ladder (`skip-build-order? = #f`).
+    (define nomacro-guarding-mineral-line?
+      (and (rt-skip-build-order? sweep-rt)
+           (let* ([acx0 (exact->inexact (l34-ctx-prelim-army-cx ctx))]
+                  [acy0 (exact->inexact (l34-ctx-prelim-army-cy ctx))]
+                  [au0 (or (l34-ctx-ally-units ctx) '())]
+                  [ab0 (or (l34-ctx-ally-bldgs ctx) '())])
+             (for/or ([b (in-list ab0)]
+                      #:when (and (hash? b)
+                                  (real? (hash-ref b 'x #f)) (real? (hash-ref b 'y #f))
+                                  (memq (fast-canonical-structure-sym (unit-type-sym b))
+                                        '(hatchery lair hive nexus command-center orbital-command planetary-fortress))))
+               (define tx (exact->inexact (hash-ref b 'x 0.0)))
+               (define ty (exact->inexact (hash-ref b 'y 0.0)))
+               (and (fl<= (fast-dist2d acx0 acy0 tx ty) 24.0)
+                    (>= (count (lambda (u)
+                                 (and (hash? u)
+                                      (memq (unit-type-sym u) '(probe scv drone))
+                                      (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f))
+                                      (fl<= (fast-dist2d tx ty
+                                                         (exact->inexact (hash-ref u 'x 9999.0))
+                                                         (exact->inexact (hash-ref u 'y 9999.0)))
+                                            16.0)))
+                               au0)
+                        4))))))
+    (define nomacro-fog-sweep?
+      (and (rt-skip-build-order? sweep-rt)
+           (not nomacro-guarding-mineral-line?)
+           (null? sweep-visible-enemies)
            (not owm-locust-now?)
            (not home-threat-blocks-hunt?)
-           (not light-home-harass-split-yield?)
-           (null? (if army-dominates? sweep-near-active-enemies sweep-visible-enemies))
            (pair? (l34-ctx-combat-units ctx))))
+    (define endgame-hunt-active?
+      (or nomacro-fog-sweep?
+          (and hunt-posture-ok?
+               (>= sweep-combat-sup 40)
+               hunt-suppress-ok?
+               (not owm-locust-now?)
+               (not home-threat-blocks-hunt?)
+               (not light-home-harass-split-yield?)
+               (null? (if army-dominates? sweep-near-active-enemies sweep-visible-enemies))
+               (pair? (l34-ctx-combat-units ctx)))))
     (when (pair? sweep-visible-enemies)
       (hash-set! sweep-st 'zero-th-center-swept? #f))
     (hash-set! (l34-ctx-l34-sc ctx) 'endgame-hunt-active? endgame-hunt-active?)
@@ -38534,7 +38987,7 @@
             (refractory-allow-action?! (live-bot-runtime-cooldown-tracker sweep-rt)
                                        '(endgame-building-hunt)
                                        sweep-frame
-                                       44)))
+                                       (if nomacro-fog-sweep? 16 44))))
       (define want-terran-hunt-scan?
         (and (eq? (live-bot-runtime-actual-race sweep-rt) 'Terran)
              enemy-main-cleared?
@@ -38728,17 +39181,17 @@
                                     p1-targets)])
                        (values (safe-coord (hash-ref nearest-t 'x sweep-ex) sweep-ex)
                                (safe-coord (hash-ref nearest-t 'y sweep-ey) sweep-ey)))
-                     ;; Loop 80 (0-TH fog-of-war skirmish): When owning 0 TownHalls with 0
-                     ;; spotted enemy units/buildings and army positioned near map center (`<= 28t`),
-                     ;; sweep across map center first so mirrored spawns never march away from mid-map foes!
+                     ;; Loop 80 + Loop 83 (fog-of-war skirmish without home economy base): When owning
+                     ;; 0 TownHalls OR running `--no-macro` Arena with 0 spotted enemies and army near
+                     ;; map center (`<= 28t`), sweep across map center first!
                      (let* ([live-th-eh (or (l34-ctx-live-owned-townhalls ctx) 0)]
                             [mcx (fl* 0.5 map-w)]
                             [mcy (fl* 0.5 map-h)]
                             [d-ctr (fast-dist2d acx acy mcx mcy)])
                        (cond
-                         [(and (= live-th-eh 0)
+                         [(and (not (l34-has-home-economy-base? (l34-ctx-rt ctx) live-th-eh))
                                (not (hash-ref sweep-st 'zero-th-center-swept? #f))
-                               (fl<= d-ctr 28.0))
+                               (fl<= d-ctr (if (rt-skip-build-order? (l34-ctx-rt ctx)) 35.0 28.0)))
                           (cond
                             [(fl<= d-ctr 5.0)
                              (hash-set! sweep-st 'zero-th-center-swept? #t)
@@ -39052,6 +39505,7 @@
                  #:bfs-dist-fn bfs-fn-p
                  #:role-leases (rt-role-leases rt-p)
                  #:skip-tags skip-p
+                 #:skip-build-order? (rt-skip-build-order? rt-p)
                  #:enemy-cap-air-cnt eff-cap-p
                  #:enemy-contested-aa-cnt eff-aa-p
                  #:combat-suppress-attack? (l34-ctx-combat-suppress-attack? ctx)
@@ -39482,7 +39936,8 @@
                                        '(hatchery lair hive nexus command-center orbital-command planetary-fortress))))
             b)]
          [has-th-rk?
-          (and (pair? th-list-rk)
+          (and (not (rt-skip-build-order? rt-rk))
+               (pair? th-list-rk)
                (or (> (length ab-rk) 1)
                    (> (length th-list-rk) 1)
                    (for/or ([b (in-list th-list-rk)])
@@ -45300,11 +45755,14 @@
                                                  frame
                                                  448))))
           (define skip-layer34-macro-leak?
-            (and (l34-ctx-live-obs? ctx)
+            (and (or (l34-ctx-live-obs? ctx) (rt-skip-build-order? rt))
                  (pair? filtered-act)
                  (or warp-in-cd-blocked?
                      (and (not is-warp-prism-warp-in?)
-                          (memq (car filtered-act) '(build expand train train-unit research))))))
+                          (memq (car filtered-act)
+                                (if (rt-skip-build-order? rt)
+                                    '(build expand train train-unit research chrono-boost)
+                                    '(build expand train train-unit research)))))))
           (define skip-worker-proxy-pull?
             (and (list? filtered-act)
                  (eq? (car filtered-act) 'pull-workers-attack)
@@ -46784,7 +47242,8 @@
     (emit-direct-batch! eff-block-acts))
   (when (and (not p7-endgame-hunt-active?)
              (or (pair? enemy-bldgs)
-                 (and (<= frame 3600)
+                 (and (not (rt-skip-build-order? rt))
+                      (<= frame 3600)
                       (>= (exact->inexact (fast-finite-real (hash-ref obs 'minerals 0.0) 0.0)) 180.0))))
     (define cegb-mins (exact->inexact (fast-finite-real (hash-ref obs 'minerals 0.0) 0.0)))
     (define cegb-bx (exact->inexact (fast-finite-real (hash-ref obs 'base-x 32.0) 32.0)))
@@ -46815,7 +47274,8 @@
                               (exact->inexact (fast-finite-real (hash-ref b 'x -999.0) -999.0))
                               (exact->inexact (fast-finite-real (hash-ref b 'y -999.0) -999.0)))
                       5.5)))))
-    (when (or has-cegb-blocker? (and (>= cegb-mins 180.0) (not cegb-own-nat-built?)))
+    (when (or has-cegb-blocker?
+              (and (not (rt-skip-build-order? rt)) (>= cegb-mins 180.0) (not cegb-own-nat-built?)))
       (define cegb-obs
         (if has-cegb-blocker?
             obs
@@ -47678,6 +48138,45 @@
          (parse-frame-state-sexp (read (open-input-string obs-or-sexp))))]
       [else (hash)]))
   (define obs (sanitize-obs-hash raw-obs))
+
+  ;; Loop 83: Inter-scenario batch reset strictly gated on `(rt-skip-build-order? rt)`.
+  ;; Triggers on (a) frame rewind, (b) pause gap > 24 game loops, or (c) 0 combat-tag overlap
+  ;; (or 0 worker-tag overlap on back-to-back worker-only econ drills).
+  (define arena-reset-triggered?
+    (if (rt-skip-build-order? rt)
+        (let*-values ([(tr) (rt-arena-batch-tracker rt)]
+                      [(prev-f) (vector-ref tr 0)]
+                      [(prev-ctags) (vector-ref tr 1)]
+                      [(prev-wtags) (vector-ref tr 2)]
+                      [(curr-f) (safe-nonneg-int (hash-ref obs 'frame 0) 0)]
+                      [(curr-ctags curr-wtags) (extract-alive-ally-unit-tag-sets obs)])
+          (define frame-rewind? (and (>= prev-f 0) (< curr-f prev-f)))
+          (define batch-pause? (and (>= prev-f 0) (> (- curr-f prev-f) 24)))
+          (define zero-combat-overlap?
+            (and (not (set-empty? prev-ctags))
+                 (not (set-empty? curr-ctags))
+                 (not (for/or ([t (in-set curr-ctags)])
+                        (set-member? prev-ctags t)))))
+          (define zero-worker-only-overlap?
+            (and (set-empty? prev-ctags)
+                 (set-empty? curr-ctags)
+                 (not (set-empty? prev-wtags))
+                 (not (set-empty? curr-wtags))
+                 (not (for/or ([t (in-set curr-wtags)])
+                        (set-member? prev-wtags t)))))
+          (define do-reset?
+            (or frame-rewind? batch-pause? zero-combat-overlap? zero-worker-only-overlap?))
+          (when do-reset?
+            (reset-tactics-arena-runtime-state! rt))
+          (vector-set! tr 0 curr-f)
+          ;; Preserve prior tags across empty inter-scenario clearing frames so tag-replacement
+          ;; still detects Scenario k -> Scenario k+1 cleanly on spawn.
+          (when (or do-reset? (not (set-empty? curr-ctags)))
+            (vector-set! tr 1 curr-ctags))
+          (when (or do-reset? (not (set-empty? curr-wtags)))
+            (vector-set! tr 2 curr-wtags))
+          do-reset?)
+        #f))
 
   (set-live-bot-runtime-step-count! rt (add1 (live-bot-runtime-step-count rt)))
   (set-box! (rt-wall-aabbs-box rt) '())
@@ -48560,7 +49059,8 @@
         'gas-starvation-boost? step-gas-starvation-boost?
         'mineral-override-pressure? step-min-override-pressure?
         'apm-pressure-backoff? step-apm-pressure-backoff?
-        'arbiter-ledger arb-ledger-step))
+        'arbiter-ledger arb-ledger-step
+        'arena-reset? arena-reset-triggered?))
 
 ;; =============================================================================
 ;; S-Expression Wire Parser for `sim/racket_sc2_ipc_bot.rkt`

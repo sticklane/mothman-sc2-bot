@@ -217,9 +217,9 @@ class TestArenaPositioningTelemetry(unittest.TestCase):
         specs = self.arena.load_scenarios(str(SCENARIOS_JSON), REPO_ROOT)
         errs = self.arena.validate_scenarios(specs)
         self.assertEqual(errs, [], f"Scenario validation errors: {errs}")
-        self.assertEqual(len(specs), 286)
-        self.assertEqual(len(raw["scenarios"]), 286)
-        self.assertEqual(sum(1 for s in specs if s.fast_core), 106)
+        self.assertEqual(len(specs), 295)
+        self.assertEqual(len(raw["scenarios"]), 295)
+        self.assertEqual(sum(1 for s in specs if s.fast_core), 115)
 
         # Verify Loop 79 Locust unit registration (free spawned ground + flying)
         self.assertEqual(self.arena.UNIT_IDS["locust"], 489)
@@ -253,18 +253,35 @@ class TestArenaPositioningTelemetry(unittest.TestCase):
         self.assertTrue(by_id["sc2-lib-m01-tvz-dual-liberator-deadspace-harass"].use_p2_main_base)
         self.assertIn(2558, by_id["sc2-lib-m01-tvz-dual-liberator-deadspace-harass"].expected_abilities)
         self.assertIn(2542, by_id["sc2-car-b01-zvp-hydras-viper-interceptor-burn"].expected_abilities)
-        # Verify Swarm Host drills spawn strictly swarm-host (authentic single 20-Locust wave, no pre-spawned double-wave) at >= 15t separation
+
+        # Loop 83: Swarm Host drills use mixed Zerg ground army (roach+hydra+swarm-host), 8t front vision, 11.5-12.5t SH gap
         for sh_sid in (
             "sc2-sh-d01-pvz-colossi-archon-stand-clear-locusts",
             "sc2-sh-d02-pvz-stalker-immortal-retreat-locusts",
             "sc2-sh-d03-tvz-hellbat-tank-clear-locusts",
         ):
             sc_sh = by_id[sh_sid]
-            self.assertEqual([u[0] for u in sc_sh.p2_units], ["swarm-host"])
-            self.assertEqual(sc_sh.p2_units[0][1], 10)
-            p1_max_dx = max(u[2] for u in sc_sh.p1_units)
-            p2_min_dx = min(u[2] for u in sc_sh.p2_units)
-            self.assertGreaterEqual(p2_min_dx - p1_max_dx, 15.0)
+            p2_names = [u[0] for u in sc_sh.p2_units]
+            self.assertEqual(p2_names, ["roach", "hydralisk", "swarm-host"])
+            self.assertIn("GlialReconstitution", sc_sh.p2_upgrades)
+            self.assertIn("MuscularAugments", sc_sh.p2_upgrades)
+            self.assertIn("GroovedSpines", sc_sh.p2_upgrades)
+            p1_front = max(u[2] for u in sc_sh.p1_units)
+            p2_front = min(u[2] for u in sc_sh.p2_units)
+            sh_dx = next(u[2] for u in sc_sh.p2_units if u[0] == "swarm-host")
+            self.assertLessEqual(p2_front - p1_front, 9.0)
+            self.assertGreaterEqual(sh_dx - p1_front, 11.5)
+            self.assertLessEqual(sh_dx - p1_front, 12.5)
+
+        # Loop 83: Carrier drills include realistic Skytoss Storm + Archon support
+        for car_sid in (
+            "sc2-car-b01-zvp-hydras-viper-interceptor-burn",
+            "sc2-car-b02-tvp-bio-viking-binary-carrier-snipe",
+        ):
+            sc_car = by_id[car_sid]
+            p2_types = {u[0] for u in sc_car.p2_units}
+            self.assertTrue({"carrier", "archon", "high-templar"} <= p2_types)
+            self.assertIn("PsiStorm", sc_car.p2_upgrades)
 
         promoted_core = [
             "sc2-kit-k01-tvp-cyclone-lockon-kite-vs-stalker-immortal",
@@ -299,6 +316,188 @@ class TestArenaPositioningTelemetry(unittest.TestCase):
         self.assertTrue(f06.fast_core)
         self.assertTrue(all(dx < 0.0 and dy == 0.0 for _, _, dx, dy in f06.p1_units))
         self.assertTrue(all(dx > 0.0 for _, _, dx, _ in f06.p2_units))
+
+    def test_loop83_bot_map_and_nomacro_cmd_and_batch_isolation(self) -> None:
+        # BOT_MAP must reference real existing PascalCase bot files
+        self.assertEqual(set(self.arena.BOT_MAP.keys()), {"Protoss", "Terran", "Zerg"})
+        for race, (bname, container_path) in self.arena.BOT_MAP.items():
+            self.assertTrue(container_path.startswith("/mothman-repo/bots/Mothman-"), f"{race}: {container_path}")
+            rel = container_path.removeprefix("/mothman-repo/")
+            self.assertTrue((REPO_ROOT / rel).is_file(), f"Missing bot entrypoint for {race}: {REPO_ROOT / rel}")
+            self.assertTrue(bname.startswith("Mothman-"))
+
+        # build_mothman_bot_cmd passes --no-macro by default and omits it only when allow_macro=True
+        cmd_nomacro = self.arena.build_mothman_bot_cmd("Mothman-P", 8081, 8090, "MicroDummy")
+        self.assertIn("--no-macro", cmd_nomacro)
+        cmd_macro = self.arena.build_mothman_bot_cmd("Mothman-P", 8081, 8090, "MicroDummy", allow_macro=True)
+        self.assertNotIn("--no-macro", cmd_macro)
+
+        # partition_duel_batches strictly isolates allow_macro=True from --no-macro scenarios
+        specs = self.arena.load_scenarios(str(SCENARIOS_JSON), REPO_ROOT)
+        allow_macro_ids = {s.id for s in specs if s.allow_macro}
+        expected_allow_macro = {
+            "sc2-reg-r14-zvp-full-lifecycle-vs-15-kiting-probes",
+            "sc2-reg-r15-tvp-full-lifecycle-vs-15-kiting-probes",
+            "sc2-reg-r16-pvp-full-lifecycle-vs-15-kiting-probes",
+            "sc2-ab-z10-queen-inject-and-creep-tumor-defense",
+            "sc2-nc-11-terran-depot-wall-raise-and-lower-march",
+            "sc2-nc-12-protoss-natural-wall-door-hold-and-open",
+            "sc2-nc-16-queen-creep-tumor-highway-and-pillar-vision",
+        }
+        self.assertEqual(allow_macro_ids, expected_allow_macro)
+        batches = self.arena.partition_duel_batches(specs)
+        for _m, _r1, _r2, _bi, blist in batches:
+            flags = {bool(s.allow_macro) for s in blist}
+            self.assertEqual(len(flags), 1, f"Mixed allow_macro and --no-macro batch: {[s.id for s in blist]}")
+            if True in flags:
+                self.assertEqual(len(blist), 1, f"allow_macro scenario must be isolated: {[s.id for s in blist]}")
+
+    def test_loop83_macro_leak_metrics_and_5014_spell_gating_and_summary(self) -> None:
+        # Tactical abilities (Prism Warp-In 1413, Interceptor 1042, Nydus Worm 1768, Creep Tumor 3691,
+        # Queen Inject 251, Mass Recall 3757, Energy Recharge 4126) MUST NOT trigger macro-leak counters!
+        tactical_only = {"23": 120, "16": 40, "1413": 4, "1042": 8, "1768": 1, "3691": 2, "251": 1, "3757": 1, "4126": 1}
+        m_clean = self.arena.compute_macro_leak_metrics(tactical_only)
+        self.assertEqual(m_clean["macro_buildings_built"], 0)
+        self.assertEqual(m_clean["macro_workers_trained"], 0)
+        self.assertEqual(m_clean["macro_ability_cmds"], 0)
+        self.assertEqual(m_clean["macro_ability_breakdown"], {})
+
+        # Real L2 macro leaks: TrainProbe(1006) x2, BuildPylon(881) x1, ChronoBoost(3755) x1
+        leaked = {"23": 50, "1006": 2, "881": 1, "3755": 1, "1413": 3}
+        m_leak = self.arena.compute_macro_leak_metrics(leaked)
+        self.assertEqual(m_leak["macro_buildings_built"], 1)
+        self.assertEqual(m_leak["macro_workers_trained"], 2)
+        self.assertEqual(m_leak["macro_ability_cmds"], 4)
+        self.assertEqual(m_leak["macro_ability_breakdown"], {"1006": 2, "881": 1, "3755": 1})
+
+        # evaluate_spell_verification handles 5.0.14-gated abilities on Base75689 cleanly
+        sv_pg, is_pg = self.arena.evaluate_spell_verification([4111], 1, {}, requires_5014=True, engine_is_5014=False)
+        self.assertIsNone(sv_pg)
+        self.assertTrue(is_pg)
+
+        sv_5014, is_pg_5014 = self.arena.evaluate_spell_verification([4111], 1, {}, requires_5014=True, engine_is_5014=True)
+        self.assertFalse(sv_5014)
+        self.assertFalse(is_pg_5014)
+
+        sv_ok, is_pg_ok = self.arena.evaluate_spell_verification([4126], 1, {"4126": 1}, requires_5014=True, engine_is_5014=False)
+        self.assertTrue(sv_ok)
+        self.assertFalse(is_pg_ok)
+
+        sv_miss, is_pg_miss = self.arena.evaluate_spell_verification([2338], 1, {}, requires_5014=False, engine_is_5014=False)
+        self.assertFalse(sv_miss)
+        self.assertFalse(is_pg_miss)
+
+        # _build_aggregate_report excludes patch-gated rows from spell_checks_total and tracks --no-macro leaks only on allow_macro=False
+        sample = [
+            {
+                "id": "sc2-ab-z01-infestor-microbial-shroud-vs-air-5014",
+                "race": "Zerg", "tier": "canonical", "category": "ability-mastery",
+                "winner": "Mothman", "win_type": "ko",
+                "p1_lost_val": 200.0, "p2_lost_val": 600.0, "trade_ratio": 3.0,
+                "expected_abilities": [4111], "spell_verified": None, "spell_patch_gated": True,
+                "allow_macro": False, "macro_buildings_built": 0, "macro_workers_trained": 0, "macro_ability_cmds": 0,
+            },
+            {
+                "id": "sc2-zvz-m02-roach-ravager-bile-concave",
+                "race": "Zerg", "tier": "canonical", "category": "kiting-concave",
+                "winner": "Mothman", "win_type": "ko",
+                "p1_lost_val": 300.0, "p2_lost_val": 900.0, "trade_ratio": 3.0,
+                "expected_abilities": [2338], "spell_verified": True,
+                "allow_macro": False, "macro_buildings_built": 1, "macro_workers_trained": 0, "macro_ability_cmds": 1,
+            },
+            {
+                "id": "sc2-reg-r16-pvp-full-lifecycle-vs-15-kiting-probes",
+                "race": "Protoss", "tier": "regression", "category": "regression",
+                "winner": "Mothman", "win_type": "econ_pass",
+                "p1_lost_val": 100.0, "p2_lost_val": 750.0, "trade_ratio": 7.5,
+                "allow_macro": True, "macro_buildings_built": 2, "macro_workers_trained": 3, "macro_ability_cmds": 5,
+            },
+        ]
+        rep = self.arena._build_aggregate_report(
+            argparse.Namespace(map="PersephoneAIE_v4.SC2Map"), sample, sc2_wall_ms=500.0, opp_mode="dummy"
+        )
+        s = rep["summary"]
+        self.assertEqual(s["spell_checks_total"], 1)
+        self.assertEqual(s["spell_verified_count"], 1)
+        self.assertEqual(s["spell_verified_pct"], 100.0)
+        self.assertEqual(s["spell_unverified_ids"], [])
+        self.assertEqual(s["spell_patch_gated_count"], 1)
+        self.assertEqual(s["spell_patch_gated_ids"], ["sc2-ab-z01-infestor-microbial-shroud-vs-air-5014"])
+        self.assertEqual(s["total_macro_buildings_built"], 3)
+        self.assertEqual(s["total_macro_workers_trained"], 3)
+        self.assertEqual(s["total_macro_ability_cmds"], 6)
+        self.assertEqual(s["nomacro_scenarios_total"], 2)
+        self.assertEqual(s["nomacro_leak_count"], 1)
+        self.assertEqual(s["nomacro_leak_scenarios"], ["sc2-zvz-m02-roach-ravager-bile-concave"])
+
+    def test_loop83_strip_hidden_enemy_townhall_from_obs(self) -> None:
+        def _mk_obs():
+            units = [
+                types.SimpleNamespace(tag=101, alliance=1, unit_type=59, pos=types.SimpleNamespace(x=25.0, y=25.0)),   # P1 own Nexus
+                types.SimpleNamespace(tag=202, alliance=4, unit_type=86, pos=types.SimpleNamespace(x=150.0, y=150.0)), # P2 live Hatchery
+                types.SimpleNamespace(tag=999, alliance=4, unit_type=86, pos=types.SimpleNamespace(x=150.0, y=150.0)), # P2 fog snapshot Hatchery
+                types.SimpleNamespace(tag=303, alliance=4, unit_type=110, pos=types.SimpleNamespace(x=92.0, y=88.0)),  # P2 combat Roach
+            ]
+            return types.SimpleNamespace(raw_data=types.SimpleNamespace(units=units))
+
+        # Non-main-base skirmish: strips BOTH live tag=202 and fog snapshot tag=999 at (150, 150)
+        obs1 = _mk_obs()
+        removed1 = self.arena.strip_hidden_enemy_townhall_from_obs(
+            obs1, enemy_orig_th_tag=202, keep_enemy_th=False, enemy_orig_th_pos=(150.0, 150.0)
+        )
+        self.assertEqual(removed1, 2)
+        self.assertEqual([u.tag for u in obs1.raw_data.units], [101, 303])
+
+        # Main-base raid (keep_enemy_th=True): keeps everything intact
+        obs2 = _mk_obs()
+        removed2 = self.arena.strip_hidden_enemy_townhall_from_obs(
+            obs2, enemy_orig_th_tag=202, keep_enemy_th=True, enemy_orig_th_pos=(150.0, 150.0)
+        )
+        self.assertEqual(removed2, 0)
+        self.assertEqual(len(obs2.raw_data.units), 4)
+
+    def test_loop83_pro_realism_catalog_upgrades_and_9_new_drills(self) -> None:
+        specs = self.arena.load_scenarios(str(SCENARIOS_JSON), REPO_ROOT)
+        by_id = {s.id: s for s in specs}
+
+        # 1. All 9 new Tier 2 fast_core drills exist with proper matchups, upgrades, and categories
+        new_9 = {
+            "sc2-zvz-m01-ling-bane-micro-war": ("Zerg", "Zerg", "kiting-concave"),
+            "sc2-zvz-m02-roach-ravager-bile-concave": ("Zerg", "Zerg", "kiting-concave"),
+            "sc2-zvz-m03-muta-ling-bane-vs-hydra-lurker": ("Zerg", "Zerg", "air-superiority"),
+            "sc2-tvt-m01-marine-tank-viking-leapfrog": ("Terran", "Terran", "high-ground-ramp"),
+            "sc2-tvt-m02-reaper-hellion-early-skirmish": ("Terran", "Terran", "kiting-concave"),
+            "sc2-pvp-m01-blink-immortal-disruptor-skirmish": ("Protoss", "Protoss", "spellcasters"),
+            "sc2-pvp-m02-shield-battery-overcharge-hold": ("Protoss", "Protoss", "early-rush-defense"),
+            "sc2-pvz-m01-2adept-shade-harass-vs-queen-ling": ("Protoss", "Zerg", "runby-offense"),
+            "sc2-pvz-m02-speedling-flood-incomplete-wall-hold": ("Protoss", "Zerg", "early-rush-defense"),
+        }
+        for sid, (r1, r2, cat) in new_9.items():
+            self.assertIn(sid, by_id)
+            sc = by_id[sid]
+            self.assertTrue(sc.fast_core, f"{sid} must be fast_core=True")
+            self.assertEqual((sc.our_race, sc.enemy_race, sc.category), (r1, r2, cat))
+        self.assertIn(2338, by_id["sc2-zvz-m02-roach-ravager-bile-concave"].expected_abilities)
+        self.assertIn(2346, by_id["sc2-pvp-m01-blink-immortal-disruptor-skirmish"].expected_abilities)
+        self.assertIn(2544, by_id["sc2-pvz-m01-2adept-shade-harass-vs-queen-ling"].expected_abilities)
+        self.assertTrue(by_id["sc2-pvz-m01-2adept-shade-harass-vs-queen-ling"].use_p2_main_base)
+        self.assertTrue(by_id["sc2-pvp-m02-shield-battery-overcharge-hold"].use_main_base)
+        self.assertTrue(by_id["sc2-pvz-m02-speedling-flood-incomplete-wall-hold"].use_main_base)
+
+        # 2. All 5 previously zero-creep Zerg scenarios now have creep (tumor or main Hatchery)
+        self.assertTrue(any(u[0] == "creep-tumor-burrowed" for u in by_id["sc2-spl-sp09-zvp-queen-transfuse-brood-hydra-vs-voidray"].p1_units))
+        self.assertTrue(any(u[0] == "creep-tumor-burrowed" for u in by_id["sc2-real-z04-queen-ultra-ling-vs-stalker-immortal"].p1_units))
+        self.assertTrue(any(u[0] == "creep-tumor-burrowed" for u in by_id["sc2-det-d03-p-nonblink-dt-stalker-vs-spores-roach-hydra"].p2_units))
+        self.assertTrue(any(u[0] == "creep-tumor-burrowed" for u in by_id["sc2-trn-n15-pvz-prism-cliff-ladder-immortals"].p2_units))
+        self.assertTrue(by_id["sc2-rsh-er04-zvp-proxy-voidray-queen-spore-hold"].use_main_base)
+
+        # 3. Zero mineral-line-harass scenarios lack a main-base TownHall
+        no_th_mlh = [s.id for s in specs if s.terrain == "mineral-line-harass" and not s.use_main_base and not s.use_p2_main_base]
+        self.assertEqual(no_th_mlh, [], f"mineral-line-harass drills missing TownHall: {no_th_mlh}")
+
+        # 4. Intentional premise preservation: blk-b01 keeps P2 non-Blink, rmp-h06 keeps no flying Medivac
+        self.assertEqual(by_id["sc2-blk-b01-pvp-12-blink-stalkers-vs-14-stalkers"].p2_upgrades, [])
+        self.assertFalse(any(u[0] == "medivac" for u in by_id["sc2-rmp-h06-tvp-blind-uphill-scan-tank-break"].p1_units))
 
 
 if __name__ == "__main__":

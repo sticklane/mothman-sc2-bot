@@ -738,6 +738,12 @@
         (newline out))
       #:exists 'append)))
 
+(define (env-flag-enabled? var-name)
+  (define v (getenv var-name))
+  (and (string? v)
+       (let ([s (string-downcase (string-trim v))])
+         (and (member s '("1" "true" "yes" "on")) #t))))
+
 (define (run-racket-sc2-match #:host [host "127.0.0.1"]
                               #:game-port [game-port #f]
                               #:start-port [start-port #f]
@@ -755,6 +761,7 @@
                               #:max-loops [max-loops 4032]
                               #:realtime? [realtime? #f]
                               #:step-size [step-size 4]
+                              #:skip-build-order? [skip-build-order? #f]
                               #:root-dir [root-dir (current-directory)])
   (define auto-launched-handle
     (if (and (not game-port) computer-opponent?)
@@ -844,7 +851,8 @@
       (define runtime
         (make-live-bot-runtime #:bot-name (string->symbol bot-name)
                                #:race configured-race-sym
-                               #:initial-posture posture-sym))
+                               #:initial-posture posture-sym
+                               #:skip-build-order? skip-build-order?))
 
       (define total-raw-cmds-sent 0)
       (define total-steps 0)
@@ -1073,6 +1081,8 @@
                      ;; Step cognitive architecture (primary actions first so individual unit micro
                      ;; populates commanded-combat-tags before any global spatial maneuver)
                      (define step-res (step-live-bot-runtime! runtime obs-hash))
+                     (when (and skip-build-order? (hash-ref step-res 'arena-reset? #f))
+                       (set! wire-apm-gov (make-wire-apm-governor #:target-apm 495.0 #:hard-cap-apm 595.0)))
                      (define rt1 (current-inexact-monotonic-milliseconds))
                      (define step-tel (hash-ref step-res 'telemetry (hash)))
                      (define prio-sum (hash-ref step-tel 'priority-summary (hash)))
@@ -1135,7 +1145,7 @@
                         #:watchdog-expand-ring-syms step-watchdog-expand-ring-syms
                         #:arbiter-ledger step-arbiter-ledger
                         #:mineral-override-pressure? step-min-override-pressure?))
-                     (define sat-cmds
+                     (define sat-cmds0
                        (saturate-workers-and-gas-commands
                         obs
                         #:excluded-worker-tags commanded-workers
@@ -1145,6 +1155,16 @@
                         #:gas-starvation-boost? step-gas-boost?
                         #:apm-pressure-backoff? step-apm-backoff?
                         #:mineral-override-pressure? step-min-override-pressure?))
+                     ;; Loop 83 (`--no-macro`): Keep worker mineral/gas saturation active while
+                     ;; stripping wire-layer autonomous macro casts (MULE 171, Supply Drop 255, Chrono 3755).
+                     (define sat-cmds
+                       (if skip-build-order?
+                           (filter (lambda (c)
+                                     (not (and (sc2-raw-unit-command? c)
+                                               (memv (sc2-raw-unit-command-ability-id c)
+                                                     '(171 255 3755)))))
+                                   sat-cmds0)
+                           sat-cmds0))
                      (define raw-cmds0 (append split-cmds action-cmds sat-cmds))
                      (define rcmds
                        (govern-sc2-wire-actions! wire-apm-gov raw-cmds0 last-game-loop obs))
@@ -1308,8 +1328,10 @@
                       (path->string (find-relative-path (simple-form-path root-dir)
                                                         (simple-form-path save-replay-path))))
                     "")
-                'saved_replay_bytes (or saved-replay-bytes 0)))
-      (append-native-telemetry! root-dir summary)
+                'saved_replay_bytes (or saved-replay-bytes 0)
+                'skip_build_order skip-build-order?))
+      (unless skip-build-order?
+        (append-native-telemetry! root-dir summary))
       summary)
     (lambda ()
       (when conn
@@ -1360,6 +1382,7 @@
   (define max-loops #f)
   (define realtime? #f)
   (define step-size 4)
+  (define skip-build-order? (env-flag-enabled? "MOTHMAN_SKIP_BUILD_ORDER"))
   (define dry-run? #f)
   (define ipc-sexp? #f)
 
@@ -1401,6 +1424,8 @@
                                 (set! realtime? #t)]
    [("--step-size") ss "Game loops per RequestStep"
                     (set! step-size (max 1 (or (string->number ss) 4)))]
+   [("--no-macro" "--skip-build-order") "Disable build-order/macro phases while preserving full combat & worker micro"
+                                        (set! skip-build-order? #t)]
    [("--ipc-sexp") "Run line-oriented stdin/stdout S-expression IPC loop"
                    (set! ipc-sexp? #t)]
    [("--dry-run") "Verify configuration and runtime without connecting to SC2"
@@ -1429,7 +1454,8 @@
      (define rt
        (make-live-bot-runtime #:bot-name (string->symbol resolved-bot-name)
                               #:race (string->symbol resolved-race)
-                              #:initial-posture (string->symbol resolved-posture)))
+                              #:initial-posture (string->symbol resolved-posture)
+                              #:skip-build-order? skip-build-order?))
      (let loop ()
        (define line (read-line (current-input-port) 'any))
        (unless (eof-object? line)
@@ -1452,7 +1478,8 @@
      (define rt
       (make-live-bot-runtime #:bot-name (string->symbol resolved-bot-name)
                              #:race (string->symbol resolved-race)
-                             #:initial-posture (string->symbol resolved-posture)))
+                             #:initial-posture (string->symbol resolved-posture)
+                             #:skip-build-order? skip-build-order?))
      (define out-hash
        (hasheq 'status "DRY_RUN_OK"
                'engine "racket_native_protobuf_ws"
@@ -1460,6 +1487,7 @@
                'bot_rkt_path (format "~a" resolved-bot-path)
                'resolved_race resolved-race
                'resolved_posture (symbol->string (live-bot-runtime-posture rt))
+               'skip_build_order (rt-skip-build-order? rt)
                'map (resolve-sc2-map-path map-name)))
      (displayln (jsexpr->string out-hash))
      out-hash]
@@ -1481,7 +1509,8 @@
                              #:map-name map-name
                              #:max-loops effective-max-loops
                              #:realtime? realtime?
-                             #:step-size step-size))
+                             #:step-size step-size
+                             #:skip-build-order? skip-build-order?))
      (displayln (jsexpr->string res))
      res]
     [else
