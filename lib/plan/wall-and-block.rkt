@@ -54,11 +54,15 @@
 (provide
  (struct-out EnemyWallAssessment)
  (struct-out UnwalledPunishPlan)
+ (struct-out EmergencyWalloffAssessment)
  classify-enemy-wall-state
  plan-unwalled-opponent-punish
  plan-own-wall-integrity-defense
  plan-expansion-and-gas-blocks
- plan-counter-expansion-and-gas-blocks)
+ plan-counter-expansion-and-gas-blocks
+ assess-protoss-emergency-walloff
+ plan-protoss-emergency-walloff-and-cancel
+ plan-pro-offensive-expansion-block)
 
 ;; =============================================================================
 ;; Shared Constants & Helpers
@@ -347,9 +351,37 @@
                           (safe-real (dyn-hash-ref b 'y entry-y) entry-y))))))
        (if (> max-pair-dist 4.8) 1 0)]
       [else 0]))
-  (define scouted? : Boolean
+  (define enemy-is-terran? : Boolean
+    (not (not (memq enemy-race '(Terran terran TERRAN)))))
+  (define explicit-main-scouted-key? : Boolean
+    (dyn-hash-has-key? sanitized-obs 'scouted-enemy-main?))
+  (define explicit-main-scouted? : Boolean
+    (eq? (dyn-hash-ref sanitized-obs 'scouted-enemy-main? #f) #t))
+  ;; Real high-ground / main-plateau vision check for Terran main ramp:
+  ;; A low-ground natural scout (`~22.6t` from `enemy-x`, `~14.6t` from `ramp-x`)
+  ;; MUST NOT count as scouting a fogged Terran high-ground main ramp!
+  (define inferred-main-plateau-scouted? : Boolean
+    (or (for/or : Boolean ([u (in-list ally-units)])
+          (and (hash? u)
+               (let ([ux (safe-real (dyn-hash-ref u 'x -999.0) -999.0)]
+                     [uy (safe-real (dyn-hash-ref u 'y -999.0) -999.0)])
+                 (or (<= (dist2d ux uy enemy-x enemy-y) 12.0)
+                     (<= (dist2d ux uy ramp-x ramp-y) 6.5)))))
+        (for/or : Boolean ([b (in-list enemy-bldgs)])
+          (and (hash? b)
+               (let ([bt (dyn-symbol (dyn-hash-ref b 'type 'unknown) 'unknown)]
+                     [bx (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0)]
+                     [by (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0)])
+                 (and (not (memq bt WALL-TOWNHALL-SYMS))
+                      (<= (dist2d bx by enemy-x enemy-y) 14.0)
+                      (> (dist2d bx by enemy-nat-x enemy-nat-y) 10.0)))))))
+  (define terran-main-scouted? : Boolean
+    (if explicit-main-scouted-key?
+        explicit-main-scouted?
+        inferred-main-plateau-scouted?))
+  (define raw-scouted? : Boolean
     (or (not (not (dyn-hash-ref sanitized-obs 'scouted-enemy-choke? #f)))
-        (not (not (dyn-hash-ref sanitized-obs 'scouted-enemy-main? #f)))
+        explicit-main-scouted?
         (not (null? enemy-bldgs))
         (for/or : Boolean ([u (in-list ally-units)])
           (and (hash? u)
@@ -365,13 +397,24 @@
                      (and (<= (abs dcx) 16.0)
                           (<= (abs dcy) 16.0)
                           (<= (+ (* dcx dcx) (* dcy dcy)) 256.0))))))))
+  ;; L82B: Fogged Terran main ramp defaults to CLOSED / `'unknown-unscouted`
+  ;; whenever we lack real high-ground main vision (unless a lowered depot is
+  ;; directly observed). Natural-open detection for Protoss/Zerg remains intact.
+  (define terran-main-fogged? : Boolean
+    (and enemy-is-terran?
+         (not terran-main-scouted?)
+         (= lowered-cnt 0)))
+  (define scouted? : Boolean
+    (if terran-main-fogged? #f raw-scouted?))
+  (define eff-gap-cnt : Integer
+    (if terran-main-fogged? 0 gap-cnt))
 
   (define post : Flonum
     (compute-bayesian-unwalled-opponent-posterior
      #:prior (if (memq enemy-race '(Zerg zerg ZERG)) 0.45 0.28)
      #:wall-structure-count wall-cnt
      #:lowered-depot-count lowered-cnt
-     #:door-gap-units gap-cnt
+     #:door-gap-units eff-gap-cnt
      #:scouted-choke? scouted?
      #:enemy-race enemy-race
      #:frame frame
@@ -380,13 +423,15 @@
   (define wstate : Symbol
     (cond
       [(> lowered-cnt 0) 'open-depot-door]
+      [terran-main-fogged?
+       (if (>= wall-cnt 2) 'walled 'unknown-unscouted)]
       [(and scouted? (= wall-cnt 0) (>= frame 1568)) 'no-wall]
-      [(and scouted? (or (= wall-cnt 1) (> gap-cnt 0))) 'gapped-wall]
+      [(and scouted? (or (= wall-cnt 1) (> eff-gap-cnt 0))) 'gapped-wall]
       [(>= wall-cnt 2) 'walled]
       [(not scouted?) 'unknown-unscouted]
       [else 'no-wall]))
 
-  (EnemyWallAssessment wstate post wall-cnt lowered-cnt gap-cnt static-cnt entry-x entry-y))
+  (EnemyWallAssessment wstate post wall-cnt lowered-cnt eff-gap-cnt static-cnt entry-x entry-y))
 
 ;; Inspects enemy ramp/choke structure density; when `'no-wall`, `'gapped-wall`,
 ;; or `'open-depot-door` (`frame >= 1568` or immediate depot opening) and Bayesian
@@ -1116,3 +1161,499 @@
            (emit! (list 'patrol-block-expansion pid nat-x nat-y)))))
 
      (reverse actions)]))
+
+;; =============================================================================
+;; 5. Protoss Emergency Doorway Wall-Off (Pylon / Shield Battery) + Auto-Cancel
+;;    (`25M` net on `cancel-building` `314`)
+;; =============================================================================
+
+(struct EmergencyWalloffAssessment
+  ([threat-kind : Symbol]
+   [door-x : Flonum]
+   [door-y : Flonum]
+   [door-plugged-by-unit? : Boolean]
+   [door-covered-by-bldg? : Boolean]
+   [chosen-structure : Symbol]
+   [shade-count-near-door : Integer]
+   [zergling-count-near-door : Integer]
+   [cancel-building-ids : (Listof Integer)])
+  #:transparent)
+
+(: WALL-EMERGENCY-DOOR-PLUG-UNIT-SYMS (Listof Symbol))
+(define WALL-EMERGENCY-DOOR-PLUG-UNIT-SYMS
+  '(zealot adept immortal stalker archon sentry))
+
+(: WALL-EMERGENCY-PLUG-BLDG-SYMS (Listof Symbol))
+(define WALL-EMERGENCY-PLUG-BLDG-SYMS
+  '(pylon shield-battery))
+
+(: bldg-entity-id (-> Any Integer))
+(define (bldg-entity-id b)
+  (define raw-id (dyn-hash-ref b 'id #f))
+  (if (exact-integer? raw-id)
+      raw-id
+      (safe-exact-int (dyn-hash-ref b 'tag 0) 0)))
+
+(: bldg-vitality-frac-shared (-> Any Flonum))
+(define (bldg-vitality-frac-shared b)
+  (cond
+    [(not (hash? b)) 1.0]
+    [(dyn-hash-has-key? b 'hull-hp)
+     (define cur (safe-real (or (dyn-hash-ref b 'hp #f) (dyn-hash-ref b 'health #f) 100.0) 100.0))
+     (define tot (max 1.0 (safe-real (or (dyn-hash-ref b 'max-hp #f)
+                                         (dyn-hash-ref b 'health-max #f)
+                                         (max 1.0 cur))
+                                     (max 1.0 cur))))
+     (/ cur tot)]
+    [else
+     (define hp (safe-real (or (dyn-hash-ref b 'hp #f) (dyn-hash-ref b 'health #f) 100.0) 100.0))
+     (define mhp (max 1.0 (safe-real (or (dyn-hash-ref b 'max-hp #f)
+                                         (dyn-hash-ref b 'health-max #f)
+                                         (max 1.0 hp))
+                                     (max 1.0 hp))))
+     (define sh (safe-real (or (dyn-hash-ref b 'shield #f) (dyn-hash-ref b 'shields #f) 0.0) 0.0))
+     (define msh (safe-real (or (dyn-hash-ref b 'max-shield #f)
+                                (dyn-hash-ref b 'shield-max #f)
+                                (dyn-hash-ref b 'max-shields #f)
+                                0.0)
+                            0.0))
+     (define cur (+ hp sh))
+     (define tot (max 1.0 (+ mhp msh)))
+     (if (> msh 0.0) (/ cur tot) (min 1.0 (/ cur tot)))]))
+
+;; Evaluates whether an under-construction structure has dropped below `threshold`
+;; (e.g. `0.35`) of its vitality without falsely triggering on undamaged freshly-started
+;; SC2 buildings (whose vitality starts at `0.10 + 0.90 * build-progress`).
+(: bldg-construction-low-hp? (-> Any Flonum Flonum Boolean))
+(define (bldg-construction-low-hp? b prog threshold)
+  (define expl-pct (dyn-hash-ref b 'hp-pct #f))
+  (cond
+    [(real? expl-pct)
+     (< (safe-real expl-pct 1.0) threshold)]
+    [else
+     (define expected-vit (+ 0.10 (* 0.90 (max 0.0 (min 1.0 prog)))))
+     (define actual-vit (bldg-vitality-frac-shared b))
+     (or (< actual-vit (* threshold expected-vit))
+         (and (< actual-vit threshold)
+              (< actual-vit (* 0.65 expected-vit))))]))
+
+(: is-pylon-bldg? (-> Any Boolean))
+(define (is-pylon-bldg? b)
+  (and (hash? b)
+       (or (eq? (dyn-symbol (dyn-hash-ref b 'type 'unknown) 'unknown) 'pylon)
+           (= (safe-exact-int (dyn-hash-ref b 'unit-type 0) 0) 60))))
+
+(: is-shield-battery-bldg? (-> Any Boolean))
+(define (is-shield-battery-bldg? b)
+  (and (hash? b)
+       (or (eq? (dyn-symbol (dyn-hash-ref b 'type 'unknown) 'unknown) 'shield-battery)
+           (= (safe-exact-int (dyn-hash-ref b 'unit-type 0) 0) 1910))))
+
+(: is-cyber-core-bldg? (-> Any Boolean))
+(define (is-cyber-core-bldg? b)
+  (and (hash? b)
+       (or (eq? (dyn-symbol (dyn-hash-ref b 'type 'unknown) 'unknown) 'cybernetics-core)
+           (= (safe-exact-int (dyn-hash-ref b 'unit-type 0) 0) 72))))
+
+(: is-ebay-bldg? (-> Any Boolean))
+(define (is-ebay-bldg? b)
+  (and (hash? b)
+       (or (eq? (dyn-symbol (dyn-hash-ref b 'type 'unknown) 'unknown) 'engineering-bay)
+           (= (safe-exact-int (dyn-hash-ref b 'unit-type 0) 0) 22))))
+
+(: is-adept-shade-unit? (-> Any Boolean))
+(define (is-adept-shade-unit? u)
+  (and (hash? u)
+       (or (eq? (dyn-symbol (dyn-hash-ref u 'type 'unknown) 'unknown) 'adept-phase-shift)
+           (= (safe-exact-int (dyn-hash-ref u 'unit-type 0) 0) 801))))
+
+(: is-zergling-unit? (-> Any Boolean))
+(define (is-zergling-unit? u)
+  (and (hash? u)
+       (not (dyn-hash-ref u 'flying #f))
+       (not (dyn-hash-ref u 'is-flying #f))
+       (or (eq? (dyn-symbol (dyn-hash-ref u 'type 'unknown) 'unknown) 'zergling)
+           (= (safe-exact-int (dyn-hash-ref u 'unit-type 0) 0) 105))))
+
+(: is-adept-unit? (-> Any Boolean))
+(define (is-adept-unit? u)
+  (and (hash? u)
+       (not (dyn-hash-ref u 'flying #f))
+       (not (dyn-hash-ref u 'is-flying #f))
+       (or (eq? (dyn-symbol (dyn-hash-ref u 'type 'unknown) 'unknown) 'adept)
+           (= (safe-exact-int (dyn-hash-ref u 'unit-type 0) 0) 311))))
+
+(: shade-heading-into-door? (-> Any Flonum Flonum Flonum Flonum Boolean))
+(define (shade-heading-into-door? sh door-x door-y base-x base-y)
+  (define sx (safe-real (dyn-hash-ref sh 'x 9999.0) 9999.0))
+  (define sy (safe-real (dyn-hash-ref sh 'y 9999.0) 9999.0))
+  (define d-door (dist2d sx sy door-x door-y))
+  (cond
+    ;; Directly at or entering the 1-hex doorway gap (`<= 4.5t`)
+    [(<= d-door 4.5) #t]
+    ;; Approaching doorway (`4.5t < d <= 11.0t`): respect velocity vector if provided,
+    ;; otherwise treat Shades closing within `<= 11.0t` on the approach side as threats.
+    [(<= d-door 11.0)
+     (define vx-raw (dyn-hash-ref sh 'vx #f))
+     (define vy-raw (dyn-hash-ref sh 'vy #f))
+     (cond
+       [(and (real? vx-raw) (real? vy-raw))
+        (define vx (safe-real vx-raw 0.0))
+        (define vy (safe-real vy-raw 0.0))
+        (define to-dx (- door-x sx))
+        (define to-dy (- door-y sy))
+        (or (> (+ (* vx to-dx) (* vy to-dy)) 0.0)
+            (<= d-door 5.5))]
+       [else
+        (define d-door-base (dist2d door-x door-y base-x base-y))
+        (define d-shade-base (dist2d sx sy base-x base-y))
+        (<= d-shade-base (+ d-door-base 11.5))])]
+    [else #f]))
+
+(: resolve-wall-door-xy (-> Any Flonum Flonum Flonum Flonum Flonum Flonum (Pairof Flonum Flonum)))
+(define (resolve-wall-door-xy obs base-x base-y nat-x nat-y enemy-x enemy-y)
+  (define default-door (compute-default-ramp-xy nat-x nat-y enemy-x enemy-y 8.0))
+  (define explicit-door
+    (parse-pt-pair (dyn-hash-ref obs 'door-pos #f) (car default-door) (cdr default-door)))
+  (define door-x
+    (cond
+      [explicit-door (car explicit-door)]
+      [(dyn-hash-has-key? obs 'wall-door-x)
+       (safe-real (dyn-hash-ref obs 'wall-door-x (car default-door)) (car default-door))]
+      [else (car default-door)]))
+  (define door-y
+    (cond
+      [explicit-door (cdr explicit-door)]
+      [(dyn-hash-has-key? obs 'wall-door-y)
+       (safe-real (dyn-hash-ref obs 'wall-door-y (cdr default-door)) (cdr default-door))]
+      [else (cdr default-door)]))
+  (cons door-x door-y))
+
+;; Pure Protoss emergency doorway wall-off assessment:
+;;   - Detects enemy Adept Shades heading into/within `1.0-4.5t` (or approaching `<= 11.0t`)
+;;     of `(door-x, door-y)`, OR `>= 4` enemy Speedlings rushing an unsealed doorway (`<= 10.0t`)
+;;     with no healthy friendly door-plug unit holding position alive.
+;;   - Chooses `'shield-battery` (`100M`) when a ready `cybernetics-core` exists and the doorway
+;;     is inside a ready `pylon` power field (`<= 6.5t`); otherwise `'pylon` (`100M`).
+;;   - Marks in-progress emergency doorway `pylon`/`shield-battery` structures for immediate
+;;     `cancel-building` (`314`, 75% refund = `25M` net) when:
+;;       (i)   threat clears (`0` shades near door AND `< 2` Speedlings AND `< 2` Adepts), OR
+;;       (ii)  under-construction vitality drops `< 35%`, OR
+;;       (iii) build progress reaches `>= 88%` (preventing permanent self-wall-in).
+(: assess-protoss-emergency-walloff (-> Any EmergencyWalloffAssessment))
+(define (assess-protoss-emergency-walloff obs)
+  (define sanitized-obs : Any (if (hash? obs) obs (hash)))
+  (define race (dyn-symbol (dyn-hash-ref sanitized-obs 'our-race
+                                         (dyn-hash-ref sanitized-obs 'race 'Unknown))
+                           'Unknown))
+  (define base-x (safe-real (dyn-hash-ref sanitized-obs 'base-x SC2-DEFAULT-HOME-BASE-X) 32.0))
+  (define base-y (safe-real (dyn-hash-ref sanitized-obs 'base-y SC2-DEFAULT-HOME-BASE-Y) 32.0))
+  (define default-eb (default-reflected-enemy-xy sanitized-obs base-x base-y))
+  (define enemy-x (safe-real (dyn-hash-ref sanitized-obs 'enemy-x (car default-eb)) (car default-eb)))
+  (define enemy-y (safe-real (dyn-hash-ref sanitized-obs 'enemy-y (cdr default-eb)) (cdr default-eb)))
+  (define default-nat (symmetric-directed-offset base-x base-y enemy-x enemy-y 22.627416997969522 0.0))
+  (define nat-x (safe-real (dyn-hash-ref sanitized-obs 'natural-x (car default-nat)) (car default-nat)))
+  (define nat-y (safe-real (dyn-hash-ref sanitized-obs 'natural-y (cdr default-nat)) (cdr default-nat)))
+  (define door-pt (resolve-wall-door-xy sanitized-obs base-x base-y nat-x nat-y enemy-x enemy-y))
+  (define door-x (car door-pt))
+  (define door-y (cdr door-pt))
+  (cond
+    [(not (memq race '(Protoss protoss PROTOSS)))
+     (EmergencyWalloffAssessment 'none door-x door-y #f #f 'none 0 0 '())]
+    [else
+     (define frame (safe-exact-int (dyn-hash-ref sanitized-obs 'frame 0) 0))
+     (define mins (safe-real (dyn-hash-ref sanitized-obs 'minerals 0.0) 0.0))
+     (define ally-bldgs (dyn-list (dyn-hash-ref sanitized-obs 'ally-buildings '())))
+     (define ally-units (dyn-list (dyn-hash-ref sanitized-obs 'ally-units '())))
+     (define enemy-units (dyn-list (dyn-hash-ref sanitized-obs 'enemy-units '())))
+     (define raw-plug-ids (dyn-list (dyn-hash-ref sanitized-obs 'emergency-plug-ids '())))
+     (define single-plug-id (safe-exact-int (dyn-hash-ref sanitized-obs 'emergency-plug-id 0) 0))
+     (define tagged-plug-ids : (Listof Integer)
+       (let ([base-ids (filter-map (lambda ([v : Any])
+                                     (and (exact-integer? v) (> v 0) v))
+                                   raw-plug-ids)])
+         (if (> single-plug-id 0) (cons single-plug-id base-ids) base-ids)))
+
+     ;; Count active threats near the 1-hex wall doorway
+     (define-values (shades-near-cnt shades-breaching-cnt lings-near-cnt adepts-near-cnt)
+       (for/fold ([sn : Integer 0] [sb : Integer 0] [zl : Integer 0] [ad : Integer 0])
+                 ([e (in-list enemy-units)]
+                  #:when (hash? e))
+         (define ex (safe-real (dyn-hash-ref e 'x 9999.0) 9999.0))
+         (define ey (safe-real (dyn-hash-ref e 'y 9999.0) 9999.0))
+         (define d (dist2d ex ey door-x door-y))
+         (cond
+           [(is-adept-shade-unit? e)
+            (values (if (<= d 11.5) (add1 sn) sn)
+                    (if (shade-heading-into-door? e door-x door-y base-x base-y) (add1 sb) sb)
+                    zl
+                    ad)]
+           [(is-zergling-unit? e)
+            (values sn sb (if (<= d 10.0) (add1 zl) zl) ad)]
+           [(is-adept-unit? e)
+            (values sn sb zl (if (<= d 8.0) (add1 ad) ad))]
+           [else
+            (values sn sb zl ad)])))
+
+     ;; Is a healthy friendly door-plug unit holding the 1-hex gap alive?
+     (define door-plugged-by-unit? : Boolean
+       (for/or : Boolean ([u (in-list ally-units)])
+         (and (hash? u)
+              (not (dyn-hash-ref u 'flying #f))
+              (not (dyn-hash-ref u 'is-flying #f))
+              (not (dyn-hash-ref u 'is-hallucination #f))
+              (not (not (memq (dyn-symbol (dyn-hash-ref u 'type 'unknown) 'unknown)
+                              WALL-EMERGENCY-DOOR-PLUG-UNIT-SYMS)))
+              (>= (unit-hp-pct u) 0.25)
+              (let* ([ux (safe-real (dyn-hash-ref u 'x 9999.0) 9999.0)]
+                     [uy (safe-real (dyn-hash-ref u 'y 9999.0) 9999.0)]
+                     [d (dist2d ux uy door-x door-y)]
+                     [ord-sym (dyn-symbol (dyn-hash-ref u 'order 'none) 'none)]
+                     [ord-id (safe-exact-int (dyn-hash-ref u 'order-ability-id 0) 0)]
+                     [holding? (or (eq? ord-sym 'hold-position)
+                                   (= ord-id 18)
+                                   (eq? (dyn-hash-ref u 'holding-position? #f) #t))])
+                ;; A unit right in the 1-hex door (`<= 1.25t`) OR explicitly holding position within `<= 1.8t`
+                (or (<= d 1.25)
+                    (and holding? (<= d 1.8)))))))
+
+     ;; Is the doorway already covered by any friendly building (complete or warping in)?
+     (define door-covered-by-bldg? : Boolean
+       (for/or : Boolean ([b (in-list ally-bldgs)])
+         (and (hash? b)
+              (not (dyn-hash-ref b 'flying #f))
+              (<= (dist2d door-x door-y
+                          (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0)
+                          (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0))
+                  1.9))))
+
+     ;; Check all in-progress emergency doorway Pylons / Shield Batteries for auto-cancel (`314`)
+     (define threat-cleared? : Boolean
+       (and (= shades-near-cnt 0)
+            (< lings-near-cnt 2)
+            (< adepts-near-cnt 2)))
+     (define keep-all-finish? : Boolean
+       (eq? (dyn-hash-ref sanitized-obs 'keep-emergency-finish? #f) #t))
+     (define cancel-ids : (Listof Integer)
+       (reverse
+        (for/fold ([acc : (Listof Integer) '()])
+                  ([b (in-list ally-bldgs)]
+                   #:when (hash? b))
+          (define bid (bldg-entity-id b))
+          (define prog (max 0.0 (min 1.0 (safe-real (dyn-hash-ref b 'build-progress 1.0) 1.0))))
+          (define bx (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0))
+          (define by (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0))
+          (define is-plug-type? (or (is-pylon-bldg? b) (is-shield-battery-bldg? b)))
+          (define on-door-or-tagged?
+            (or (<= (dist2d bx by door-x door-y) 2.2)
+                (and (> bid 0) (not (not (memv bid tagged-plug-ids))))))
+          (cond
+            [(and is-plug-type?
+                  on-door-or-tagged?
+                  (< prog SC2-BUILD-COMPLETE-PROGRESS)
+                  (> bid 0)
+                  (not (eq? (dyn-hash-ref b 'keep-finish? #f) #t)))
+             (define low-hp? (bldg-construction-low-hp? b prog 0.35))
+             (define near-complete? (and (not keep-all-finish?) (>= prog 0.88)))
+             (if (or threat-cleared? low-hp? near-complete?)
+                 (cons bid acc)
+                 acc)]
+            [else acc]))))
+
+     ;; Determine whether we need to place a new emergency doorway Pylon or Shield Battery
+     (define in-frame-window? : Boolean
+       (or (<= frame 8064)
+           (eq? (dyn-hash-ref sanitized-obs 'allow-late-emergency-walloff? #f) #t)))
+     (define has-probe-near? : Boolean
+       (for/or : Boolean ([u (in-list ally-units)])
+         (and (hash? u)
+              (or (eq? (dyn-symbol (dyn-hash-ref u 'type 'unknown) 'unknown) 'probe)
+                  (= (safe-exact-int (dyn-hash-ref u 'unit-type 0) 0) 84))
+              (let ([ux (safe-real (dyn-hash-ref u 'x 9999.0) 9999.0)]
+                    [uy (safe-real (dyn-hash-ref u 'y 9999.0) 9999.0)])
+                (or (<= (dist2d ux uy door-x door-y) 26.0)
+                    (<= (dist2d ux uy base-x base-y) 26.0))))))
+     (define threat-kind : Symbol
+       (cond
+         [(and (> shades-breaching-cnt 0) (not door-plugged-by-unit?))
+          'adept-shade]
+         [(and (>= lings-near-cnt 4) (not door-plugged-by-unit?))
+          'speedling-rush]
+         [(and (>= adepts-near-cnt 2) (not door-plugged-by-unit?))
+          'adept-breach]
+         [else 'none]))
+     (define can-place-now? : Boolean
+       (and (not (eq? threat-kind 'none))
+            (null? cancel-ids)
+            (not door-covered-by-bldg?)
+            in-frame-window?
+            (>= mins 100.0)
+            has-probe-near?))
+     (define cyber-ready? : Boolean
+       (and can-place-now?
+            (for/or : Boolean ([b (in-list ally-bldgs)])
+              (and (is-cyber-core-bldg? b)
+                   (>= (safe-real (dyn-hash-ref b 'build-progress 1.0) 1.0)
+                       SC2-BUILD-COMPLETE-PROGRESS)))))
+     (define door-powered? : Boolean
+       (and cyber-ready?
+            (for/or : Boolean ([b (in-list ally-bldgs)])
+              (and (is-pylon-bldg? b)
+                   (>= (safe-real (dyn-hash-ref b 'build-progress 1.0) 1.0)
+                       SC2-BUILD-COMPLETE-PROGRESS)
+                   (<= (dist2d door-x door-y
+                               (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0)
+                               (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0))
+                       6.5)))))
+     (define prefer-pylon? : Boolean
+       (eq? (dyn-hash-ref sanitized-obs 'prefer-pylon-walloff? #f) #t))
+     (define chosen-structure : Symbol
+       (cond
+         [(not can-place-now?) 'none]
+         [(and cyber-ready? door-powered? (not prefer-pylon?)) 'shield-battery]
+         [else 'pylon]))
+
+     (EmergencyWalloffAssessment threat-kind
+                                 door-x
+                                 door-y
+                                 door-plugged-by-unit?
+                                 door-covered-by-bldg?
+                                 chosen-structure
+                                 shades-near-cnt
+                                 lings-near-cnt
+                                 cancel-ids)]))
+
+;; Wire-ready planner emitting emergency doorway `(build shield-battery|pylon door-x door-y)`
+;; and `(cancel-building bid)` (`314`, 75% refund = `25M` net) actions for Protoss.
+(: plan-protoss-emergency-walloff-and-cancel (-> Any (Listof (Listof Any))))
+(define (plan-protoss-emergency-walloff-and-cancel obs)
+  (define a (assess-protoss-emergency-walloff obs))
+  (define cancel-cmds : (Listof (Listof Any))
+    (for/list : (Listof (Listof Any)) ([bid (in-list (EmergencyWalloffAssessment-cancel-building-ids a))])
+      (list 'cancel-building bid)))
+  (define build-sym (EmergencyWalloffAssessment-chosen-structure a))
+  (cond
+    [(pair? cancel-cmds) cancel-cmds]
+    [(not (eq? build-sym 'none))
+     (list (list 'build build-sym
+                 (EmergencyWalloffAssessment-door-x a)
+                 (EmergencyWalloffAssessment-door-y a)))]
+    [else '()]))
+
+;; =============================================================================
+;; 6. Pro Offensive Natural Expansion-Block + Auto-Cancel (`25M` PvZ / `31.25M` TvP)
+;; =============================================================================
+
+;; Bounded early-game helper (`0:45-1:45` = frames `1008..2352`) for a forward scouting worker:
+;;   - `PvZ`: drops `pylon` (`100M`, spare floor `125M` default) on empty enemy natural pad.
+;;   - `TvP`: drops `engineering-bay` (`125M`, spare floor `150M` default) on empty enemy natural pad.
+;;   - Auto-cancels (`cancel-building`, ability `314`, 75% refund = `25M`/`31.25M` net) whenever
+;;     the in-progress block drops `< 35%` HP OR reaches `>= 85%` build progress.
+(: plan-pro-offensive-expansion-block (-> Any (Listof (Listof Any))))
+(define (plan-pro-offensive-expansion-block obs)
+  (define sanitized-obs : Any (if (hash? obs) obs (hash)))
+  (cond
+    [(eq? (dyn-hash-ref sanitized-obs 'enabled? #t) #f) '()]
+    [else
+     (define frame (safe-exact-int (dyn-hash-ref sanitized-obs 'frame 0) 0))
+     (define mins (safe-real (dyn-hash-ref sanitized-obs 'minerals 0.0) 0.0))
+     (define race (dyn-symbol (dyn-hash-ref sanitized-obs 'our-race
+                                            (dyn-hash-ref sanitized-obs 'race 'Unknown))
+                              'Unknown))
+     (define enemy-race (dyn-symbol (dyn-hash-ref sanitized-obs 'enemy-race 'Unknown) 'Unknown))
+     (define base-x (safe-real (dyn-hash-ref sanitized-obs 'base-x SC2-DEFAULT-HOME-BASE-X) 32.0))
+     (define base-y (safe-real (dyn-hash-ref sanitized-obs 'base-y SC2-DEFAULT-HOME-BASE-Y) 32.0))
+     (define default-eb (default-reflected-enemy-xy sanitized-obs base-x base-y))
+     (define enemy-x (safe-real (dyn-hash-ref sanitized-obs 'enemy-x (car default-eb)) (car default-eb)))
+     (define enemy-y (safe-real (dyn-hash-ref sanitized-obs 'enemy-y (cdr default-eb)) (cdr default-eb)))
+     (define default-enemy-nat
+       (symmetric-directed-offset enemy-x enemy-y base-x base-y 22.627416997969522 0.0))
+     (define enemy-nat-x
+       (safe-real (dyn-hash-ref sanitized-obs 'enemy-natural-x (car default-enemy-nat))
+                  (car default-enemy-nat)))
+     (define enemy-nat-y
+       (safe-real (dyn-hash-ref sanitized-obs 'enemy-natural-y (cdr default-enemy-nat))
+                  (cdr default-enemy-nat)))
+     (define ally-bldgs (dyn-list (dyn-hash-ref sanitized-obs 'ally-buildings '())))
+     (define enemy-bldgs (dyn-list (dyn-hash-ref sanitized-obs 'enemy-buildings '())))
+     (define ally-units (dyn-list (dyn-hash-ref sanitized-obs 'ally-units '())))
+
+     ;; 1. Auto-cancel any in-progress forward Pylon / Engineering Bay on the enemy natural
+     ;;    at `< 35%` HP or `>= 85%` build progress (`75%` refund = `25M` PvZ / `31.25M` TvP net).
+     ;;    Runs up to frame `4500` so a late `1:40` drop still cleanly cancels.
+     (define cancel-cmds : (Listof (Listof Any))
+       (if (> frame 4500)
+           '()
+           (reverse
+            (for/fold ([acc : (Listof (Listof Any)) '()])
+                      ([b (in-list ally-bldgs)]
+                       #:when (hash? b))
+              (define bid (bldg-entity-id b))
+              (define prog (max 0.0 (min 1.0 (safe-real (dyn-hash-ref b 'build-progress 1.0) 1.0))))
+              (define bx (safe-real (dyn-hash-ref b 'x base-x) base-x))
+              (define by (safe-real (dyn-hash-ref b 'y base-y) base-y))
+              (define is-block-type? (or (is-pylon-bldg? b) (is-ebay-bldg? b)))
+              (define on-enemy-nat?
+                (and (<= (dist2d bx by enemy-nat-x enemy-nat-y) 7.5)
+                     (> (dist2d bx by base-x base-y) 40.0)))
+              (if (and is-block-type?
+                       on-enemy-nat?
+                       (< prog SC2-BUILD-COMPLETE-PROGRESS)
+                       (> bid 0)
+                       (not (eq? (dyn-hash-ref b 'keep-finish? #f) #t))
+                       (or (bldg-construction-low-hp? b prog 0.35)
+                           (>= prog 0.85)))
+                  (cons (list 'cancel-building bid) acc)
+                  acc)))))
+
+     ;; 2. Bounded placement window (`0:45-1:45` = frames `1008..2352`) for `PvZ` / `TvP`
+     (define-values (block-sym scout-sym default-min-mins)
+       (cond
+         [(and (memq race '(Protoss protoss PROTOSS))
+               (memq enemy-race '(Zerg zerg ZERG)))
+          (values 'pylon 'probe 125.0)]
+         [(and (memq race '(Terran terran TERRAN))
+               (memq enemy-race '(Protoss protoss PROTOSS)))
+          (values 'engineering-bay 'scv 150.0)]
+         [else (values 'none 'none 9999.0)]))
+     (define min-mins-req
+       (safe-real (dyn-hash-ref sanitized-obs 'min-block-minerals default-min-mins)
+                  default-min-mins))
+     (define under-attack? (eq? (dyn-hash-ref sanitized-obs 'under-attack? #f) #t))
+     (define in-window? (and (>= frame 1008) (<= frame 2352)))
+     (define enemy-nat-empty? : Boolean
+       (and (not (for/or : Boolean ([b (in-list ally-bldgs)])
+                   (and (hash? b)
+                        (<= (dist2d enemy-nat-x enemy-nat-y
+                                    (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0)
+                                    (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0))
+                            6.5))))
+            (not (for/or : Boolean ([b (in-list enemy-bldgs)])
+                   (and (hash? b)
+                        (<= (dist2d enemy-nat-x enemy-nat-y
+                                    (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0)
+                                    (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0))
+                            6.5))))))
+     (define scout-worker-at-nat? : Boolean
+       (and (not (eq? scout-sym 'none))
+            (for/or : Boolean ([u (in-list ally-units)])
+              (and (hash? u)
+                   (let ([ut (dyn-symbol (dyn-hash-ref u 'type 'unknown) 'unknown)]
+                         [uid (safe-exact-int (dyn-hash-ref u 'unit-type 0) 0)])
+                     (or (eq? ut scout-sym)
+                         (and (eq? scout-sym 'probe) (= uid 84))
+                         (and (eq? scout-sym 'scv) (= uid 45))))
+                   (<= (dist2d enemy-nat-x enemy-nat-y
+                               (safe-real (dyn-hash-ref u 'x 9999.0) 9999.0)
+                               (safe-real (dyn-hash-ref u 'y 9999.0) 9999.0))
+                       14.0)))))
+     (cond
+       [(pair? cancel-cmds) cancel-cmds]
+       [(and (not (eq? block-sym 'none))
+             in-window?
+             (not under-attack?)
+             (>= mins min-mins-req)
+             enemy-nat-empty?
+             scout-worker-at-nat?)
+        (list (list 'build block-sym enemy-nat-x enemy-nat-y))]
+       [else '()])]))

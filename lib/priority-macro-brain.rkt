@@ -56,6 +56,12 @@
  macro-world-state-mirror-signals
  macro-world-state-depleting-bases
  macro-world-state-natural-blocked?
+ macro-world-state-enemy-wall-open?
+ macro-world-state-enemy-wall-assessment
+ macro-world-state-total-adepts-produced
+ macro-world-state-total-zerglings-produced
+ enemy-wall-assessment->open?
+ protoss-unwalled-adept-target
  macro-world-state->ledger-hash
  reset-macro-escrow-tracker!
  macro-escrow-sync-entry!
@@ -1241,6 +1247,73 @@
 (define macro-world-state-mirror-signals-table (make-weak-hasheq))
 (define macro-world-state-depleting-bases-table (make-weak-hasheq))
 (define macro-world-state-natural-blocked-table (make-weak-hasheq))
+(define macro-world-state-enemy-wall-open-table (make-weak-hasheq))
+(define macro-world-state-enemy-wall-assessment-table (make-weak-hasheq))
+(define macro-world-state-total-adepts-produced-table (make-weak-hasheq))
+(define macro-world-state-total-zerglings-produced-table (make-weak-hasheq))
+
+;; Extracts static-defense-count from either an EnemyWallAssessment struct or hash.
+(define (enemy-wall-assessment-static-defense-count assess)
+  (cond
+    [(hash? assess)
+     (define v (hash-ref assess 'static-defense-count 0))
+     (if (real? v) (max 0 (inexact->exact (floor v))) 0)]
+    [(struct? assess)
+     (define vec (struct->vector assess))
+     (if (and (>= (vector-length vec) 7)
+              (eq? (vector-ref vec 0) 'struct:EnemyWallAssessment)
+              (real? (vector-ref vec 6)))
+         (max 0 (inexact->exact (floor (vector-ref vec 6))))
+         0)]
+    [else 0]))
+
+;; Pure decoder for scouted enemy wall state (boolean, symbol, hash, or transparent
+;; EnemyWallAssessment struct). Always defaults safely to #f when unscouted or walled.
+(define (enemy-wall-assessment->open? assess #:reject-static-defense? [reject-static-def? #f])
+  (cond
+    [(eq? assess #t) #t]
+    [(or (eq? assess #f) (eq? assess 'unset)) #f]
+    [(symbol? assess)
+     (not (not (memq assess '(no-wall gapped-wall open-depot-door))))]
+    [(hash? assess)
+     (cond
+       [(and (hash-has-key? assess 'scouted?)
+             (eq? (hash-ref assess 'scouted?) #f))
+        #f]
+       [(and reject-static-def?
+             (> (enemy-wall-assessment-static-defense-count assess) 0))
+        #f]
+       [(hash-has-key? assess 'enemy-wall-open?)
+        (eq? (hash-ref assess 'enemy-wall-open?) #t)]
+       [else
+        (define wstate (hash-ref assess 'wall-state 'unknown-unscouted))
+        (define post (hash-ref assess 'unwalled-posterior #f))
+        (and (not (not (memq wstate '(no-wall gapped-wall open-depot-door))))
+             (or (eq? wstate 'open-depot-door)
+                 (not (real? post))
+                 (>= post 0.50)))])]
+    [(struct? assess)
+     (define vec (struct->vector assess))
+     (if (and (>= (vector-length vec) 7)
+              (eq? (vector-ref vec 0) 'struct:EnemyWallAssessment))
+         (let ([wstate (vector-ref vec 1)]
+               [post (vector-ref vec 2)]
+               [static-cnt (vector-ref vec 6)])
+           (and (not (not (memq wstate '(no-wall gapped-wall open-depot-door))))
+                (or (not reject-static-def?)
+                    (not (real? static-cnt))
+                    (<= static-cnt 0))
+                (or (eq? wstate 'open-depot-door)
+                    (not (real? post))
+                    (>= post 0.50))))
+         #f)]
+    [else #f]))
+
+;; 2 Adepts (2 x 22 = 44 >= 40 HP) 1-volley Drones/Probes; 3 Adepts (3 x 22 = 66 >= 45 HP) 1-volley SCVs.
+(define (protoss-unwalled-adept-target enemy-race)
+  (case enemy-race
+    [(Terran terran "Terran" "terran") 3]
+    [else 2]))
 
 (define (macro-world-state-enemy-unit-counts ws)
   (and (macro-world-state? ws)
@@ -1264,6 +1337,48 @@
   (and (macro-world-state? ws)
        (not (not (hash-ref macro-world-state-natural-blocked-table ws #f)))))
 
+(define (macro-world-state-enemy-wall-assessment ws)
+  (and (macro-world-state? ws)
+       (let ([direct (hash-ref macro-world-state-enemy-wall-assessment-table ws #f)])
+         (or direct
+             (let ([ms (macro-world-state-mirror-signals ws)])
+               (and (hash? ms) (hash-ref ms 'enemy-wall-assessment #f)))))))
+
+(define (macro-world-state-enemy-wall-open? ws)
+  (and (macro-world-state? ws)
+       (let ([direct (hash-ref macro-world-state-enemy-wall-open-table ws 'unset)])
+         (cond
+           [(boolean? direct) direct]
+           [else
+            (define ms (macro-world-state-mirror-signals ws))
+            (define ms-open
+              (if (and (hash? ms) (hash-has-key? ms 'enemy-wall-open?))
+                  (hash-ref ms 'enemy-wall-open? 'unset)
+                  'unset))
+            (if (boolean? ms-open)
+                ms-open
+                (enemy-wall-assessment->open? (macro-world-state-enemy-wall-assessment ws)))]))))
+
+(define (macro-world-state-total-adepts-produced ws)
+  (and (macro-world-state? ws)
+       (let ([direct (hash-ref macro-world-state-total-adepts-produced-table ws #f)])
+         (cond
+           [(exact-nonnegative-integer? direct) direct]
+           [else
+            (define ms (macro-world-state-mirror-signals ws))
+            (define v (and (hash? ms) (hash-ref ms 'total-adepts-produced #f)))
+            (and (real? v) (max 0 (inexact->exact (floor v))))]))))
+
+(define (macro-world-state-total-zerglings-produced ws)
+  (and (macro-world-state? ws)
+       (let ([direct (hash-ref macro-world-state-total-zerglings-produced-table ws #f)])
+         (cond
+           [(exact-nonnegative-integer? direct) direct]
+           [else
+            (define ms (macro-world-state-mirror-signals ws))
+            (define v (and (hash? ms) (hash-ref ms 'total-zerglings-produced #f)))
+            (and (real? v) (max 0 (inexact->exact (floor v))))]))))
+
 (define (macro-world-state->ledger-hash ws)
   (cond
     [(hash? ws) ws]
@@ -1285,6 +1400,8 @@
         'active-bases (macro-world-state-active-bases ws)
         'depleting-bases (macro-world-state-depleting-bases ws)
         'natural-blocked? (macro-world-state-natural-blocked? ws)
+        'enemy-wall-open? (macro-world-state-enemy-wall-open? ws)
+        'enemy-wall-assessment (macro-world-state-enemy-wall-assessment ws)
         'building-counts (macro-world-state-total-building-counts ws)
         'ready-building-counts (macro-world-state-ready-building-counts ws)
         'unit-counts (macro-world-state-unit-counts ws)
@@ -1351,6 +1468,10 @@
          #:mirror-signals [mirror-signals #f]
          #:depleting-bases [depleting-bases 0]
          #:natural-blocked? [natural-blocked? #f]
+         #:enemy-wall-open? [enemy-wall-open? 'unset]
+         #:enemy-wall-assessment [enemy-wall-assessment #f]
+         #:total-adepts-produced [total-adepts-produced #f]
+         #:total-zerglings-produced [total-zerglings-produced #f]
          #:opp-commitment-ht [opp-commitment-ht #f]
          #:loss-recovery-ht [loss-recovery-ht #f]
          #:peak-workers [peak-workers #f]
@@ -1417,6 +1538,16 @@
     (hash-set! macro-world-state-depleting-bases-table ws depleting-bases))
   (when (eq? natural-blocked? #t)
     (hash-set! macro-world-state-natural-blocked-table ws #t))
+  (when (boolean? enemy-wall-open?)
+    (hash-set! macro-world-state-enemy-wall-open-table ws enemy-wall-open?))
+  (when enemy-wall-assessment
+    (hash-set! macro-world-state-enemy-wall-assessment-table ws enemy-wall-assessment))
+  (when (real? total-adepts-produced)
+    (hash-set! macro-world-state-total-adepts-produced-table ws
+               (max 0 (inexact->exact (floor total-adepts-produced)))))
+  (when (real? total-zerglings-produced)
+    (hash-set! macro-world-state-total-zerglings-produced-table ws
+               (max 0 (inexact->exact (floor total-zerglings-produced)))))
   ws)
 
 ;; =============================================================================
@@ -1703,7 +1834,41 @@
                    (if (real? v) (exact->inexact v) 0.0))))
    #:depleting-bases (let ([d (hash-ref obs 'depleting-bases 0)])
                        (if (exact-nonnegative-integer? d) d 0))
-   #:natural-blocked? (eq? (hash-ref obs 'natural-blocked? #f) #t)))
+   #:natural-blocked? (eq? (hash-ref obs 'natural-blocked? #f) #t)
+   #:enemy-wall-open? (let* ([raw-sub (hash-ref obs 'mirror-signals #f)]
+                             [sub (if (hash? raw-sub) raw-sub (hasheq))])
+                        (cond
+                          [(hash-has-key? obs 'enemy-wall-open?)
+                           (eq? (hash-ref obs 'enemy-wall-open? #f) #t)]
+                          [(hash-has-key? sub 'enemy-wall-open?)
+                           (eq? (hash-ref sub 'enemy-wall-open? #f) #t)]
+                          [else 'unset]))
+   #:enemy-wall-assessment (let* ([raw-sub (hash-ref obs 'mirror-signals #f)]
+                                  [sub (if (hash? raw-sub) raw-sub (hasheq))])
+                             (cond
+                               [(hash-has-key? obs 'enemy-wall-assessment)
+                                (hash-ref obs 'enemy-wall-assessment #f)]
+                               [(hash-has-key? sub 'enemy-wall-assessment)
+                                (hash-ref sub 'enemy-wall-assessment #f)]
+                               [else #f]))
+   #:total-adepts-produced (let* ([raw-sub (hash-ref obs 'mirror-signals #f)]
+                                  [sub (if (hash? raw-sub) raw-sub (hasheq))]
+                                  [v (cond
+                                       [(hash-has-key? obs 'total-adepts-produced)
+                                        (hash-ref obs 'total-adepts-produced #f)]
+                                       [(hash-has-key? sub 'total-adepts-produced)
+                                        (hash-ref sub 'total-adepts-produced #f)]
+                                       [else #f])])
+                             (and (real? v) (max 0 (inexact->exact (floor v)))))
+   #:total-zerglings-produced (let* ([raw-sub (hash-ref obs 'mirror-signals #f)]
+                                     [sub (if (hash? raw-sub) raw-sub (hasheq))]
+                                     [v (cond
+                                          [(hash-has-key? obs 'total-zerglings-produced)
+                                           (hash-ref obs 'total-zerglings-produced #f)]
+                                          [(hash-has-key? sub 'total-zerglings-produced)
+                                           (hash-ref sub 'total-zerglings-produced #f)]
+                                          [else #f])])
+                                (and (real? v) (max 0 (inexact->exact (floor v)))))))
 
 ;; Helper: convert building/unit counts hash to flat list of symbols for legacy APIs
 (define (counts-hash->symbol-list ht)
@@ -2156,13 +2321,34 @@
 ;; Synthesizes the live 5-track `dynamic-macro-plan` plus reusable per-step context.
 (define (synthesize-dynamic-macro-plan/ctx state
                                          #:enemy-unit-counts [override-enemy-unit-counts #f]
-                                         #:enemy-building-counts [override-enemy-building-counts #f])
+                                         #:enemy-building-counts [override-enemy-building-counts #f]
+                                         #:enemy-wall-open? [override-enemy-wall-open? 'unset]
+                                         #:enemy-wall-assessment [override-enemy-wall-assessment #f]
+                                         #:total-adepts-produced [override-total-adepts-produced #f]
+                                         #:total-zerglings-produced [override-total-zerglings-produced #f])
   (define enemy-u-counts
     (or (and (hash? override-enemy-unit-counts) override-enemy-unit-counts)
         (macro-world-state-enemy-unit-counts state)))
   (define enemy-b-counts
     (or (and (hash? override-enemy-building-counts) override-enemy-building-counts)
         (macro-world-state-enemy-building-counts state)))
+  (define ws-enemy-wall-assessment
+    (or override-enemy-wall-assessment
+        (macro-world-state-enemy-wall-assessment state)))
+  (define ws-enemy-wall-open?
+    (cond
+      [(boolean? override-enemy-wall-open?) override-enemy-wall-open?]
+      [override-enemy-wall-assessment
+       (enemy-wall-assessment->open? override-enemy-wall-assessment)]
+      [else (macro-world-state-enemy-wall-open? state)]))
+  (define ws-total-adepts-produced
+    (or (and (real? override-total-adepts-produced)
+             (max 0 (inexact->exact (floor override-total-adepts-produced))))
+        (macro-world-state-total-adepts-produced state)))
+  (define ws-total-zerglings-produced
+    (or (and (real? override-total-zerglings-produced)
+             (max 0 (inexact->exact (floor override-total-zerglings-produced))))
+        (macro-world-state-total-zerglings-produced state)))
   (match-define (macro-world-state
                  race enemy-race frame minerals gas
                  supply-used supply-cap supply-left pending-supply
@@ -3134,9 +3320,39 @@
              (< cur-queens desired-queens))
     ;; L49-W1B (`#1155`/`#1157`): Scale peaceful Zerg Queens to 2->3->4 on Pro pace
     ;; (`Queen #2 @ 2:05-2:31`, `Queen #3 @ 2:53-3:34`, `Queen #4 @ 3:36-4:24`), strictly non-blocking under attack!
+    (define plan-unwalled-speedling-punish?
+      (and ws-enemy-wall-open?
+           (memq enemy-race '(Protoss Terran))
+           (>= frame 2688)
+           (<= frame 5712)
+           (not under-attack?)
+           (<= enemy-threat-supply 0)
+           (not under-early-rush-crisis?)
+           (not eff-req-aa?)
+           (not eff-req-det?)
+           (not enemy-cap-air?)
+           (= (enemy-wall-assessment-static-defense-count ws-enemy-wall-assessment) 0)
+           (= (bldg-count-equivalent enemy-b-counts 'photon-cannon) 0)
+           (= (bldg-count-equivalent enemy-b-counts 'bunker) 0)
+           (>= plan-total-townhalls 2)
+           (>= workers 19)
+           (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+           (or (has-upgrade-sym? 'metabolic-boost all-upgs)
+               (memq 'metabolic-boost researched-upgrades)
+               (memq 'metabolic-boost pending-upgrades)
+               (memq 'zergling-movementspeed researched-upgrades)
+               (memq 'zergling-movementspeed pending-upgrades)
+               (memq 'zerg-ling-metabolic-boost researched-upgrades)
+               (memq 'zerg-ling-metabolic-boost pending-upgrades))
+           (< (max (unit-count-equivalent unit-counts 'zergling)
+                   (if (exact-nonnegative-integer? ws-total-zerglings-produced)
+                       ws-total-zerglings-produced
+                       0))
+              16)))
     (define zerg-pro-early-queen-target
       (cond
         [(< plan-total-townhalls 2) 2]
+        [plan-unwalled-speedling-punish? 2]
         [(>= plan-total-townhalls 3) 4]
         [(or (> (+ (bldg-count-equivalent total-bldg-counts 'roach-warren)
                    (bldg-count-equivalent total-bldg-counts 'baneling-nest)) 0)
@@ -3524,6 +3740,38 @@
 
   (when (eq? race 'Zerg)
     (define cur-zerglings (unit-count-equivalent unit-counts 'zergling))
+    (define total-lings-produced
+      (max cur-zerglings
+           (if (exact-nonnegative-integer? ws-total-zerglings-produced)
+               ws-total-zerglings-produced
+               0)))
+    (define plan-speed-started-or-ready?
+      (or (has-upgrade-sym? 'metabolic-boost all-upgs)
+          (memq 'metabolic-boost researched-upgrades)
+          (memq 'metabolic-boost pending-upgrades)
+          (memq 'zergling-movementspeed researched-upgrades)
+          (memq 'zergling-movementspeed pending-upgrades)
+          (memq 'zerg-ling-metabolic-boost researched-upgrades)
+          (memq 'zerg-ling-metabolic-boost pending-upgrades)))
+    (when (and ws-enemy-wall-open?
+               (memq enemy-race '(Protoss Terran))
+               (>= frame 2688)
+               (<= frame 5712)
+               (not under-attack?)
+               (<= enemy-threat-supply 0)
+               (not under-early-rush-crisis?)
+               (not eff-req-aa?)
+               (not eff-req-det?)
+               (not enemy-cap-air?)
+               (= (enemy-wall-assessment-static-defense-count ws-enemy-wall-assessment) 0)
+               (= (bldg-count-equivalent enemy-b-counts 'photon-cannon) 0)
+               (= (bldg-count-equivalent enemy-b-counts 'bunker) 0)
+               (>= plan-total-townhalls 2)
+               (>= workers 19)
+               (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+               plan-speed-started-or-ready?
+               (< total-lings-produced 16))
+      (add-goal-spec! 'zergling 'army-production 'train 16 490.0 'unwalled-speedling-punish))
     (define cur-banelings (unit-count-equivalent unit-counts 'baneling))
     (define baneling-light-bio-rec? (> (hash-ref sg-rec-units 'baneling 0.0) 0.0))
     (define min-lings-for-bane (if baneling-light-bio-rec? 2 8))
@@ -4007,13 +4255,27 @@
       (add-goal-spec! 'shield-battery 'survival-supply 'build sb-target
                       (if (and mass-reapers? (= cur-sb-cnt 0)) 496.0 484.0)
                       'pvt-fast-kiter-counter))
-    (when (and (not pvt-fast-kiter-threat?)
-               (not suppress-opening-harass?)
-               (sg-unit-allowed? 'adept)
-               (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
-               (< army-supply 24)
-               (< (unit-count-equivalent unit-counts 'adept) 2))
-      (add-goal-spec! 'adept 'army-production 'train 2 458.0 'proactive-adept-harass))
+    (let* ([adept-punish-tgt (protoss-unwalled-adept-target enemy-race)]
+           [total-adepts-produced
+            (max (unit-count-equivalent unit-counts 'adept)
+                 (if (exact-nonnegative-integer? ws-total-adepts-produced)
+                     ws-total-adepts-produced
+                     0))])
+      (when (and ws-enemy-wall-open?
+                 (>= frame 2352)
+                 (<= frame 6048)
+                 (not under-attack?)
+                 (<= enemy-threat-supply 0)
+                 (not under-early-rush-crisis?)
+                 (not pvt-fast-kiter-threat?)
+                 (not suppress-opening-harass?)
+                 (not eff-req-aa?)
+                 (not eff-req-det?)
+                 (not enemy-cap-air?)
+                 (sg-unit-allowed? 'adept)
+                 (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
+                 (< total-adepts-produced adept-punish-tgt))
+        (add-goal-spec! 'adept 'army-production 'train adept-punish-tgt 492.0 'proactive-adept-harass)))
     (when (and (> (bldg-count-equivalent ready-bldg-counts 'stargate) 0)
                (not enemy-cap-air?)
                (not suppress-opening-harass?)
@@ -4942,6 +5204,10 @@
 (define (step-priority-macro-brain state
                                    #:enemy-unit-counts [override-enemy-unit-counts #f]
                                    #:enemy-building-counts [override-enemy-building-counts #f]
+                                   #:enemy-wall-open? [override-enemy-wall-open? 'unset]
+                                   #:enemy-wall-assessment [override-enemy-wall-assessment #f]
+                                   #:total-adepts-produced [override-total-adepts-produced #f]
+                                   #:total-zerglings-produced [override-total-zerglings-produced #f]
                                    #:arbiter-gas-override-count [arbiter-gas-overrides 0]
                                    #:arbiter-facility-override-count [arbiter-fac-overrides 0])
   (define enemy-u-counts
@@ -4950,6 +5216,23 @@
   (define enemy-b-counts
     (or (and (hash? override-enemy-building-counts) override-enemy-building-counts)
         (macro-world-state-enemy-building-counts state)))
+  (define ws-enemy-wall-assessment
+    (or override-enemy-wall-assessment
+        (macro-world-state-enemy-wall-assessment state)))
+  (define ws-enemy-wall-open?
+    (cond
+      [(boolean? override-enemy-wall-open?) override-enemy-wall-open?]
+      [override-enemy-wall-assessment
+       (enemy-wall-assessment->open? override-enemy-wall-assessment)]
+      [else (macro-world-state-enemy-wall-open? state)]))
+  (define ws-total-adepts-produced
+    (or (and (real? override-total-adepts-produced)
+             (max 0 (inexact->exact (floor override-total-adepts-produced))))
+        (macro-world-state-total-adepts-produced state)))
+  (define ws-total-zerglings-produced
+    (or (and (real? override-total-zerglings-produced)
+             (max 0 (inexact->exact (floor override-total-zerglings-produced))))
+        (macro-world-state-total-zerglings-produced state)))
   (match-define (macro-world-state
                  race enemy-race frame minerals gas
                  supply-used supply-cap supply-left pending-supply
@@ -4993,7 +5276,11 @@
     (define-values (dyn-plan dp-ctx)
       (synthesize-dynamic-macro-plan/ctx state
                                          #:enemy-unit-counts enemy-u-counts
-                                         #:enemy-building-counts enemy-b-counts))
+                                         #:enemy-building-counts enemy-b-counts
+                                         #:enemy-wall-open? ws-enemy-wall-open?
+                                         #:enemy-wall-assessment ws-enemy-wall-assessment
+                                         #:total-adepts-produced ws-total-adepts-produced
+                                         #:total-zerglings-produced ws-total-zerglings-produced))
     (define plan-active-nodes (dynamic-macro-plan-active-goals dyn-plan))
     (define plan-actionable-nodes (dynamic-macro-plan-actionable-goals dyn-plan))
     (define plan-next-actions-ht (dynamic-macro-plan-translated-next-actions dyn-plan))
@@ -8565,8 +8852,117 @@
          (> (bldg-count-equivalent total-bldg-counts 'baneling-nest) 0)
          (> (bldg-count-equivalent total-bldg-counts 'hydralisk-den) 0)
          (= (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)))
+  ;; Loop 82 Track C: Scout-triggered macro-transition punish vs unwalled opponents.
+  ;; Protoss (`PvZ`, `PvP`, `PvT`): train 2 Adepts vs Z/P (44 >= 40 HP 1-volley worker kill)
+  ;; or 3 Adepts vs open Terran (66 >= 45 HP 1-volley SCV kill) in 1:45..4:30 (`2352..6048f`),
+  ;; strictly capped at 2/3 total Adepts produced and never cutting Natural Nexus or Probes.
+  ;; Zerg (`ZvP`, `ZvT`): train hard-capped 14-16 Speedlings in 2:00..4:15 (`2688..5712f`)
+  ;; once Spawning Pool is ready and Metabolic Boost is started/ready, keeping 2-base Queen
+  ;; and Speed intact, then immediately resuming Drones and 3rd Hatchery.
+  (define protoss-unwalled-adept-target-cnt
+    (protoss-unwalled-adept-target enemy-race))
+  (define protoss-total-adepts-so-far
+    (max (unit-count-equivalent unit-counts 'adept)
+         (if (exact-nonnegative-integer? ws-total-adepts-produced)
+             ws-total-adepts-produced
+             0)))
+  (define protoss-unwalled-adept-window?
+    (and (eq? race 'Protoss)
+         ws-enemy-wall-open?
+         (>= frame 2352) ;; 1:45
+         (<= frame 6048) ;; 4:30
+         (not under-attack?)
+         (<= enemy-threat-supply 0)
+         (not under-early-rush-crisis?)
+         (not early-ling-rush-defense-active?)
+         (not early-worker-rush-active?)
+         (not pvz-early-ling-flood-active?)
+         (not early-proxy-marauder-rush-active?)
+         (not pvt-fast-kiter-threat?)
+         (< (unit-count-equivalent enemy-u-counts 'reaper) 2)
+         (= enemy-air-combat-cnt 0)
+         (not protoss-early-rush-zealot-first?)
+         (not protoss-early-breach-zealot-due?)
+         (not eff-req-aa?)
+         (not eff-req-det?)
+         (not protoss-cloaked-air-crisis?)
+         (not enemy-cap-air?)
+         (not supply-preempt-now?)))
+  (define protoss-unwalled-adept-punish-due?
+    (and protoss-unwalled-adept-window?
+         (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
+         (> (+ (bldg-count-equivalent ready-bldg-counts 'gateway)
+               (bldg-count-equivalent ready-bldg-counts 'warp-gate))
+            0)
+         (or (not (hash? open-facility-slots))
+             (> open-gw-slots-live 0))
+         (not early-nat-exp-window?)
+         (not midgame-1base-natural-due?)
+         (not late-1base-commit-expand-due?)
+         (not pvz-first-zealot-wall-due?)
+         (>= gas 25)
+         (>= supply-left 2)
+         (< protoss-total-adepts-so-far protoss-unwalled-adept-target-cnt)))
+  (define zerg-cur-lings
+    (unit-count-equivalent unit-counts 'zergling))
+  (define zerg-total-lings-so-far
+    (max zerg-cur-lings
+         (if (exact-nonnegative-integer? ws-total-zerglings-produced)
+             ws-total-zerglings-produced
+             0)))
+  (define zerg-metabolic-boost-started-or-ready?
+    (or (has-upgrade-sym? 'metabolic-boost all-upgs)
+        (memq 'metabolic-boost researched-upgrades)
+        (memq 'metabolic-boost pending-upgrades)
+        (memq 'zergling-movementspeed researched-upgrades)
+        (memq 'zergling-movementspeed pending-upgrades)
+        (memq 'zerg-ling-metabolic-boost researched-upgrades)
+        (memq 'zerg-ling-metabolic-boost pending-upgrades)))
+  (define zerg-unwalled-choke-static-def?
+    (or (> (enemy-wall-assessment-static-defense-count ws-enemy-wall-assessment) 0)
+        (> (bldg-count-equivalent enemy-b-counts 'photon-cannon) 0)
+        (> (bldg-count-equivalent enemy-b-counts 'bunker) 0)))
+  (define zerg-unwalled-punish-eligible?
+    (and (eq? race 'Zerg)
+         (memq enemy-race '(Protoss Terran))
+         ws-enemy-wall-open?
+         (not zerg-unwalled-choke-static-def?)
+         (>= frame 2688) ;; 2:00
+         (<= frame 5712) ;; 4:15
+         (>= total-townhalls-incl-pending 2)
+         (>= workers 19)
+         (not under-attack?)
+         (<= enemy-threat-supply 0)
+         (not under-early-rush-crisis?)
+         (not early-ling-rush-defense-active?)
+         (not early-worker-rush-active?)
+         (not eff-req-aa?)
+         (not eff-req-det?)
+         (not zerg-cloaked-air-crisis?)
+         (not enemy-cap-air?)
+         (not enemy-air-dominant?)
+         (not supply-preempt-now?)))
+  (define zerg-unwalled-speed-upgrade-due?
+    (and zerg-unwalled-punish-eligible?
+         (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+         (not zerg-metabolic-boost-started-or-ready?)
+         (>= gas 75)
+         (or (not (hash? open-facility-slots))
+             (> (hash-ref open-facility-slots 'spawning-pool 0) 0))))
+  (define zerg-unwalled-speedling-punish-due?
+    (and zerg-unwalled-punish-eligible?
+         (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+         zerg-metabolic-boost-started-or-ready?
+         (>= supply-left 1)
+         (or (not (hash? open-facility-slots))
+             (> open-larva-cnt 0))
+         (< zerg-total-lings-so-far 16)))
+  (define zerg-unwalled-speedling-pause-drones?
+    (and zerg-unwalled-speedling-punish-due?
+         (< minerals 450)))
   (define zerg-roach-warren-1-priority-due?
     (and (eq? race 'Zerg)
+         (not zerg-unwalled-speedling-punish-due?)
          (not zerg-zvt-skip-rw-when-bn-hydra-ready?)
          (not zerg-zvz-rush-suppress-t15-tech?)
          (not zerg-banshee-suppress-ground-t15-tech?)
@@ -8705,6 +9101,20 @@
          (< (unit-count-equivalent unit-counts 'baneling) zerg-anti-bio-baneling-target)
          (< (unit-count-equivalent unit-counts 'zergling)
             (if (>= enemy-terran-marine-cnt 18) 12 8))))
+  (define zerg-unwalled-speedling-cap-reached?
+    (and (eq? race 'Zerg)
+         (memq enemy-race '(Protoss Terran))
+         ws-enemy-wall-open?
+         (>= frame 2688)
+         (<= frame 6048)
+         (>= zerg-total-lings-so-far 16)
+         (< workers 47)
+         (not under-attack?)
+         (<= enemy-threat-supply 0)
+         (not under-early-rush-crisis?)
+         (not early-ling-rush-defense-active?)
+         (not early-worker-rush-active?)
+         (not zerg-anti-bio-needs-morph-lings?)))
   ;; L37-P0-1 (`#860`, `#34 ZvT AxeFighter` 0 Banelings vs 153 Marines w/ ready BanelingNest):
   ;; Against >= 18 Terran Marines with ready BanelingNest, elevate Banelings (625u, blk=#t) &
   ;; morph-lings (605u) strictly above Roach/Hydra/Drone so 12-18+ Banelings actually morph!
@@ -8803,6 +9213,8 @@
   (define zerg-tech-ready-ling-cap
     (cond
       [(not (eq? race 'Zerg)) 999]
+      [zerg-unwalled-speedling-cap-reached? 16]
+      [zerg-unwalled-speedling-punish-due? 16]
       [(or under-early-rush-crisis?
            early-ling-rush-defense-active?
            zvz-early-ling-defense-due?
@@ -9834,6 +10246,7 @@
   (define protoss-pvz-ranged-stalker-core-due?
     (and (eq? race 'Protoss)
          (eq? enemy-race 'Zerg)
+         (not (and protoss-unwalled-adept-punish-due? (= enemy-roach-ravager-cnt 0)))
          (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
          (> ready-protoss-gateways 0)
          (or (not (hash? open-facility-slots)) (> open-gw-slots-live 0))
@@ -10409,6 +10822,7 @@
          (or (not (hash? open-facility-slots)) (> open-gw-slots-live 0))
          (not early-nat-exp-window?)
          (not protoss-1base-nat-nexus-floor-yield?)
+         (not protoss-unwalled-adept-punish-due?)
          (not pvz-early-ling-zealot-pump?)
          (not pvz-first-zealot-wall-due?)
          (not early-worker-rush-active?)
@@ -10464,6 +10878,7 @@
   (define zerg-early-pro-queen-target
     (cond
       [(< total-townhalls-incl-pending 2) 2]
+      [zerg-unwalled-speedling-punish-due? 2]
       [(>= total-townhalls-incl-pending 3) 4]
       [(or (> (+ (bldg-count-equivalent total-bldg-counts 'roach-warren)
                  (bldg-count-equivalent total-bldg-counts 'baneling-nest)) 0)
@@ -10971,6 +11386,8 @@
   (define protoss-2base-robo-due?
     (and (eq? race 'Protoss)
          (not protoss-early-flood-defer-robo?)
+         (not (and protoss-unwalled-adept-punish-due?
+                   (or (< minerals 275) (< gas 125))))
          (not (protoss-early-2nd-t2-tech-deferred? 'robotics-facility))
          (or (>= active-bases 2)
              (>= workers 28)
@@ -10996,6 +11413,8 @@
     (and (eq? race 'Protoss)
          (eq? enemy-race 'Zerg)
          (not protoss-early-flood-defer-robo?)
+         (not (and protoss-unwalled-adept-punish-due?
+                   (or (< minerals 275) (< gas 125))))
          (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
          (= (bldg-count-equivalent total-bldg-counts 'robotics-facility) 0)
          (= (bldg-count-equivalent total-bldg-counts 'stargate) 0)
@@ -11301,6 +11720,7 @@
     (and (eq? race 'Zerg)
          (= active-bases 2)
          (= total-townhalls-incl-pending 2)
+         (not (and zerg-unwalled-speedling-punish-due? (< minerals 450)))
          (not under-attack?)
          (not under-early-rush-crisis?)
          (or (not early-enemy-combat-arrived?)
@@ -12519,6 +12939,9 @@
                      (if protoss-midgame-archon-due? '(archon) '())
                      (if (or protoss-midgame-ht-due? protoss-gas-sink-ht-due?) '(high-templar) '())
                      (if (or protoss-early-core-stalker-due? protoss-midgame-stalker-pump-due?) '(stalker) '())
+                     (if protoss-unwalled-adept-punish-due? '(adept) '())
+                     (if zerg-unwalled-speed-upgrade-due? '(metabolic-boost) '())
+                     (if zerg-unwalled-speedling-punish-due? '(zergling) '())
                      (if zerg-zvz-midgame-hydraden-due? '(hydralisk-den) '())
                      (if terran-interference-matrix-due? '(interference-matrix) '())
                      (if terran-fast-rax-tl1-due? '(barracks-techlab) '())
@@ -14122,6 +14545,22 @@
            [(and protoss-midgame-archon-due? (eq? csym 'archon)) #t]
            [(and (or protoss-midgame-ht-due? protoss-gas-sink-ht-due?) (eq? csym 'high-templar)) #t]
            [(and (or protoss-early-core-stalker-due? protoss-midgame-stalker-pump-due?) (eq? csym 'stalker)) #t]
+           [(and protoss-unwalled-adept-punish-due? (eq? csym 'adept)) #t]
+           [(and (eq? race 'Protoss)
+                 (eq? csym 'adept)
+                 (not protoss-unwalled-adept-punish-due?)
+                 (not pvt-fast-kiter-threat?)
+                 (not early-ling-rush-defense-active?)
+                 (not under-early-rush-crisis?)
+                 (not (and under-attack? (< gas 50)))
+                 (not (and protoss-early-flood-ranged-due? (eq? protoss-early-flood-ranged-sym 'adept)))
+                 (not (and bo-goal-sym (same-brain-sym? 'adept bo-goal-sym)))
+                 (not (> (hash-ref sg-rec-units 'adept 0.0) 0.0))
+                 (not (has-upgrade-sym? 'resonating-glaives all-upgs)))
+            #f]
+           [(and zerg-unwalled-speed-upgrade-due? (eq? csym 'metabolic-boost)) #t]
+           [(and zerg-unwalled-speedling-punish-due? (eq? csym 'zergling)) #t]
+           [(and zerg-unwalled-speedling-cap-reached? (eq? csym 'zergling)) #f]
            [(and zerg-zvz-midgame-hydraden-due? (eq? csym 'hydralisk-den)) #t]
            [(and terran-interference-matrix-due? (eq? csym 'interference-matrix)) #t]
            [(and terran-fast-rax-tl1-due? (eq? csym 'barracks-techlab)) #t]
@@ -14301,6 +14740,7 @@
            [(eq? cat 'worker)
             (and (not protoss-12pool-pause-probe-for-zealot?)
                  (not early-worker-rush-pause-workers?)
+                 (not zerg-unwalled-speedling-pause-drones?)
                  (or (<= workers 0)
                      tvp-worker-recovery?
                      (if (hash? open-facility-slots)
@@ -14711,6 +15151,7 @@
                       [utility-score (cond
                                        [(= workers 0) raw-worker-u]
                                        [early-worker-rush-pause-workers? 0.0]
+                                       [zerg-unwalled-speedling-pause-drones? (min 140.0 raw-worker-u)]
                                        [(>= workers sat-target) 25.0]
                                        [wd-worker-plateau-boost? (max 590.0 raw-worker-u)]
                                        [zvz-rush-pause-drones? (min 155.0 raw-worker-u)]
@@ -14720,6 +15161,7 @@
                                        [(not worker-army-curve-ok?) (min 310.0 raw-worker-u)]
                                        [else raw-worker-u])]
                       [blocking-allowed? (and (not early-worker-rush-pause-workers?)
+                                              (not zerg-unwalled-speedling-pause-drones?)
                                               (not (eq? macro-regime 'survival-defense))
                                               (not zvz-rush-pause-drones?)
                                               (not zerg-midgame-floor-pause-drones?)
@@ -15479,6 +15921,7 @@
            (and (hash? open-facility-slots)
                 (eq? cat 'combat-unit)
                 (memq sym '(zergling marine zealot hellion))
+                (not (and (eq? sym 'zergling) zerg-unwalled-speedling-punish-due?))
                 (not (and min-overflow-gas-wait?
                           (memq sym '(zealot marine zergling))))
                 (not under-attack?)
@@ -15507,6 +15950,8 @@
            (and (not (and mineral-only-gas-locked? (>= army-supply 4)))
                 (or (not (eq? cat 'combat-unit))
                     effective-bo-goal?
+                    (and (eq? nsym 'adept) protoss-unwalled-adept-punish-due?)
+                    (and (eq? nsym 'zergling) zerg-unwalled-speedling-punish-due?)
                     colossus-unlock-needed?
                     under-attack?
                     (> enemy-threat-supply 0)
@@ -15690,6 +16135,9 @@
                 (not under-attack?)
                 (<= enemy-threat-supply 0)
                 (not belief-army-deficit?)
+                (not (and (eq? nsym 'adept) protoss-unwalled-adept-punish-due?))
+                (not (and (eq? nsym 'zergling) zerg-unwalled-speedling-punish-due?))
+                (not (and (eq? nsym 'metabolic-boost) zerg-unwalled-speed-upgrade-due?))
                 (>= army-supply 6)
                 (< workers worker-recovery-target)
                 (not (and gas-unlock-tech-boost? (>= gas 150)))
@@ -15707,6 +16155,8 @@
                answers-aa-or-det?
                colossus-unlock-needed?
                pvt-robo-bay-boost?
+               (and (eq? nsym 'adept) protoss-unwalled-adept-punish-due?)
+               (and (eq? nsym 'zergling) zerg-unwalled-speedling-punish-due?)
                (and tvp-cannon-contain? (eq? nsym 'siege-tank))
                (and terran-tvp-anti-stalker-tank-train-due? (eq? nsym 'siege-tank))
                (and under-attack? (< army-supply 4))))
@@ -15905,7 +16355,14 @@
                                    (memq nsym '(factory robotics-facility twilight-council starport lair
                                                 evolution-chamber engineering-bay forge))))))
                 (not zerg-hydra-nonblocking-for-roach?)
-                (not (and (memq nsym '(stalker adept)) protoss-stalker-nonblocking-now?))
+                (not (and (memq nsym '(stalker adept))
+                          protoss-stalker-nonblocking-now?
+                          (not (and (eq? nsym 'adept)
+                                    protoss-unwalled-adept-punish-due?
+                                    (>= minerals 90)
+                                    (or (not (hash? open-facility-slots))
+                                        (= (hash-ref open-facility-slots 'townhall 0) 0)
+                                        (>= minerals 150))))))
                 (not protoss-aa-defer-ground-only?)
                 (not protoss-aa-heavy-escrow-unblocked?)
                 (not (and (eq? nsym 'starport) (not terran-starport-escrow-ok?) (not terran-air-dom-starport-scale-due?) (>= minerals 300) (< gas 95)))
@@ -16021,6 +16478,14 @@
                     (and protoss-midgame-disruptor-due? (eq? nsym 'disruptor) (>= minerals 125) (>= gas 125))
                     (and protoss-urgent-aa-reaper-stalker-due? (eq? nsym 'stalker))
                     (and protoss-early-core-stalker-due? (eq? nsym 'stalker) (>= minerals 90))
+                    (and protoss-unwalled-adept-punish-due?
+                         (eq? nsym 'adept)
+                         (>= minerals 90)
+                         (or (not (hash? open-facility-slots))
+                             (= (hash-ref open-facility-slots 'townhall 0) 0)
+                             (>= minerals 150)))
+                    (and zerg-unwalled-speed-upgrade-due? (eq? nsym 'metabolic-boost) (>= gas 75))
+                    (and zerg-unwalled-speedling-punish-due? (eq? nsym 'zergling))
                     (and zerg-zvz-midgame-hydraden-due? (eq? nsym 'hydralisk-den))
                     (and protoss-banshee-gate3-due? (eq? nsym 'gateway))
                     (and protoss-anti-tempest-stargate-due? (eq? nsym 'stargate))
@@ -16954,6 +17419,12 @@
               (max 486.0 plan-weight u0)]
              [(and protoss-early-core-stalker-due? (eq? nsym 'stalker))
               (max 525.0 plan-weight u0)]
+             [(and protoss-unwalled-adept-punish-due? (eq? nsym 'adept))
+              (max 562.0 plan-weight u0)]
+             [(and zerg-unwalled-speed-upgrade-due? (eq? nsym 'metabolic-boost))
+              (max 525.0 plan-weight u0)]
+             [(and zerg-unwalled-speedling-punish-due? (eq? nsym 'zergling))
+              (max 510.0 plan-weight u0)]
              [(and protoss-anti-reaper-macro-active?
                    (eq? nsym 'gateway)
                    (< (+ (bldg-count-equivalent total-bldg-counts 'gateway)
@@ -18404,6 +18875,16 @@
             (max u 486.0)]
            [(and protoss-early-core-stalker-due? (eq? nsym 'stalker))
             (max u 525.0)]
+           [(and protoss-unwalled-adept-punish-due? (eq? nsym 'adept))
+            (max u 562.0)]
+           [(and zerg-unwalled-speed-upgrade-due? (eq? nsym 'metabolic-boost))
+            (max u 525.0)]
+           [(and zerg-unwalled-speedling-punish-due? (eq? nsym 'zergling))
+            (max u 510.0)]
+           [(and zerg-unwalled-speedling-punish-due?
+                 (eq? nsym 'queen)
+                 (>= (unit-count-equivalent unit-counts 'queen) 2))
+            (min u 440.0)]
            [(and protoss-anti-reaper-macro-active?
                  (eq? nsym 'gateway)
                  (< (+ (bldg-count-equivalent total-bldg-counts 'gateway)
@@ -18449,12 +18930,14 @@
                  (not zvz-early-ling-defense-due?)
                  (not zvz-early-ling-wave2-hold?)
                  (not zerg-anti-bio-needs-morph-lings?)
+                 (not zerg-unwalled-speedling-punish-due?)
                  (>= (unit-count-equivalent unit-counts 'zergling)
                      (if (eq? enemy-race 'Zerg) 6 4)))
             (min u 440.0)]
            [(and zerg-has-ready-gas-combat-tech?
                  (eq? nsym 'zergling)
                  (not zerg-anti-bio-needs-morph-lings?)
+                 (not zerg-unwalled-speedling-punish-due?)
                  (>= gas 25)
                  (>= (unit-count-equivalent unit-counts 'zergling) 8)
                  (not under-early-rush-crisis?)
@@ -18467,6 +18950,7 @@
            [(and zerg-has-ready-gas-combat-tech?
                  (eq? nsym 'zergling)
                  (not zerg-anti-bio-needs-morph-lings?)
+                 (not zerg-unwalled-speedling-punish-due?)
                  (>= gas 50)
                  (>= (unit-count-equivalent unit-counts 'zergling) 6)
                  (not under-early-rush-crisis?))
@@ -18556,7 +19040,14 @@
                 terran-factory-gas-protect-post?
                 terran-factory-deferred-post?
                 pvz-ling-suppress-tech-post?
-                (and (memq nsym '(stalker adept)) protoss-stalker-nonblocking-now?)
+                (and (memq nsym '(stalker adept))
+                     protoss-stalker-nonblocking-now?
+                     (not (and (eq? nsym 'adept)
+                               protoss-unwalled-adept-punish-due?
+                               (>= minerals 90)
+                               (or (not (hash? open-facility-slots))
+                                   (= (hash-ref open-facility-slots 'townhall 0) 0)
+                                   (>= minerals 150)))))
                 (and (eq? nsym 'queen) queen-non-blocking-now? (not (and zerg-cloak-air-queen-post? (< (unit-count-equivalent unit-counts 'queen) 4))))
                 (and (eq? nsym 'starport) (not terran-starport-escrow-ok?) (not terran-air-dom-starport-scale-due?) (>= minerals 300) (< gas 95))
                 (and protoss-forge-gated-off? (eq? nsym 'forge))
@@ -18784,6 +19275,14 @@
                      (and protoss-midgame-disruptor-due? (eq? nsym 'disruptor) (>= minerals 125) (>= gas 125))
                      (and protoss-urgent-aa-reaper-stalker-due? (eq? nsym 'stalker))
                      (and protoss-early-core-stalker-due? (eq? nsym 'stalker) (>= minerals 90))
+                     (and protoss-unwalled-adept-punish-due?
+                          (eq? nsym 'adept)
+                          (>= minerals 90)
+                          (or (not (hash? open-facility-slots))
+                              (= (hash-ref open-facility-slots 'townhall 0) 0)
+                              (>= minerals 150)))
+                     (and zerg-unwalled-speed-upgrade-due? (eq? nsym 'metabolic-boost) (>= gas 75))
+                     (and zerg-unwalled-speedling-punish-due? (eq? nsym 'zergling))
                      (and zerg-zvz-midgame-hydraden-due? (eq? nsym 'hydralisk-den))
                      (and protoss-banshee-gate3-due? (eq? nsym 'gateway))
                      (and protoss-anti-tempest-stargate-due? (eq? nsym 'stargate))
@@ -19744,8 +20243,19 @@
             (< (+ (unit-count-equivalent unit-counts 'widow-mine)
                   (hash-ref seen-unit-counts 'widow-mine 0))
                wm-cap))]
+         [(adept)
+          (if protoss-unwalled-adept-punish-due?
+              (< (+ protoss-total-adepts-so-far
+                    (hash-ref seen-unit-counts 'adept 0))
+                 protoss-unwalled-adept-target-cnt)
+              #t)]
          [(zergling)
-          (and (not (and zerg-stargate-mass-air-active?
+          (and (not zerg-unwalled-speedling-cap-reached?)
+               (or (not zerg-unwalled-speedling-punish-due?)
+                   (< (+ zerg-total-lings-so-far
+                         (* 2 (hash-ref seen-unit-counts 'zergling 0)))
+                      16))
+               (not (and zerg-stargate-mass-air-active?
                          zerg-mass-air-hydra-due?
                          (< minerals 150)
                          (>= gas 50)))
@@ -19804,6 +20314,8 @@
       (and (not (and late-1base-commit-pause-units?
                      (memq csym '(scv probe))))
            (not (and early-worker-rush-pause-workers?
+                     (eq? cat 'worker)))
+           (not (and zerg-unwalled-speedling-pause-drones?
                      (eq? cat 'worker)))
            (or (not (eq? cat 'worker))
                (<= workers 0)
@@ -20500,7 +21012,7 @@
                               photon-cannon missile-turret
                               extractor refinery assimilator barracks-techlab factory factory-techlab spore-crawler)))
          (hash-update! seen-tech-counts csym add1 0))
-       (when (memq csym '(queen observer warp-prism phoenix raven zealot roach ravager cyclone hellion corruptor overseer overlord-transport sentry lurker baneling zergling ghost liberator thor widow-mine))
+       (when (memq csym '(queen observer warp-prism phoenix raven zealot adept roach ravager cyclone hellion corruptor overseer overlord-transport sentry lurker baneling zergling ghost liberator thor widow-mine))
          (hash-update! seen-unit-counts csym add1 0))
        (when (memq pslot UNIT-MORPH-SOURCE-SLOTS)
          (hash-update! used-morph-slots pslot

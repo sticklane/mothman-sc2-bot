@@ -12,11 +12,16 @@
          racket/list
          racket/math
          "../sc2-common.rkt"
-         "../sc2-game-constants.rkt")
+         "../sc2-game-constants.rkt"
+         "../sc2-placement.rkt")
 
 (provide
  SC2-TERRAN-ADDON-RELIFT-COOLDOWN-FRAMES
+ SC2-TERRAN-WALL-RAX-PROTECT-UNTIL-FRAME
+ terran-wall-barracks-lift-allowed?
  plan-terran-addon-swap)
+
+(define SC2-TERRAN-WALL-RAX-PROTECT-UNTIL-FRAME 6720)
 
 ;; Module-level anti-thrash state for Terran add-on swaps:
 ;; - `TERRAN-RELIFT-COOLDOWN-UNTIL`: `bldg-tag -> cooldown-until-frame` (`448` loops = `20.0s`)
@@ -57,6 +62,93 @@
       (and (memq bt '(barracks factory starport))
            (or (eq? (hash-ref b 'flying? #f) #t)
                (eq? (hash-ref b 'is-flying #f) #t)))))
+
+;; Identifies whether a grounded Barracks `b` is anchoring the main-ramp wall seal
+;; via `terran-ramp-wall` metadata, explicit `wall-barracks-id`/`wall-barracks-pos`,
+;; or structural geometry (flanked within <= 4.5t by >= 2 Supply Depots).
+(define (barracks-is-ramp-wall-seal? b sanitized-obs ally-bldgs)
+  (and (eq? (hash-ref b 'type 'unknown) 'barracks)
+       (not (bldg-is-flying-prod? b))
+       (let* ([bid (hash-ref b 'id 0)]
+              [bx (exact->inexact (hash-ref b 'x -9999.0))]
+              [by (exact->inexact (hash-ref b 'y -9999.0))]
+              [rw (hash-ref sanitized-obs 'terran-ramp-wall #f)]
+              [wb-id (hash-ref sanitized-obs 'wall-barracks-id #f)]
+              [wb-pos (hash-ref sanitized-obs 'wall-barracks-pos #f)])
+         (or (and (exact-integer? wb-id) (> wb-id 0) (= bid wb-id))
+             (and (pair? wb-pos)
+                  (let ([wx (exact->inexact (car wb-pos))]
+                        [wy (exact->inexact (if (pair? (cdr wb-pos)) (cadr wb-pos) (cdr wb-pos)))])
+                    (<= (dist2d-sq bx by wx wy) 2.25)))
+             (and (hash? rw) (terran-wall-barracks-slot? rw bx by 1.75))
+             (and (not (hash? rw))
+                  (not wb-id)
+                  (not wb-pos)
+                  (>= (for/sum ([d (in-list ally-bldgs)]
+                                #:when (and (memq (hash-ref d 'type 'unknown)
+                                                  '(supply-depot supply-depot-lowered))
+                                            (>= (hash-ref d 'build-progress 1.0) 0.5)
+                                            (<= (dist2d-sq bx by
+                                                           (exact->inexact (hash-ref d 'x 9999.0))
+                                                           (exact->inexact (hash-ref d 'y 9999.0)))
+                                                20.25)))
+                        1)
+                      2))))))
+
+;; Returns #t when lifting ramp-wall Barracks `b` is safe:
+;;   - Not a ramp-wall seal Barracks, OR
+;;   - Explicit `allow-wall-barracks-lift?` is `#t`, OR
+;;   - `frame >= SC2-TERRAN-WALL-RAX-PROTECT-UNTIL-FRAME` (5:00 / 6720f), OR
+;;   - A backup seal structure (>= 3 Supply Depots within 6.5t OR another completed grounded
+;;     Factory/Barracks/Bunker within 5.5t) already guards the ramp, OR
+;;   - `factory-swap-ready?` is `#t` (an idle completed grounded Factory is immediately swapping
+;;     into the wall slot) AND 0 enemy combat threats exist within 24.0t of the wall Barracks.
+(define (terran-wall-barracks-lift-allowed? b sanitized-obs ally-bldgs enemy-units
+                                            #:factory-swap-ready? [factory-swap-ready? #f]
+                                            #:exclude-backup-id [exclude-backup-id 0])
+  (cond
+    [(not (barracks-is-ramp-wall-seal? b sanitized-obs ally-bldgs)) #t]
+    [(eq? (hash-ref sanitized-obs 'allow-wall-barracks-lift? #f) #t) #t]
+    [(>= (hash-ref sanitized-obs 'frame 0) SC2-TERRAN-WALL-RAX-PROTECT-UNTIL-FRAME) #t]
+    [else
+     (define bid (hash-ref b 'id 0))
+     (define bx (exact->inexact (hash-ref b 'x 0.0)))
+     (define by (exact->inexact (hash-ref b 'y 0.0)))
+     (define nearby-depots
+       (for/sum ([d (in-list ally-bldgs)]
+                 #:when (and (memq (hash-ref d 'type 'unknown) '(supply-depot supply-depot-lowered))
+                             (>= (hash-ref d 'build-progress 1.0) 0.5)
+                             (<= (dist2d-sq bx by
+                                            (exact->inexact (hash-ref d 'x 9999.0))
+                                            (exact->inexact (hash-ref d 'y 9999.0)))
+                                 42.25)))
+         1))
+     (define backup-bldg-near-ramp?
+       (ormap (lambda (o)
+                (define oid (hash-ref o 'id -1))
+                (and (not (= oid bid))
+                     (not (= oid exclude-backup-id))
+                     (memq (hash-ref o 'type 'unknown) '(barracks factory bunker))
+                     (bldg-complete? o)
+                     (not (bldg-is-flying-prod? o))
+                     (<= (dist2d-sq bx by
+                                    (exact->inexact (hash-ref o 'x 9999.0))
+                                    (exact->inexact (hash-ref o 'y 9999.0)))
+                         30.25)))
+              ally-bldgs))
+     (define enemy-threat-near-wall?
+       (ormap (lambda (e)
+                (define et (hash-ref e 'type 'unknown))
+                (and (not (fast-terran-swap-noncombat? et))
+                     (not (hash-ref e 'is-hallucination #f))
+                     (<= (dist2d-sq bx by
+                                    (exact->inexact (hash-ref e 'x 9999.0))
+                                    (exact->inexact (hash-ref e 'y 9999.0)))
+                         576.0)))
+              enemy-units))
+     (or (>= nearby-depots 3)
+         backup-bldg-near-ramp?
+         (and factory-swap-ready? (not enemy-threat-near-wall?)))]))
 
 ;; Pro Terran Building Lift-Off & Add-On Swapping:
 ;; Swaps idle `Barracks` / `Factory` / `Starport` onto a pre-built `TechLab` or `Reactor`
@@ -301,24 +393,36 @@
         (define allow-rax-tl-strip?
           (or (eq? (hash-ref sanitized-obs 'allow-barracks-techlab-strip? #f) #t)
               (not (hash-has-key? sanitized-obs 'mineral-harvesters))))
+        (define bare-fac-ready-for-swap?
+          (and bare-fac-or-port
+               (eq? (hash-ref bare-fac-or-port 'type 'unknown) 'factory)))
+        (define (donor-eligible? b)
+          (define bid (hash-ref b 'id 0))
+          (define btype (hash-ref b 'type 'unknown))
+          (and (memq btype '(barracks factory))
+               (bldg-complete? b)
+               (not (bldg-is-flying-prod? b))
+               (bldg-has-addon? b)
+               (not (hash-ref b 'busy? #f))
+               (not (bldg-on-relift-cooldown? bid))
+               (cond
+                 [(eq? btype 'barracks)
+                  (and (or allow-rax-tl-strip?
+                           (memq (bldg-attached-addon-sym b) '(barracks-reactor reactor)))
+                       (terran-wall-barracks-lift-allowed?
+                        b sanitized-obs ally-bldgs enemy-units
+                        #:factory-swap-ready? bare-fac-ready-for-swap?
+                        #:exclude-backup-id (if bare-fac-or-port (hash-ref bare-fac-or-port 'id 0) 0)))]
+                 [else
+                  (or allow-fac-tl-strip?
+                      (memq (bldg-attached-addon-sym b) '(factory-reactor reactor)))])))
+        ;; Always prefer a non-wall donor Barracks/Factory ahead of a ramp-wall Barracks!
         (define donor-rax-or-fac
-          (findf (lambda (b)
-                   (define bid (hash-ref b 'id 0))
-                   (define btype (hash-ref b 'type 'unknown))
-                   (and (memq btype '(barracks factory))
-                        (bldg-complete? b)
-                        (not (bldg-is-flying-prod? b))
-                        (bldg-has-addon? b)
-                        (not (hash-ref b 'busy? #f))
-                        (not (bldg-on-relift-cooldown? bid))
-                        (cond
-                          [(eq? btype 'barracks)
-                           (or allow-rax-tl-strip?
-                               (memq (bldg-attached-addon-sym b) '(barracks-reactor reactor)))]
-                          [else
-                           (or allow-fac-tl-strip?
-                               (memq (bldg-attached-addon-sym b) '(factory-reactor reactor)))])))
-                 ally-bldgs))
+          (or (findf (lambda (b)
+                       (and (donor-eligible? b)
+                            (not (barracks-is-ramp-wall-seal? b sanitized-obs ally-bldgs))))
+                     ally-bldgs)
+              (findf donor-eligible? ally-bldgs)))
 
         (define donor-land-actions
           (if lifted-donor
@@ -359,7 +463,10 @@
                                            (not (bldg-is-flying-prod? b))
                                            (not (bldg-has-addon? b))
                                            (not (hash-ref b 'busy? #f))
-                                           (not (bldg-on-relift-cooldown? bid))))
+                                           (not (bldg-on-relift-cooldown? bid))
+                                           (terran-wall-barracks-lift-allowed?
+                                            b sanitized-obs ally-bldgs enemy-units
+                                            #:factory-swap-ready? #f)))
                                     ally-bldgs))])
                     (and cand-rec
                          (let ([avail-ad (findf (lambda (ad) (addon-available-for-bldg? ad (hash-ref cand-rec 'id 0)))

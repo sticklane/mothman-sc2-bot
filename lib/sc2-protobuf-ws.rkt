@@ -32,7 +32,9 @@
                   sc2-symmetry-reflect-point
                   sc2-detect-map-symmetry
                   sc2-ground-bfs-dist-at
-                  sc2-ground-territory-margin)
+                  sc2-ground-territory-margin
+                  solve-terran-ramp-wall
+                  terran-wall-barracks-slot?)
          (only-in "sc2-common.rkt"
                   SC2-SINGLETON-TECH-BUILDINGS
                   SC2-DUAL-CAP-TECH-BUILDINGS)
@@ -7919,7 +7921,11 @@
         0))
 
   ;; If this build specifically targets a reserved wall-slot AABB matching our footprint dims,
-  ;; exclude that slot (and its own paired `terran-addon-pad` AABB) from self-repulsion.
+  ;; exclude that slot, any `'doorway-corridor` AABB (matching `lib/bot-runtime.rkt:5420-5427`
+  ;; so door-adjacent `slot-1`/`slot-2`/`pylon` are never repelled by the doorway corridor!),
+  ;; and its own paired `terran-addon-pad` AABB from self-repulsion.
+  ;; Keep `'doorway-corridor` active for all non-wall interior buildings so interior simcity
+  ;; never plugs the 1-tile doorway!
   ;; L49 Protected Tech: Fragile Protoss tech (`Robo`/`Stargate`/`Twilight`/`RoboBay`/`TemplarArchive`)
   ;; MUST NEVER match or claim a front `'wall-slot` AABB — wall strictly with sturdy Gateway/CyberCore/Forge!
   (define matched-wall-slot
@@ -7931,12 +7937,19 @@
                                  (<= (abs (- (reserved-aabb-half-w b) cand-hw)) 0.35)
                                  (<= (abs (- (reserved-aabb-half-h b) cand-hh)) 0.35)))
            b)))
+  (define doorway-corridor-aabbs
+    (filter (lambda (b)
+              (and (reserved-aabb? b)
+                   (eq? (reserved-aabb-kind b) 'doorway-corridor)))
+            reserved-aabbs))
   (define eff-reserved-aabbs
     (if matched-wall-slot
         (let ([wx (reserved-aabb-cx matched-wall-slot)]
               [wy (reserved-aabb-cy matched-wall-slot)])
           (filter (lambda (b)
                     (not (or (equal? b matched-wall-slot)
+                             (and (reserved-aabb? b)
+                                  (eq? (reserved-aabb-kind b) 'doorway-corridor))
                              (and needs-terran-addon-clearance?
                                   (reserved-aabb? b)
                                   (eq? (reserved-aabb-kind b) 'terran-addon-pad)
@@ -8053,10 +8066,13 @@
            (and (>= cx SC2-MAP-PLAYABLE-MIN-COORD) (<= cx SC2-MAP-PLAYABLE-MAX-COORD)
                 (>= cy SC2-MAP-PLAYABLE-MIN-COORD) (<= cy SC2-MAP-PLAYABLE-MAX-COORD)
                 (or is-townhall-build?
-                    (for/and ([ep (in-list expansion-pads)])
-                      (define px (if (pair? ep) (car ep) (any-point-x ep)))
-                      (define py (if (pair? ep) (cdr ep) (any-point-y ep)))
-                      (>= (max (abs (- cx px)) (abs (- cy py))) tight-pad-clearance)))
+                    (let ([pad-clr (if matched-wall-slot
+                                       (+ 2.45 (max cand-hw cand-hh))
+                                       tight-pad-clearance)])
+                      (for/and ([ep (in-list expansion-pads)])
+                        (define px (if (pair? ep) (car ep) (any-point-x ep)))
+                        (define py (if (pair? ep) (cdr ep) (any-point-y ep)))
+                        (>= (max (abs (- cx px)) (abs (- cy py))) pad-clr))))
                 (for/and ([b (in-list eff-reserved-aabbs)]
                           #:when (and (reserved-aabb? b)
                                       (not (and first-rax-allow-wall-3x3?
@@ -8131,7 +8147,9 @@
          (static-footprint-placement-ok? pl-grid wall-ref-x wall-ref-y cand-hw cand-hh)
          (or (not check-bfs) (< (check-bfs wall-ref-x wall-ref-y 4) +inf.0))))
 
-  (define (wall-slot-3x3-spot-clear? cx cy)
+  (define (wall-slot-3x3-spot-clear? cx cy #:exact-slot? [exact-slot? #f])
+    (define wall-pad-clr (if matched-wall-slot (+ 2.45 (max cand-hw cand-hh)) 4.5))
+    (define wall-rp-clr  (if matched-wall-slot (max 1.5 (- (+ cand-hw 1.0) 0.05)) 2.0))
     (and (>= cx SC2-MAP-PLAYABLE-MIN-COORD) (<= cx SC2-MAP-PLAYABLE-MAX-COORD)
          (>= cy SC2-MAP-PLAYABLE-MIN-COORD) (<= cy SC2-MAP-PLAYABLE-MAX-COORD)
          (static-footprint-placement-ok? pl-grid cx cy cand-hw cand-hh)
@@ -8140,12 +8158,19 @@
              (for/and ([ep (in-list expansion-pads)])
                (define px (if (pair? ep) (car ep) (any-point-x ep)))
                (define py (if (pair? ep) (cdr ep) (any-point-y ep)))
-               (>= (max (abs (- cx px)) (abs (- cy py))) 4.5)))
+               (>= (max (abs (- cx px)) (abs (- cy py))) wall-pad-clr)))
          (for/and ([b (in-list eff-reserved-aabbs)]
                    #:when (and (reserved-aabb? b)
                                (not (and first-rax-allow-wall-3x3?
                                          (eq? (reserved-aabb-kind b) 'terran-addon-pad)))))
            (not (aabb-overlaps? cx cy cand-hw cand-hh b)))
+         ;; For non-exact fallback neighbors around a matched wall slot, keep exact 0.45x0.45 doorway clear
+         ;; so a shifted fallback never accidentally plugs the 1-tile door!
+         (or exact-slot?
+             (not matched-wall-slot)
+             (for/and ([db (in-list doorway-corridor-aabbs)])
+               (not (and (< (abs (- cx (reserved-aabb-cx db))) (+ cand-hw 0.45))
+                         (< (abs (- cy (reserved-aabb-cy db))) (+ cand-hh 0.45))))))
          (for/and ([u (in-list existing-units)]
                    #:when (or (sc2-unit-is-structure? u)
                               (sc2-unit-is-mineral-field? u)
@@ -8163,7 +8188,7 @@
                      (< (abs (- cy uy)) (- (+ cand-hh u-hh) 0.05)))))
          (for/and ([rp (in-list extra-reserved-points)]
                    #:when (any-point? rp))
-           (> (pt-dist cx cy (any-point-x rp) (any-point-y rp)) 2.0))))
+           (> (pt-dist cx cy (any-point-x rp) (any-point-y rp)) wall-rp-clr))))
 
   ;; Tight <= 2.5-tile grid-aligned candidates around wall slot for 1st Barracks / matched wall builds
   (define wall-tight-cands
@@ -8188,7 +8213,7 @@
                          (pt-dist wall-ref-x wall-ref-y
                                   (sc2-point2d-x pt) (sc2-point2d-y pt))))]
                [exact-list
-                (if (wall-slot-3x3-spot-clear? wall-ref-x wall-ref-y)
+                (if (wall-slot-3x3-spot-clear? wall-ref-x wall-ref-y #:exact-slot? #t)
                     (list (sc2-point2d wall-ref-x wall-ref-y))
                     '())])
           (dedup-point2ds (append exact-list neighbors)))
@@ -14303,14 +14328,88 @@
                            (+ cur-loop 64))))
             (define ws-active-addon?
               (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))
+            ;; Guard against auto-lifting a main-ramp wall Barracks off the ramp when its East
+            ;; `(+2.5, -0.5)` add-on pad is blocked (cliff/depot) during `< 5:00` (`cur-loop < 6720`).
+            ;; Always prefer non-wall Barracks ahead of the ramp-wall Barracks for `421`/`422`, and
+            ;; NEVER fall back to `find-addon-reloc-pt` (point-targeted auto-lift) on a ramp-wall Barracks.
+            (define step-terran-wall-for-addon
+              (and (memq 'barracks fac-types)
+                   (pair? cand-facs)
+                   (sc2-image-grid? step-pl-grid)
+                   (sc2-image-grid? step-path-grid)
+                   (let* ([thg (and (sc2-game-info? eff-game-info)
+                                    (sc2-game-info-terrain-height eff-game-info))]
+                          [gw (sc2-image-grid-width step-path-grid)]
+                          [gh (sc2-image-grid-height step-path-grid)]
+                          [nat-pt
+                           (or (for/first ([ep (in-list all-expansion-pads)]
+                                           #:when (>= (pt-dist home-x home-y (car ep) (cdr ep)) 12.0))
+                                 ep)
+                               (cons default-stage-x default-stage-y))]
+                          [m-grids
+                           (hash 'width gw
+                                 'height gh
+                                 'pathing-ref (lambda (ix iy) (sc2-grid-ref step-path-grid ix iy))
+                                 'placement-ref (lambda (ix iy) (sc2-grid-ref step-pl-grid ix iy))
+                                 'height-ref (and (sc2-image-grid? thg)
+                                                  (lambda (ix iy) (sc2-grid-ref thg ix iy))))])
+                     (solve-terran-ramp-wall home-x home-y (car nat-pt) (cdr nat-pt) #:map-grids m-grids))))
+            (define (barracks-is-protected-wall-seal? u)
+              (and (eq? (sc2-id->unit-symbol (sc2-unit-unit-type u)) 'barracks)
+                   (not (sc2-unit-is-flying u))
+                   (or (<= cur-loop 0) (< cur-loop 6720))
+                   (let* ([p (sc2-unit-pos u)]
+                          [ux (sc2-point3d-x p)]
+                          [uy (sc2-point3d-y p)]
+                          [utag (sc2-unit-tag u)]
+                          [near-depots-45
+                           (count (lambda (s)
+                                    (and (not (sc2-unit-is-flying s))
+                                         (>= (sc2-unit-build-progress s) 0.5)
+                                         (memq (sc2-id->unit-symbol (sc2-unit-unit-type s) 'unknown)
+                                               '(supply-depot supply-depot-lowered))
+                                         (let ([sp (sc2-unit-pos s)])
+                                           (<= (pt-dist ux uy (sc2-point3d-x sp) (sc2-point3d-y sp)) 4.5))))
+                                  self-structures)]
+                          [is-wall-rax?
+                           (or (and (hash? step-terran-wall-for-addon)
+                                    (terran-wall-barracks-slot? step-terran-wall-for-addon ux uy 1.75))
+                               (>= near-depots-45 2))])
+                     (and is-wall-rax?
+                          ;; Exempt if a backup ramp seal (>=3 Depots within 6.5t or another completed
+                          ;; grounded Barracks/Factory/Bunker within 5.5t) already anchors the ramp.
+                          (< (count (lambda (s)
+                                      (and (not (sc2-unit-is-flying s))
+                                           (>= (sc2-unit-build-progress s) 0.5)
+                                           (memq (sc2-id->unit-symbol (sc2-unit-unit-type s) 'unknown)
+                                                 '(supply-depot supply-depot-lowered))
+                                           (let ([sp (sc2-unit-pos s)])
+                                             (<= (pt-dist ux uy (sc2-point3d-x sp) (sc2-point3d-y sp)) 6.5))))
+                                    self-structures)
+                             3)
+                          (not (ormap (lambda (s)
+                                        (and (not (= (sc2-unit-tag s) utag))
+                                             (not (sc2-unit-is-flying s))
+                                             (>= (sc2-unit-build-progress s) SC2-BUILD-COMPLETE-PROGRESS)
+                                             (memq (sc2-id->unit-symbol (sc2-unit-unit-type s) 'unknown)
+                                                   '(barracks factory bunker))
+                                             (let ([sp (sc2-unit-pos s)])
+                                               (<= (pt-dist ux uy (sc2-point3d-x sp) (sc2-point3d-y sp)) 5.5))))
+                                      self-structures))))))
+            (define ordered-cand-facs
+              (let-values ([(non-wall wall-only)
+                            (partition (lambda (u) (not (barracks-is-protected-wall-seal? u))) cand-facs)])
+                (append non-wall wall-only)))
+            (define reloc-cand-facs
+              (filter (lambda (u) (not (barracks-is-protected-wall-seal? u))) ordered-cand-facs))
             (define locally-clear-facs
               (filter (lambda (u)
                         (and (fac-addon-slot-locally-clear? u)
                              (not (fac-addon-cached-blocked? u))))
-                      cand-facs))
+                      ordered-cand-facs))
             (define-values (fac-u addon-target-pt addon-reloc-ab addon-cd)
               (cond
-                [(null? cand-facs) (values #f #f 0 24)]
+                [(null? ordered-cand-facs) (values #f #f 0 24)]
                 [ws-active-addon?
                  (cond
                    [(pair? locally-clear-facs)
@@ -14356,32 +14455,43 @@
                             [else
                              (for ([u (in-list locally-clear-facs)])
                                (hash-set! SC2-ADDON-SLOT-BLOCKED-CACHE (fac-addon-block-key u) cur-loop))
-                             (define reloc-u (first cand-facs))
-                             (define-values (r-ab r-pt bud-def?) (find-addon-reloc-pt reloc-u))
                              (cond
-                               [r-pt (values reloc-u r-pt r-ab 48)]
+                               [(pair? reloc-cand-facs)
+                                (define reloc-u (first reloc-cand-facs))
+                                (define-values (r-ab r-pt bud-def?) (find-addon-reloc-pt reloc-u))
+                                (cond
+                                  [r-pt (values reloc-u r-pt r-ab 48)]
+                                  [else
+                                   (unless bud-def? (mark-addon-tag-backoff! reloc-u))
+                                   (values #f #f 0 24)])]
                                [else
-                                (unless bud-def? (mark-addon-tag-backoff! reloc-u))
+                                (for ([u (in-list ordered-cand-facs)]) (mark-addon-tag-backoff! u))
                                 (values #f #f 0 24)])]))
                         (values #f #f 0 24))]
-                   [else
-                    (define reloc-u (first cand-facs))
+                   [(pair? reloc-cand-facs)
+                    (define reloc-u (first reloc-cand-facs))
                     (define-values (r-ab r-pt bud-def?) (find-addon-reloc-pt reloc-u))
                     (cond
                       [r-pt (values reloc-u r-pt r-ab 48)]
                       [else
                        (unless bud-def? (mark-addon-tag-backoff! reloc-u))
-                       (values #f #f 0 24)])])]
+                       (values #f #f 0 24)])]
+                   [else
+                    (for ([u (in-list ordered-cand-facs)]) (mark-addon-tag-backoff! u))
+                    (values #f #f 0 24)])]
                 [(pair? locally-clear-facs)
                  (values (first locally-clear-facs) #f 0 24)]
-                [else
-                 (define reloc-u (first cand-facs))
+                [(pair? reloc-cand-facs)
+                 (define reloc-u (first reloc-cand-facs))
                  (define-values (r-ab r-pt _bud-def?) (find-addon-reloc-pt reloc-u))
                  (cond
                    [r-pt (values reloc-u r-pt r-ab 48)]
                    [else
                     (mark-addon-tag-backoff! reloc-u)
-                    (values #f #f 0 24)])]))
+                    (values #f #f 0 24)])]
+                [else
+                 (for ([u (in-list ordered-cand-facs)]) (mark-addon-tag-backoff! u))
+                 (values #f #f 0 24)]))
             (when (and fac-u (wire-nonstack-allow?! (list 'wire-addon norm (sc2-unit-tag fac-u)) addon-cd))
               (set-add! used-producer-tags (sc2-unit-tag fac-u))
               (hash-set! used-producer-counts (sc2-unit-tag fac-u)
@@ -16044,7 +16154,10 @@
                                                       #:rpc-budget step-placement-rpc-budget
                                                       #:cur-loop cur-loop))
                   (find-verified-building-placement ws-conn ab-id eff-req-x eff-req-y units
-                                                    #:min-spacing (if is-terran-prod-relaxed? 1.5 2.0)
+                                                    #:min-spacing (cond
+                                                                    [req-is-wall-slot? 0.0]
+                                                                    [is-terran-prod-relaxed? 1.5]
+                                                                    [else 2.0])
                                                     #:max-radius (cond
                                                                    [emerg-cloak-turret? 8.0]
                                                                    [(pair? terran-compact-swap-anchors) 12.0]
@@ -19102,13 +19215,87 @@
           (when (not (null? ctags))
             (emit! (sc2-raw-unit-command 23 tgt-pt eff-tgt-id ctags #f)))]
          [else
-          (define wtag (pick-worker-near tx ty))
-          (when wtag
-            (if (and (> opt-blk-eid 0)
-                     (or (not enforce-live-enemy-tag-filter?)
-                         (set-member? live-visible-enemy-tags opt-blk-eid)))
-                (emit! (sc2-raw-unit-command 23 #f opt-blk-eid (list wtag) #f))
-                (emit! (sc2-raw-unit-command 23 (sc2-point2d tx ty) 0 (list wtag) #f))))])]
+          ;; Pull 2 workers vs enemy worker block (Probe/SCV/Drone), 3-4 workers vs enemy Pylon /
+          ;; low-HP structure block (4 when >= 16 workers, 3 otherwise), and 2 workers vs high-HP
+          ;; Engineering Bay / TownHall block — strictly excluding builders/scouts (PV8) and keeping
+          ;; >= 8 harvesters mining on standard 10+ worker openings.
+          (define blk-u
+            (or (and (> opt-blk-eid 0)
+                     (let ([eu (hash-ref all-unit-by-tag opt-blk-eid #f)])
+                       (and eu (= (sc2-unit-alliance eu) 4) eu)))
+                (let ([near-enemies
+                       (filter (lambda (eu)
+                                 (define ep (sc2-unit-pos eu))
+                                 (<= (pt-dist tx ty (sc2-point3d-x ep) (sc2-point3d-y ep)) 6.5))
+                               enemy-units)])
+                  (and (pair? near-enemies)
+                       (argmin (lambda (eu)
+                                 (define ep (sc2-unit-pos eu))
+                                 (pt-dist tx ty (sc2-point3d-x ep) (sc2-point3d-y ep)))
+                               near-enemies)))))
+          (define blk-sym
+            (and blk-u (sc2-id->unit-symbol (sc2-unit-unit-type blk-u) 'unknown)))
+          (define total-workers (length workers))
+          (define desired-clear-cnt
+            (cond
+              [(and blk-sym (memq blk-sym '(probe scv drone drone-burrowed))) 2]
+              [(and blk-sym (memq blk-sym '(engineering-bay hatchery nexus command-center
+                                            orbital-command planetary-fortress bunker))) 2]
+              [(and blk-u (sc2-unit-is-structure? blk-u))
+               (if (>= total-workers 16) 4 3)]
+              [else
+               (if (>= total-workers 12) 2 1)]))
+          (define max-clear-cnt
+            (if (> total-workers 9)
+                (max 1 (min desired-clear-cnt (- total-workers 8)))
+                (min desired-clear-cnt total-workers)))
+          (define (worker-clear-eligible? w allow-gas?)
+            (define wtag (sc2-unit-tag w))
+            (and (not (set-member? used-worker-tags wtag))
+                 (not (set-member? builder-worker-tags wtag))
+                 (not (worker-has-build-order? w cur-loop self-structures))
+                 (not (set-member? step-scout-worker-tags wtag))
+                 (or allow-gas? (not (worker-is-gas-harvester? w)))
+                 (not (and (hash? role-leases)
+                           (unit-leased-above? role-leases wtag 'harvester cur-loop)))))
+          (define clear-pool-primary
+            (filter (lambda (w) (worker-clear-eligible? w #f)) workers))
+          (define clear-pool-raw
+            (if (>= (length clear-pool-primary) max-clear-cnt)
+                clear-pool-primary
+                (append clear-pool-primary
+                        (filter (lambda (w)
+                                  (and (worker-clear-eligible? w #t)
+                                       (worker-is-gas-harvester? w)))
+                                workers))))
+          (define sorted-clear-pool
+            (sort clear-pool-raw <
+                  #:key (lambda (w)
+                          (define wp (sc2-unit-pos w))
+                          (define carrying? (worker-carrying-cargo? w))
+                          (define gas-harv? (worker-is-gas-harvester? w))
+                          (define role (worker-patch-role w))
+                          (+ (pt-dist tx ty (sc2-point3d-x wp) (sc2-point3d-y wp))
+                             (if (null? (sc2-unit-orders w)) 0.0 4.0)
+                             (if carrying? 5000.0 0.0)
+                             (if gas-harv? 500.0 0.0)
+                             (cond
+                               [(and (not carrying?) (eq? role 'far)) -18.0]
+                               [(eq? role 'near) 14.0]
+                               [else 0.0])))))
+          (define chosen-workers
+            (take sorted-clear-pool (min max-clear-cnt (length sorted-clear-pool))))
+          (define wtags (map sc2-unit-tag chosen-workers))
+          (when (pair? wtags)
+            (for ([wt (in-list wtags)])
+              (record-worker-used! wt #f))
+            (define valid-blk-tgt?
+              (and (> opt-blk-eid 0)
+                   (or (not enforce-live-enemy-tag-filter?)
+                       (set-member? live-visible-enemy-tags opt-blk-eid))))
+            (if valid-blk-tgt?
+                (emit! (sc2-raw-unit-command 23 #f opt-blk-eid wtags #f))
+                (emit! (sc2-raw-unit-command 23 (sc2-point2d tx ty) 0 wtags #f))))])]
 
       [(list 'transport-juggle tr-id pass-ids (? real? raw-x) (? real? raw-y))
        (when (and (exact-integer? tr-id) (> tr-id 0))

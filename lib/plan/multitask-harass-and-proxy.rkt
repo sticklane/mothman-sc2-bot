@@ -102,6 +102,12 @@
  (struct-out counter-proxy-plan)
 
  ;; Multi-Base Adept Split Harass & Counter
+ ADEPT-SHADE-DURATION-FRAMES
+ ADEPT-FAKE-SHADE-HOLD-MIN-FRAMES
+ ADEPT-FAKE-SHADE-CANCEL-MAX-FRAMES
+ ADEPT-RETREAT-SHADE-HP-THRESHOLD
+ ADEPT-RETREAT-SHADE-DIST
+ reset-adept-shade-birth-table!
  plan-multi-base-adept-harass
  plan-counter-adept-harass
 
@@ -143,6 +149,33 @@
 
 (: CANCEL-ADEPT-PHASE-SHIFT-ABILITY-ID Integer)
 (define CANCEL-ADEPT-PHASE-SHIFT-ABILITY-ID 2594) ;; `2546` in raw replay events
+
+;; LotV Adept Psionic Transfer (`7.0s = 157f` at `22.4` fps):
+;; Pro players (`725`-Shade study) hold fake Shades to the final `1.0-1.5s` (`5.45-5.85s`
+;; = `122-131f`) before cancelling, commit `~75%` into Enemy Main minerals (`<= 2` defenders),
+;; and cast Retreat-Out safety Shades (`18-22t` toward home) when pressured (`HP < 60%` / outnumbered).
+(: ADEPT-SHADE-DURATION-FRAMES Integer)
+(define ADEPT-SHADE-DURATION-FRAMES 157)
+
+(: ADEPT-FAKE-SHADE-HOLD-MIN-FRAMES Integer)
+(define ADEPT-FAKE-SHADE-HOLD-MIN-FRAMES 122) ;; `5.45s` of `7.0s`
+
+(: ADEPT-FAKE-SHADE-CANCEL-MAX-FRAMES Integer)
+(define ADEPT-FAKE-SHADE-CANCEL-MAX-FRAMES 148) ;; `6.61s` safety ceiling before teleport
+
+(: ADEPT-RETREAT-SHADE-HP-THRESHOLD Float)
+(define ADEPT-RETREAT-SHADE-HP-THRESHOLD 0.60)
+
+(: ADEPT-RETREAT-SHADE-DIST Float)
+(define ADEPT-RETREAT-SHADE-DIST 19.0)
+
+(define *adept-shade-birth-frames* : (Mutable-HashTable Integer Integer) (make-hasheqv))
+(define *last-adept-shade-frame* : Integer 0)
+
+(: reset-adept-shade-birth-table! (-> Void))
+(define (reset-adept-shade-birth-table!)
+  (hash-clear! *adept-shade-birth-frames*)
+  (set! *last-adept-shade-frame* 0))
 
 (: WIDOW-MINE-BURROW-ABILITY-ID Integer)
 (define WIDOW-MINE-BURROW-ABILITY-ID 2095)
@@ -595,12 +628,193 @@
     [else 'Random]))
 
 ;; =============================================================================
-;; 1. Multi-Base Adept Split Harass & Counter
+;; 1. Multi-Base Adept Split Harass & Counter (Pro 725-Shade Micro)
 ;; =============================================================================
 
-;; Splits Adepts across two enemy mineral lines using `adept-phase-shift` (`2544`) into Base B
-;; while engaging Base A, and emits `cancel-adept-phase-shift` (`2594` / raw `2546`) if the
-;; Base B shade destination has `enemy-power > 1.2 * adept-power`.
+;; Non-worker enemy combat defender assessment within `radius` of `(cx, cy)`.
+;; Excludes workers (`scv`/`probe`/`drone`/`mule`) and non-defensive buildings so
+;; undefended mineral lines never look "lethal" to Adept Shades.
+(struct adept-dest-threat
+  ([combat-cnt : Integer]
+   [stalker-cnt : Integer]
+   [roach-cnt : Integer]
+   [marine-cnt : Integer]
+   [cannon-cnt : Integer]
+   [battery-cnt : Integer]
+   [heavy-static-cnt : Integer]
+   [spine-cnt : Integer]
+   [combat-pwr : Float])
+  #:transparent)
+
+(: enemy-combat-defender? (-> Any Boolean))
+(define (enemy-combat-defender? e)
+  (and (u-alive? e)
+       (let ([ut (u-type e)])
+         (cond
+           [(u-worker? ut) #f]
+           [(memq ut '(larva egg changeling adept-phase-shift observer overlord
+                       overlord-cocoon overseer creep-tumor creep-tumor-burrowed
+                       creep-tumor-queen warp-prism)) #f]
+           [(memq ut '(photon-cannon shield-battery spine-crawler bunker
+                       planetary-fortress auto-turret siege-tank-sieged)) #t]
+           [(u-structure? e) #f]
+           [else (> (unit-combat-cache-max-dps (cached-unit-combat ut)) 0.0)]))))
+
+(: assess-adept-dest-threat (-> (Listof Any) Float Float Float adept-dest-threat))
+(define (assess-adept-dest-threat enemy-units cx cy radius)
+  (define r2 (* radius radius))
+  (for/fold ([ccnt : Integer 0]
+             [scnt : Integer 0]
+             [rcnt : Integer 0]
+             [mcnt : Integer 0]
+             [pcnt : Integer 0]
+             [bcnt : Integer 0]
+             [hcnt : Integer 0]
+             [spcnt : Integer 0]
+             [cpwr : Float 0.0]
+             #:result (adept-dest-threat ccnt scnt rcnt mcnt pcnt bcnt hcnt spcnt cpwr))
+            ([e (in-list enemy-units)]
+             #:when (enemy-combat-defender? e))
+    (define dx (- cx (u-x e)))
+    (define dy (- cy (u-y e)))
+    (if (and (<= (abs dx) radius)
+             (<= (abs dy) radius)
+             (<= (+ (* dx dx) (* dy dy)) r2))
+        (let ([ut (u-type e)]
+              [p (unit-power e)])
+          (cond
+            [(eq? ut 'shield-battery)
+             ;; Battery amplifies Cannon/Stalker survivability without adding direct DPS count
+             (values ccnt scnt rcnt mcnt pcnt (add1 bcnt) hcnt spcnt (+ cpwr 12.0))]
+            [(eq? ut 'photon-cannon)
+             (values (add1 ccnt) scnt rcnt mcnt (add1 pcnt) bcnt hcnt spcnt (+ cpwr p))]
+            [(eq? ut 'spine-crawler)
+             (values (add1 ccnt) scnt rcnt mcnt pcnt bcnt hcnt (add1 spcnt) (+ cpwr p))]
+            [(memq ut '(bunker planetary-fortress siege-tank-sieged))
+             (values (add1 ccnt) scnt rcnt mcnt pcnt bcnt (add1 hcnt) spcnt (+ cpwr p))]
+            [(eq? ut 'stalker)
+             (values (add1 ccnt) (add1 scnt) rcnt mcnt pcnt bcnt hcnt spcnt (+ cpwr p))]
+            [(memq ut '(roach ravager))
+             (values (add1 ccnt) scnt (add1 rcnt) mcnt pcnt bcnt hcnt spcnt (+ cpwr p))]
+            [(memq ut '(marine marauder))
+             (values (add1 ccnt) scnt rcnt (add1 mcnt) pcnt bcnt hcnt spcnt (+ cpwr p))]
+            [else
+             (values (add1 ccnt) scnt rcnt mcnt pcnt bcnt hcnt spcnt (+ cpwr p))]))
+        (values ccnt scnt rcnt mcnt pcnt bcnt hcnt spcnt cpwr))))
+
+(: resolve-adept-shade-age-frames
+   (-> Any (Option Any) Integer Integer (Option (Mutable-HashTable Integer Integer)) (Option Float)))
+(define (resolve-adept-shade-age-frames adept matched-shade atag current-frame shade-birth-table)
+  (: lookup-num (-> Any Symbol (Option Float)))
+  (define (lookup-num h k)
+    (if (and h (hash? h))
+        (let ([v (dyn-hash-ref h k #f)])
+          (if (real? v) (->float v) #f))
+        #f))
+  (define age-f
+    (or (lookup-num matched-shade 'age-frames)
+        (lookup-num matched-shade 'shade-age-frames)
+        (lookup-num adept 'age-frames)
+        (lookup-num adept 'shade-age-frames)))
+  (define age-s
+    (or (lookup-num matched-shade 'shade-age-sec)
+        (lookup-num matched-shade 'age-sec)
+        (lookup-num adept 'shade-age-sec)
+        (lookup-num adept 'age-sec)))
+  (define rem-f
+    (or (lookup-num matched-shade 'remaining-frames)
+        (lookup-num matched-shade 'shade-remaining-frames)
+        (lookup-num adept 'remaining-frames)
+        (lookup-num adept 'shade-remaining-frames)))
+  (define rem-s
+    (or (lookup-num matched-shade 'remaining-sec)
+        (lookup-num matched-shade 'shade-remaining-sec)
+        (lookup-num adept 'remaining-sec)
+        (lookup-num adept 'shade-remaining-sec)))
+  (define born-f
+    (or (lookup-num matched-shade 'born-frame)
+        (lookup-num matched-shade 'shade-born-frame)
+        (lookup-num adept 'born-frame)
+        (lookup-num adept 'shade-born-frame)))
+  (cond
+    [age-f (max 0.0 age-f)]
+    [age-s (max 0.0 (* age-s 22.4))]
+    [rem-f (max 0.0 (- (->float ADEPT-SHADE-DURATION-FRAMES) rem-f))]
+    [rem-s (max 0.0 (* (- 7.0 rem-s) 22.4))]
+    [(and born-f (> current-frame 0))
+     (max 0.0 (- (->float current-frame) born-f))]
+    [(and shade-birth-table (> current-frame 0))
+     (define sh-tag (if (and matched-shade (> (u-tag matched-shade) 0)) (u-tag matched-shade) (- atag)))
+     (define born (hash-ref! shade-birth-table sh-tag (lambda () current-frame)))
+     (max 0.0 (->float (- current-frame born)))]
+    [else #f]))
+
+(: pick-sorted-mineral-workers (-> Float Float (Listof Any) Float (Listof Any)))
+(define (pick-sorted-mineral-workers cx cy enemy-units radius)
+  (define r2 (* radius radius))
+  (define cands : (Listof Any)
+    (for/list : (Listof Any)
+              ([e (in-list enemy-units)]
+               #:when (and (u-alive? e)
+                           (> (u-tag e) 0)
+                           (u-worker? (u-type e))
+                           (let ([dx (- cx (u-x e))]
+                                 [dy (- cy (u-y e))])
+                             (and (<= (abs dx) radius)
+                                  (<= (abs dy) radius)
+                                  (<= (+ (* dx dx) (* dy dy)) r2)))))
+      e))
+  ;; Sort by lowest EHP first (guaranteed 1-volley kills on wounded/40-HP workers),
+  ;; tie-breaking by closest distance to `(cx, cy)`.
+  (sort cands
+        (lambda ([a : Any] [b : Any])
+          (define ea (u-ehp a))
+          (define eb (u-ehp b))
+          (cond
+            [(< (+ ea 0.5) eb) #t]
+            [(< (+ eb 0.5) ea) #f]
+            [else
+             (< (dist2 cx cy (u-x a) (u-y a))
+                (dist2 cx cy (u-x b) (u-y b)))]))))
+
+(: compute-retreat-out-point
+   (-> Float Float Float Float Boolean Float Float (Pair Float Float)))
+(define (compute-retreat-out-point ax ay hx hy two-bases? opp-x opp-y)
+  (define rvx (- hx ax))
+  (define rvy (- hy ay))
+  (define rlen (max 1e-4 (dist2 0.0 0.0 rvx rvy)))
+  (define ux (/ rvx rlen))
+  (define uy (/ rvy rlen))
+  (define step (min ADEPT-RETREAT-SHADE-DIST (max 16.0 (min 22.0 rlen))))
+  (define raw-pt (clamp-pt (+ ax (* step ux)) (+ ay (* step uy)) 200.0 200.0))
+  ;; If stepping straight toward home lands right inside the other enemy base (`<= 10.0t`),
+  ;; deflect laterally away from that enemy base so the Retreat-Out Shade escapes cleanly.
+  (if (and two-bases? (<= (dist2 (car raw-pt) (cdr raw-pt) opp-x opp-y) 10.0))
+      (let* ([px (- uy)]
+             [py ux]
+             [cand1 (clamp-pt (+ (car raw-pt) (* 10.5 px)) (+ (cdr raw-pt) (* 10.5 py)) 200.0 200.0)]
+             [cand2 (clamp-pt (- (car raw-pt) (* 10.5 px)) (- (cdr raw-pt) (* 10.5 py)) 200.0 200.0)])
+        (if (>= (dist2 (car cand1) (cdr cand1) opp-x opp-y)
+                (dist2 (car cand2) (cdr cand2) opp-x opp-y))
+            cand1
+            cand2))
+      raw-pt))
+
+;; Pro multi-base Adept Shade harassment (`725`-Shade study):
+;;   1) Delayed Fake-Shade Cancel: holds fake Shades until the final `1.0-1.5s` (`>= 122f`
+;;      = `5.45s` of `7.0s`) before emitting `cancel-adept-phase-shift` (`2594`) when lethal
+;;      defenders (`>= 3` Stalkers / `>= 4` Roaches / `>= 6` Marines / Cannon+Battery / Bunker)
+;;      are stacked at destination.
+;;   2) High-Commit Enemy Main Minerals (`~75%` pro commit): never cancels a Shade into Enemy
+;;      Main Minerals with `<= 2` non-worker combat defenders; all Adepts in the volley focus-fire
+;;      the SAME worker tag (`2` Adepts = `44 >= 40` HP Probe/Drone; `3` Adepts = `66 >= 45` HP SCV).
+;;   3) Retreat-Out Safety Shades (`18.2%` of pro Shades, `87.1%` completion): when pressured
+;;      inside an enemy base (`HP < 60%` or outnumbered), casts `adept-phase-shift` (`2544`)
+;;      `16-22t` toward safe home ground, never cancels active retreat Shades, and keeps firing
+;;      worker focus-fire volleys until teleporting out alive.
+;;   4) Cross-Base Dual-Prong Fake-Shade (`Main <-> Nat`): when enemy has `2` bases, physical
+;;      Adepts pressure one mineral line while casting `adept-phase-shift` (`2544`) into the
+;;      opposite mineral line so slow defenders cannot cover both.
 (: plan-multi-base-adept-harass
    (->* ((Listof Any) (Listof Any))
         (#:home-x Real
@@ -608,7 +822,10 @@
          #:enemy-main-x (Option Real)
          #:enemy-main-y (Option Real)
          #:enemy-targets (Listof (Pair Real Real))
-         #:max-safe-power-ratio Real)
+         #:max-safe-power-ratio Real
+         #:current-frame Integer
+         #:enemy-race Symbol
+         #:shade-birth-table (Option (Mutable-HashTable Integer Integer)))
         (Listof harass-directive)))
 (define (plan-multi-base-adept-harass ally-units enemy-units
                                       #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
@@ -616,7 +833,11 @@
                                       #:enemy-main-x [emx #f]
                                       #:enemy-main-y [emy #f]
                                       #:enemy-targets [explicit-targets '()]
-                                      #:max-safe-power-ratio [power-ratio-kw 1.2])
+                                      #:max-safe-power-ratio [power-ratio-kw 1.2]
+                                      #:current-frame [current-frame 0]
+                                      #:enemy-race [enemy-race 'Unknown]
+                                      #:shade-birth-table [shade-birth-table #f])
+  (void enemy-race)
   (define hx (->float home-x))
   (define hy (->float home-y))
   (define power-ratio (->float power-ratio-kw))
@@ -638,7 +859,6 @@
      (cond
        [(null? adepts) '()]
        [else
-        (define multi-adept? (pair? (cdr adepts)))
         (define targets : (Listof (Pair Float Float))
           (if (>= (length explicit-targets) 2)
               (for/list : (Listof (Pair Float Float)) ([p (in-list (take explicit-targets 2))])
@@ -650,26 +870,78 @@
         (define ay0 (cdr base-a))
         (define bx0 (car base-b))
         (define by0 (cdr base-b))
+        (define two-bases? (>= (dist2 ax0 ay0 bx0 by0) 12.0))
+        ;; Identify enemy Main mineral line coordinates (explicit `emx`/`emy` if provided,
+        ;; otherwise whichever of `base-a` / `base-b` is farthest from home).
+        (define-values (main-x main-y)
+          (cond
+            [(and emx emy) (values (->float emx) (->float emy))]
+            [(>= (dist2 ax0 ay0 hx hy) (dist2 bx0 by0 hx hy)) (values ax0 ay0)]
+            [else (values bx0 by0)]))
+
+        ;; Pair live `adept-phase-shift` Shades (`801`) to Adepts (honoring explicit `owner-tag`
+        ;; first, then nearest-distance pairing for real SC2 observations where `801` has no owner-tag).
+        (define matched-shade-by-adept : (Mutable-HashTable Integer Any) (make-hasheqv))
+        (define used-shade-idxs : (Mutable-HashTable Integer Boolean) (make-hasheqv))
+        ;; Pass 1: explicit `owner-tag`
+        (for ([a (in-list adepts)])
+          (define atag (u-tag a))
+          (for ([sh (in-list shades)]
+                [sidx (in-naturals)]
+                #:when (not (hash-has-key? used-shade-idxs sidx)))
+            (when (and (not (hash-has-key? matched-shade-by-adept atag))
+                       (eqv? (dyn-hash-ref sh 'owner-tag #f) atag))
+              (hash-set! matched-shade-by-adept atag sh)
+              (hash-set! used-shade-idxs sidx #t))))
+        ;; Pass 2: nearest unmatched Shade (`<= 45.0t`, max 7s travel is `41.6t`)
+        (for ([a (in-list adepts)]
+              #:when (not (hash-has-key? matched-shade-by-adept (u-tag a))))
+          (define atag (u-tag a))
+          (define ax (u-x a))
+          (define ay (u-y a))
+          (define-values (best-sidx best-sh)
+            (for/fold ([bi : Integer -1] [bsh : (Option Any) #f] [bd : Float 45.0]
+                       #:result (values bi bsh))
+                      ([sh (in-list shades)]
+                       [sidx (in-naturals)]
+                       #:when (not (hash-has-key? used-shade-idxs sidx)))
+              (define d (dist2 ax ay (u-x sh) (u-y sh)))
+              (if (<= d bd) (values sidx sh d) (values bi bsh bd))))
+          (when (and best-sh (>= best-sidx 0))
+            (hash-set! matched-shade-by-adept atag best-sh)
+            (hash-set! used-shade-idxs best-sidx #t)))
+
+        ;; Prune expired/dead keys from `shade-birth-table` so it never grows unbounded
+        (when (and shade-birth-table (> current-frame 0) (> (hash-count shade-birth-table) 0))
+          (define live-keys : (Mutable-HashTable Integer Boolean) (make-hasheqv))
+          (for ([sh (in-list shades)])
+            (define st (u-tag sh))
+            (when (> st 0) (hash-set! live-keys st #t)))
+          (for ([a (in-list adepts)])
+            (when (or (hash-has-key? matched-shade-by-adept (u-tag a))
+                      (real? (dyn-hash-ref a 'shade-x #f))
+                      (eq? (dyn-hash-ref a 'phase-shift-active? #f) #t))
+              (hash-set! live-keys (- (u-tag a)) #t)))
+          (define stale-keys : (Listof Integer)
+            (for/fold ([acc : (Listof Integer) '()])
+                      ([(k born) (in-hash shade-birth-table)])
+              (if (or (not (hash-has-key? live-keys k))
+                      (> (- current-frame born) (+ ADEPT-SHADE-DURATION-FRAMES 20)))
+                  (cons k acc)
+                  acc)))
+          (for ([k (in-list stale-keys)])
+            (hash-remove! shade-birth-table k)))
+
         (define total-adept-power
           (max 1.0 (for/fold ([acc : Float 0.0]) ([a (in-list adepts)]) (+ acc (unit-power a)))))
         (define canceled-tags : (Mutable-HashTable Integer Boolean) (make-hasheqv))
-        (define pwr-cache-set? : Boolean #f)
-        (define pwr-cache-x : Float 0.0)
-        (define pwr-cache-y : Float 0.0)
-        (define pwr-cache-val : Float 0.0)
-        (: cached-enemy-pwr (-> Float Float Float))
-        (define (cached-enemy-pwr cx cy)
-          (cond
-            [(and pwr-cache-set? (= cx pwr-cache-x) (= cy pwr-cache-y))
-             pwr-cache-val]
-            [else
-             (define v (sum-unit-power enemy-units cx cy 8.5))
-             (set! pwr-cache-set? #t)
-             (set! pwr-cache-x cx)
-             (set! pwr-cache-y cy)
-             (set! pwr-cache-val v)
-             v]))
-        ;; First inspect active shades or explicit shade destination against > 1.2 * adept-power
+        (define active-shade-tags : (Mutable-HashTable Integer Boolean) (make-hasheqv))
+
+        ;; 1. Inspect active Shades:
+        ;;    - NEVER cancel Retreat-Out Safety Shades (`87.1%` pro completion)
+        ;;    - COMMIT into Enemy Main Minerals when `<= 2` combat defenders (`~75%` pro commit)
+        ;;    - HOLD Fake Shades against lethal stacks until `>= 122f` (`5.45s` of `7.0s`),
+        ;;      then cancel cleanly via `cancel-adept-phase-shift` (`2594`)!
         (define cancel-dirs
           (if (and (null? shades)
                    (not (for/or : Boolean ([a (in-list adepts)])
@@ -682,130 +954,217 @@
                 (define atag (u-tag a))
                 (define explicit-sx (dyn-hash-ref a 'shade-x #f))
                 (define explicit-sy (dyn-hash-ref a 'shade-y #f))
-                (define matched-shade
-                  (and (pair? shades)
-                       (for/fold ([hit : (Option Any) #f])
-                                 ([sh (in-list shades)]
-                                  #:when (not hit))
-                         (define owner (dyn-hash-ref sh 'owner-tag #f))
-                         (if (or (eqv? owner atag) (not multi-adept?)) sh #f))))
-                (define shade-active?
-                  (or matched-shade
+                (define matched-shade : (Option Any)
+                  (hash-ref matched-shade-by-adept atag (lambda () #f)))
+                (define shade-active? : Boolean
+                  (or (not (not matched-shade))
                       (and (real? explicit-sx) (real? explicit-sy))
                       (eq? (dyn-hash-ref a 'phase-shift-active? #f) #t)))
                 (cond
                   [(not shade-active?) acc]
                   [else
+                   (hash-set! active-shade-tags atag #t)
                    (define sx
                      (cond
                        [matched-shade (u-x matched-shade)]
                        [(real? explicit-sx) (->float explicit-sx)]
-                       [else (+ bx0 0.0)]))
+                       [else bx0]))
                    (define sy
                      (cond
                        [matched-shade (u-y matched-shade)]
                        [(real? explicit-sy) (->float explicit-sy)]
-                       [else (+ by0 0.0)]))
-                   (define local-enemy-pwr (cached-enemy-pwr sx sy))
-                   (define local-adept-pwr
-                     (max (unit-power a)
-                          (if matched-shade
-                              (for/fold ([s : Float 0.0])
-                                        ([sh (in-list shades)])
-                                (define dx (- sx (u-x sh)))
-                                (define dy (- sy (u-y sh)))
-                                (if (<= (+ (* dx dx) (* dy dy)) 49.0)
-                                    (+ s 15.0)
-                                    s))
-                              total-adept-power)))
-                   (if (> local-enemy-pwr (* power-ratio local-adept-pwr))
-                       (begin
+                       [else by0]))
+                   (define ax (u-x a))
+                   (define ay (u-y a))
+                   ;; Detect Retreat-Out Safety Shade: tagged `'retreat-out`, OR heading toward home
+                   ;; (`dist(shade, home) + 4.0 < dist(adept, home)`) AND outside both enemy bases (`> 10.5t`).
+                   (define shade-outside-enemy-bases?
+                     (and (> (dist2 sx sy ax0 ay0) 10.5)
+                          (> (dist2 sx sy bx0 by0) 10.5)))
+                   (define retreat-out-shade? : Boolean
+                     (or (eq? (dyn-hash-ref a 'shade-purpose #f) 'retreat-out)
+                         (and matched-shade
+                              (eq? (dyn-hash-ref matched-shade 'shade-purpose #f) 'retreat-out))
+                         (and shade-outside-enemy-bases?
+                              (< (+ (dist2 sx sy hx hy) 4.0) (dist2 ax ay hx hy)))))
+                   (define shade-age-f
+                     (resolve-adept-shade-age-frames a matched-shade atag current-frame shade-birth-table))
+                   (cond
+                     [retreat-out-shade? acc]
+                     [else
+                      (define threat (assess-adept-dest-threat enemy-units sx sy 8.5))
+                      (define single-adept-pwr (max 15.0 (unit-power a)))
+                      (define local-adept-pwr
+                        (max single-adept-pwr
+                             (if matched-shade
+                                 (for/fold ([s : Float 0.0])
+                                           ([sh (in-list shades)])
+                                   (define dx (- sx (u-x sh)))
+                                   (define dy (- sy (u-y sh)))
+                                   (if (<= (+ (* dx dx) (* dy dy)) 49.0)
+                                       (+ s single-adept-pwr)
+                                       s))
+                                 total-adept-power)))
+                      (define lethal-stack? : Boolean
+                        (or (>= (adept-dest-threat-stalker-cnt threat) 3)
+                            (>= (adept-dest-threat-roach-cnt threat) 4)
+                            (>= (adept-dest-threat-marine-cnt threat) 6)
+                            (and (>= (adept-dest-threat-cannon-cnt threat) 1)
+                                 (>= (adept-dest-threat-battery-cnt threat) 1))
+                            (>= (adept-dest-threat-cannon-cnt threat) 2)
+                            (>= (adept-dest-threat-heavy-static-cnt threat) 1)
+                            (>= (adept-dest-threat-spine-cnt threat) 2)
+                            (> (adept-dest-threat-combat-pwr threat)
+                               (* power-ratio local-adept-pwr))))
+                      (define near-enemy-main? (<= (dist2 sx sy main-x main-y) 9.5))
+                      (define commit-main-minerals? : Boolean
+                        (and near-enemy-main?
+                             (<= (adept-dest-threat-combat-cnt threat) 2)
+                             (= (adept-dest-threat-cannon-cnt threat) 0)
+                             (= (adept-dest-threat-heavy-static-cnt threat) 0)
+                             (< (adept-dest-threat-spine-cnt threat) 2)))
+                      (define dest-unsafe? (and lethal-stack? (not commit-main-minerals?)))
+                      (define hold-fake-shade? : Boolean
+                        (and shade-age-f
+                             (< shade-age-f (->float ADEPT-FAKE-SHADE-HOLD-MIN-FRAMES))))
+                      (cond
+                        [(and dest-unsafe? (not hold-fake-shade?))
                          (hash-set! canceled-tags atag #t)
                          (cons (harass-directive atag 'adept 'cast-spell 'cancel-adept-phase-shift
                                                  CANCEL-ADEPT-PHASE-SHIFT-ABILITY-ID atag sx sy
                                                  90.0 'adept-cancel-unsafe-shade-dest 'multi-base-adept)
-                               acc))
-                       acc)]))))
-        ;; Hoist Base A / Base B safe power & nearest worker queries lazily (at most once each).
-        (define max-safe-pwr (* power-ratio total-adept-power))
-        (define a-safe-done? : Boolean #f)
-        (define a-safe-val : Boolean #f)
-        (define b-safe-done? : Boolean #f)
-        (define b-safe-val : Boolean #f)
-        (: base-safe? (-> Boolean Float Float Boolean))
-        (define (base-safe? alt-is-b? shx shy)
-          (if alt-is-b?
-              (begin
-                (unless b-safe-done?
-                  (set! b-safe-val (<= (cached-enemy-pwr shx shy) max-safe-pwr))
-                  (set! b-safe-done? #t))
-                b-safe-val)
-              (begin
-                (unless a-safe-done?
-                  (set! a-safe-val (<= (cached-enemy-pwr shx shy) max-safe-pwr))
-                  (set! a-safe-done? #t))
-                a-safe-val)))
-        (define w-a-done? : Boolean #f)
-        (define w-a-val : (Option Any) #f)
-        (define w-b-done? : Boolean #f)
-        (define w-b-val : (Option Any) #f)
-        (: base-worker (-> Boolean Float Float (Option Any)))
-        (define (base-worker on-b? ex ey)
-          (if on-b?
-              (begin
-                (unless w-b-done?
-                  (set! w-b-val (find-nearest-worker ex ey enemy-units 8.5))
-                  (set! w-b-done? #t))
-                w-b-val)
-              (begin
-                (unless w-a-done?
-                  (set! w-a-val (find-nearest-worker ex ey enemy-units 8.5))
-                  (set! w-a-done? #t))
-                w-a-val)))
-        ;; Split remaining active Adepts across Base A (direct attack) & Base B (phase shift)
+                               acc)]
+                        [else acc])])]))))
+
+        ;; 2. Precompute per-base coordinated 1-volley worker target lists
+        ;;    (`2` Adepts = `44 >= 40` HP Probe/Drone; `3` Adepts = `66 >= 45` HP SCV).
+        (define workers-near-a (pick-sorted-mineral-workers ax0 ay0 enemy-units 9.5))
+        (define workers-near-b
+          (if two-bases? (pick-sorted-mineral-workers bx0 by0 enemy-units 9.5) workers-near-a))
+
+        ;; Count how many active non-canceled Adepts are operating at each base so we can
+        ;; assign exact 1-volley kill groups (all 2-3 Adepts focus the SAME worker tag!).
+        (define-values (group-a-adepts group-b-adepts)
+          (for/fold ([ga : (Listof Integer) '()] [gb : (Listof Integer) '()]
+                     #:result (values (reverse ga) (reverse gb)))
+                    ([a (in-list adepts)]
+                     #:when (not (hash-has-key? canceled-tags (u-tag a))))
+            (define ax (u-x a))
+            (define ay (u-y a))
+            (if (or (not two-bases?)
+                    (<= (dist2 ax ay ax0 ay0) (dist2 ax ay bx0 by0)))
+                (values (cons (u-tag a) ga) gb)
+                (values ga (cons (u-tag a) gb)))))
+        (define group-a-idx-map : (Mutable-HashTable Integer Integer) (make-hasheqv))
+        (for ([t (in-list group-a-adepts)] [i (in-naturals)]) (hash-set! group-a-idx-map t i))
+        (define group-b-idx-map : (Mutable-HashTable Integer Integer) (make-hasheqv))
+        (for ([t (in-list group-b-adepts)] [i (in-naturals)]) (hash-set! group-b-idx-map t i))
+        (define group-a-sz (length group-a-adepts))
+        (define group-b-sz (length group-b-adepts))
+
+        (: pick-volley-worker (-> Integer Boolean Float Float (Option Any)))
+        (define (pick-volley-worker atag on-b? ax ay)
+          (define base-workers (if on-b? workers-near-b workers-near-a))
+          (define local-workers
+            (if (pair? base-workers)
+                base-workers
+                (pick-sorted-mineral-workers ax ay enemy-units 8.5)))
+          (cond
+            [(null? local-workers) #f]
+            [else
+             (define first-w (car local-workers))
+             (define volley-k : Integer (if (eq? (u-type first-w) 'scv) 3 2))
+             (define gsz : Integer (if on-b? group-b-sz group-a-sz))
+             (define gidx : Integer
+               (if on-b?
+                   (hash-ref group-b-idx-map atag (lambda () 0))
+                   (hash-ref group-a-idx-map atag (lambda () 0))))
+             (define widx : Integer
+               (if (< gsz (* 2 volley-k))
+                   0
+                   (min (sub1 (length local-workers)) (quotient gidx volley-k))))
+             (list-ref local-workers widx)]))
+
+        ;; 3. Emit directives for remaining Adepts:
+        ;;    Priority 1: Retreat-Out Safety Shade (`HP < 60%` or outnumbered inside enemy base)
+        ;;    Priority 2: Cross-Base Dual-Prong Fake-Shade (`Main <-> Nat`) when `phase-shift-ready?`
+        ;;    Priority 3: Coordinated 1-Volley Worker Focus-Fire (also runs while holding active Shade!)
+        ;;    Priority 4: Advance into nearer enemy mineral line
         (define attack-dirs
           (for/fold ([acc : (Listof harass-directive) '()]
                      #:result (reverse acc))
-                    ([a (in-list adepts)]
-                     [idx (in-naturals)])
+                    ([a (in-list adepts)])
             (define atag (u-tag a))
             (cond
               [(hash-has-key? canceled-tags atag) acc]
               [else
-               (define on-b-group? (and multi-adept? (odd? idx)))
-               (define ex (if on-b-group? bx0 ax0))
-               (define ey (if on-b-group? by0 ay0))
-               (define sh-x (if on-b-group? ax0 bx0))
-               (define sh-y (if on-b-group? ay0 by0))
                (define ax (u-x a))
                (define ay (u-y a))
-               (define dax (- ax sh-x))
-               (define day (- ay sh-y))
-               (define d-alt2 (+ (* dax dax) (* day day)))
-               (define dex (- ax ex))
-               (define dey (- ay ey))
-               (define d-eng2 (+ (* dex dex) (* dey dey)))
+               (define near-a?
+                 (or (not two-bases?)
+                     (<= (dist2 ax ay ax0 ay0) (dist2 ax ay bx0 by0))))
+               (define curr-x (if near-a? ax0 bx0))
+               (define curr-y (if near-a? ay0 by0))
+               (define opp-x (if near-a? bx0 ax0))
+               (define opp-y (if near-a? by0 ay0))
+               (define d-curr (dist2 ax ay curr-x curr-y))
+               (define d-opp (dist2 ax ay opp-x opp-y))
+               (define d-home (dist2 ax ay hx hy))
+               (define has-active-shade? (hash-has-key? active-shade-tags atag))
                (define phase-ready?
-                 (and (even? idx)
-                      (<= d-alt2 1764.0)
-                      (<= d-eng2 196.0)
+                 (and (not has-active-shade?)
                       (not (eq? (dyn-hash-ref a 'phase-shift-ready? #t) #f))
                       (not (eq? (dyn-hash-ref a 'phase-shift-active? #f) #t))))
+               (define inside-enemy-base?
+                 (or (<= (min d-curr d-opp) 22.0)
+                     (< (min d-curr d-opp) d-home)))
+               ;; Check local pressure for Retreat-Out Safety Shade
+               (define need-retreat-shade? : Boolean
+                 (and phase-ready?
+                      inside-enemy-base?
+                      (or (< (u-hp-ratio a) ADEPT-RETREAT-SHADE-HP-THRESHOLD)
+                          (let* ([local-threat (assess-adept-dest-threat enemy-units ax ay 9.5)]
+                                 [ecnt (adept-dest-threat-combat-cnt local-threat)]
+                                 [epwr (adept-dest-threat-combat-pwr local-threat)])
+                            (and (> ecnt 0)
+                                 (let-values ([(acnt apwr)
+                                               (for/fold ([c : Integer 0] [p : Float 0.0])
+                                                         ([u (in-list adepts)])
+                                                 (if (<= (dist2 ax ay (u-x u) (u-y u)) 8.0)
+                                                     (values (add1 c) (+ p (unit-power u)))
+                                                     (values c p)))])
+                                   (or (> epwr (* 1.05 (max 1.0 apwr)))
+                                       (and (<= acnt 2) (>= ecnt 2))
+                                       (and (<= acnt 3) (>= ecnt 3)))))))))
+               (define can-dual-prong-shade? : Boolean
+                 (and phase-ready?
+                      two-bases?
+                      (<= d-curr 16.0)
+                      (<= d-opp 42.0)))
                (cond
-                 ;; Cast phase shift (`2544`) toward opposite mineral line to split enemy defense
-                 [(and phase-ready? (base-safe? (not on-b-group?) sh-x sh-y))
+                 ;; Priority 1: Retreat-Out Safety Shade (`16-22t` toward safe home ground)
+                 [need-retreat-shade?
+                  (define rpt (compute-retreat-out-point ax ay hx hy two-bases? opp-x opp-y))
                   (cons (harass-directive atag 'adept 'cast-spell 'adept-phase-shift
-                                          ADEPT-PHASE-SHIFT-ABILITY-ID 0 sh-x sh-y
+                                          ADEPT-PHASE-SHIFT-ABILITY-ID 0 (car rpt) (cdr rpt)
+                                          85.0 'adept-retreat-out-safety-shade 'multi-base-adept)
+                        acc)]
+                 ;; Priority 2: Cross-Base Dual-Prong Fake-Shade (`Main <-> Nat`)
+                 [can-dual-prong-shade?
+                  (cons (harass-directive atag 'adept 'cast-spell 'adept-phase-shift
+                                          ADEPT-PHASE-SHIFT-ABILITY-ID 0 opp-x opp-y
                                           75.0 'adept-split-shade-second-base 'multi-base-adept)
                         acc)]
-                 [(base-worker on-b-group? ex ey)
+                 ;; Priority 3: Coordinated 1-Volley Worker Focus-Fire (same target tag per volley!)
+                 [(pick-volley-worker atag (not near-a?) ax ay)
                   => (lambda ([worker-tgt : Any])
                        (cons (harass-directive atag 'adept 'focus-fire #f 0 (u-tag worker-tgt)
                                                (u-x worker-tgt) (u-y worker-tgt)
                                                70.0 'adept-focus-mineral-worker 'multi-base-adept)
                              acc))]
+                 ;; Priority 4: Move/attack into nearer enemy mineral line
                  [else
-                  (cons (harass-directive atag 'adept 'attack-pos #f 0 0 ex ey
+                  (cons (harass-directive atag 'adept 'attack-pos #f 0 0 curr-x curr-y
                                           60.0 'adept-move-harass-mineral-line 'multi-base-adept)
                         acc)])])))
         (append cancel-dirs attack-dirs)])]))
@@ -3119,7 +3478,19 @@
                                      #:enemy-main-x emx #:enemy-main-y emy))
          '())
      (if a-has-adept?
-         (plan-multi-base-adept-harass ally-units enemy-units #:home-x hx #:home-y hy #:enemy-main-x emx #:enemy-main-y emy #:enemy-targets cached-enemy-targets)
+         (begin
+           (when (and (> current-frame 0) (< current-frame *last-adept-shade-frame*))
+             (hash-clear! *adept-shade-birth-frames*))
+           (when (> current-frame 0)
+             (set! *last-adept-shade-frame* current-frame))
+           (plan-multi-base-adept-harass ally-units enemy-units
+                                         #:home-x hx #:home-y hy
+                                         #:enemy-main-x emx #:enemy-main-y emy
+                                         #:enemy-targets cached-enemy-targets
+                                         #:current-frame current-frame
+                                         #:enemy-race enemy-race
+                                         #:shade-birth-table (and (> current-frame 0)
+                                                                  *adept-shade-birth-frames*)))
          '())
      (if a-has-wm-runby?
          (widow-mine-runby-plan-directives

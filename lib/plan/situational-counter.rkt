@@ -1567,11 +1567,33 @@
 
 (: select-situational-upgrades
    (->* (Symbol Symbol (Listof Symbol) (Listof Symbol) (Listof Symbol))
-        ((Listof Symbol) Nonnegative-Integer Nonnegative-Integer)
+        ((Listof Symbol) Nonnegative-Integer Nonnegative-Integer
+         #:enemy-race Symbol
+         #:hellion-count Integer
+         #:siege-tank-count Integer)
         (Listof Symbol)))
 (define (select-situational-upgrades raw-race situation enemy-comp researched-upgs pending-upgs
-                                     [available-bldgs '()] [minerals 0] [gas 0])
+                                     [available-bldgs '()] [minerals 0] [gas 0]
+                                     #:enemy-race [raw-enemy-race 'Unknown]
+                                     #:hellion-count [hellion-count 0]
+                                     #:siege-tank-count [siege-tank-count 0])
   (define race : Symbol (normalize-known-race raw-race))
+  (define enemy-race : Symbol (normalize-race-or-unknown raw-enemy-race))
+  (define enemy-is-terran? : Boolean
+    (or (eq? enemy-race 'Terran)
+        (and (eq? enemy-race 'Unknown)
+             (not (not (ormap (lambda ([u : Symbol])
+                                (memq u '(marine marauder reaper siege-tank siege-tank-sieged
+                                          hellion hellbat cyclone viking viking-fighter
+                                          medivac banshee liberator raven thor battlecruiser)))
+                              enemy-comp))))))
+  ;; L82B: Gate `'infernal-preigniter` (Blue Flame, 100M/100G on FactoryTechLab) strictly on
+  ;; `(>= hellion-count 2)` AND `(or (not (eq? enemy-race 'Terran)) (>= siege-tank-count 2))`
+  ;; so 0-Hellion Blue Flame NEVER stalls SiegeTank #1 on FactoryTechLab!
+  (define infernal-preigniter-ok? : Boolean
+    (and (>= hellion-count 2)
+         (or (not enemy-is-terran?)
+             (>= siege-tank-count 2))))
   (define have-ht : (HashTable Symbol Symbol) (make-hasheq))
   (for ([p (in-list pending-upgs)])
     (hash-set! have-ht p 'pending))
@@ -1594,6 +1616,8 @@
     (for/list : (Listof (Pairof Float upgrade-catalog-entry))
               ([u (in-list race-upgrades)]
                #:when (and (not (hash-ref have-ht (upgrade-catalog-entry-sym u) #f))
+                           (or (not (eq? (upgrade-catalog-entry-sym u) 'infernal-preigniter))
+                               infernal-preigniter-ok?)
                            (let ([pre (upgrade-catalog-entry-prereq u)])
                              (or (not pre) (eq? (hash-ref have-ht pre #f) 'researched)))
                            (or (not have-bldgs?)
@@ -2150,27 +2174,35 @@
 
   (define actor-ht : (HashTable Symbol (Listof actor-entry)) (make-hasheq))
 
-  ;; Single pass over ally units: army count, AA specialist supply & optional actor indexing
-  (define-values (seq-after-units ally-army-count our-aa-supply)
-    (let loop-au : (Values Integer Integer Float)
+  ;; Single pass over ally units: army count, AA specialist supply, Hellion/Tank counts & actor indexing
+  (define-values (seq-after-units ally-army-count our-aa-supply ally-hellion-count ally-siege-tank-count)
+    (let loop-au : (Values Integer Integer Float Integer Integer)
                  ([xs : (Listof Any) ally-units]
                   [seq : Integer 0]
                   [army : Integer 0]
-                  [aa-sup : Float 0.0])
+                  [aa-sup : Float 0.0]
+                  [hellions : Integer 0]
+                  [tanks : Integer 0])
       (if (pair? xs)
           (let*-values ([(u) (car xs)]
                         [(raw-t cnt _bp) (dyn-unit-type-and-count u)])
             (let* ([m (fast-unit-meta raw-t)]
+                   [c (unit-type-meta-canon-unit m)]
                    [cu (canon-counter-unit raw-t)]
                    [max-req (and build-plan? (unit-type-meta-actor-max-energy m))]
-                   [is-aa? (memq cu '(corruptor viking-fighter))])
+                   [is-aa? (memq cu '(corruptor viking-fighter))]
+                   [is-hellion? (or (memq cu '(hellion hellbat)) (memq c '(hellion hellbat)))]
+                   [is-tank? (or (memq cu '(siege-tank siege-tank-sieged))
+                                 (memq c '(siege-tank siege-tank-sieged)))])
               (when max-req
-                (maybe-push-actor! actor-ht (unit-type-meta-canon-unit m) max-req seq u))
+                (maybe-push-actor! actor-ht c max-req seq u))
               (loop-au (cdr xs)
                        (+ seq 1)
                        (if (unit-type-meta-army? m) (+ army cnt) army)
-                       (if is-aa? (+ aa-sup (* (->float cnt) 2.0)) aa-sup))))
-          (values seq army aa-sup))))
+                       (if is-aa? (+ aa-sup (* (->float cnt) 2.0)) aa-sup)
+                       (if is-hellion? (+ hellions cnt) hellions)
+                       (if is-tank? (+ tanks cnt) tanks))))
+          (values seq army aa-sup hellions tanks))))
 
   ;; Single pass over ally buildings: canonical structure list, completed TownHalls & actor indexing
   (define-values (ally-bldg-syms-rev ready-townhalls)
@@ -2532,7 +2564,10 @@
         (define upg-recs
           (select-situational-upgrades our-race primary-sit enemy-syms
                                        researched-upgs pending-upgs
-                                       ally-bldg-syms minerals gas))
+                                       ally-bldg-syms minerals gas
+                                       #:enemy-race enemy-race-inferred
+                                       #:hellion-count ally-hellion-count
+                                       #:siege-tank-count ally-siege-tank-count))
 
         (define ab-recs
           (select-ability-actions-from-ht primary-sit enemy-syms actor-ht frame (dyn-obs-live? raw-obs)))

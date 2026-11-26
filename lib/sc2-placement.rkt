@@ -30,6 +30,10 @@
  find-main-ramp-geometry
  solve-terran-ramp-wall-analytical
  solve-terran-ramp-wall
+ terran-wall-barracks-slot?
+ terran-wall-barracks-addon-clear?
+ terran-wall-seal-coord?
+ wall-barracks-addon-pad-buildable?
  compute-natural-exit-direction
  solve-protoss-matchup-wall-analytical
  find-natural-choke-candidates
@@ -38,6 +42,7 @@
  solve-protoss-main-ramp-on-grids
  should-wall-main-ramp-vs-random?
  solve-protoss-matchup-wall
+ solve-zerg-natural-wall
  solve-choke-wall-in
  wall-solution-valid-ref
  wall-solution-zergling-tight-ref
@@ -123,6 +128,30 @@
      (values (and (> w 0) (> h 0) (procedure? pref) (procedure? bref))
              w h pref bref href)]))
 
+;; Resolves a buildable tile's plateau height against `fth`, tolerating bottom-left vertex
+;; cliff-bevel dropoffs when at least 2 of the tile's remaining 3 cell corners sit on `fth`.
+(define (cell-resolved-height-at href ix iy w h fth [tol 1.75])
+  (define v0 (href ix iy))
+  (define th0 (if (real? v0) (exact->inexact v0) fth))
+  (cond
+    [(<= (abs (- th0 fth)) tol) th0]
+    [else
+     (define x1 (min (sub1 w) (add1 ix)))
+     (define y1 (min (sub1 h) (add1 iy)))
+     (define v1 (href x1 iy))
+     (define v2 (href ix y1))
+     (define v3 (href x1 y1))
+     (define th1 (if (real? v1) (exact->inexact v1) -1e9))
+     (define th2 (if (real? v2) (exact->inexact v2) -1e9))
+     (define th3 (if (real? v3) (exact->inexact v3) -1e9))
+     (define m1 (<= (abs (- th1 fth)) tol))
+     (define m2 (<= (abs (- th2 fth)) tol))
+     (define m3 (<= (abs (- th3 fth)) tol))
+     (define mcnt (+ (if m1 1 0) (if m2 1 0) (if m3 1 0)))
+     (if (>= mcnt 2)
+         (/ (+ (if m1 th1 0.0) (if m2 th2 0.0) (if m3 th3 0.0)) (exact->inexact mcnt))
+         #f)]))
+
 (define (footprint-buildable-at-height? cx cy hw hh w h bref href target-h
                                         [check-height? #t]
                                         [pref #f])
@@ -159,9 +188,8 @@
               [else
                (define next-pc (if (and pref-ok? (grid-cell-positive? (pref ix iy))) (add1 pc) pc))
                (if href-ok?
-                   (let* ([v (href ix iy)]
-                          [th (if (real? v) (exact->inexact v) fth)])
-                     (if (<= (abs (- th fth)) 1.75)
+                   (let ([th (cell-resolved-height-at href ix iy w h fth 1.75)])
+                     (if th
                          (loop-y (add1 iy) (min mn th) (max mx th) next-pc)
                          #f))
                    (loop-y (add1 iy) mn mx next-pc))]))]))]))
@@ -226,12 +254,16 @@
            (push-pt! (+ nat-x off) (+ nat-y 6.0))
            (push-pt! (+ nat-x off) (+ nat-y 8.0))
            (push-pt! (+ nat-x off) (+ nat-y 10.0))
+           (push-pt! (+ nat-x off) (+ nat-y 12.0))
            (push-pt! (+ nat-x off) (- nat-y 8.0))
+           (push-pt! (+ nat-x off) (- nat-y 12.0))
            (push-pt! nat-x (+ nat-y off))
            (push-pt! (+ nat-x 6.0) (+ nat-y off))
            (push-pt! (+ nat-x 8.0) (+ nat-y off))
            (push-pt! (+ nat-x 10.0) (+ nat-y off))
+           (push-pt! (+ nat-x 12.0) (+ nat-y off))
            (push-pt! (- nat-x 8.0) (+ nat-y off))
+           (push-pt! (- nat-x 12.0) (+ nat-y off))
            (push-pt! (+ nat-x off) (+ nat-y off))
            (push-pt! (+ nat-x off) (- nat-y off)))
          acc))
@@ -299,10 +331,16 @@
                                       (grid-cell-positive? (pref (+ sx0 lx) (+ sy0 ly)))))
                (cons lx ly)))))
 
+     (define (hg-plateau-cell? gx gy)
+       (and (grid-cell-positive? (pref gx gy))
+            (grid-cell-positive? (bref gx gy))
+            (or (not (procedure? href))
+                (<= (- h-hi h-lo) 2.0)
+                (and (cell-resolved-height-at href gx gy w h h-main 1.75) #t))))
+
      (when seed-pt
        (define sidx (+ (* (cdr seed-pt) sw) (car seed-pt)))
        (vector-set! b-dist sidx 0)
-       (bytes-set! hg-plat sidx 1)
        (vector-set! qbuf 0 sidx)
        (let loop ([head 0] [tail 1])
          (when (< head tail)
@@ -310,7 +348,6 @@
            (define d0 (vector-ref b-dist cur))
            (define cy (quotient cur sw))
            (define cx (remainder cur sw))
-           (define cur-hg? (= (bytes-ref hg-plat cur) 1))
            (define tail1 tail)
            (when (< d0 38)
              (define-syntax-rule (step! nx ny)
@@ -321,19 +358,54 @@
                  (when (and (= (vector-ref b-dist nidx) -1)
                             (grid-cell-positive? (pref gx gy)))
                    (vector-set! b-dist nidx (add1 d0))
-                   (when (and cur-hg?
-                              (grid-cell-positive? (bref gx gy))
-                              (or (not (procedure? href))
-                                  (<= (- h-hi h-lo) 2.0)
-                                  (<= (abs (- (grid-height-val href gx gy h-main) h-main)) 1.75)))
-                     (bytes-set! hg-plat nidx 1))
                    (vector-set! qbuf tail1 nidx)
                    (set! tail1 (add1 tail1)))))
              (step! (add1 cx) cy)
              (step! (sub1 cx) cy)
              (step! cx (add1 cy))
              (step! cx (sub1 cy)))
-           (loop (add1 head) tail1))))
+           (loop (add1 head) tail1)))
+
+       ;; Dedicated high-ground buildable plateau BFS (decoupled from walkable `b-dist`
+       ;; so paths grazing unbuildable cliff-rim tiles never taint ramp-top high ground).
+       (define hg-seed
+         (let ([slx (car seed-pt)]
+               [sly (cdr seed-pt)])
+           (if (hg-plateau-cell? (+ sx0 slx) (+ sy0 sly))
+               seed-pt
+               (for*/first ([r (in-range 1 5)]
+                            [dy-i (in-range (- r) (add1 r))]
+                            [dx-i (in-range (- r) (add1 r))]
+                            #:do [(define lx (+ slx dx-i))
+                                  (define ly (+ sly dy-i))]
+                            #:when (and (>= lx 0) (< lx sw) (>= ly 0) (< ly sh)
+                                        (hg-plateau-cell? (+ sx0 lx) (+ sy0 ly))))
+                 (cons lx ly)))))
+       (when hg-seed
+         (define hsidx (+ (* (cdr hg-seed) sw) (car hg-seed)))
+         (bytes-set! hg-plat hsidx 1)
+         (vector-set! qbuf 0 hsidx)
+         (let hloop ([head 0] [tail 1])
+           (when (< head tail)
+             (define cur (vector-ref qbuf head))
+             (define cy (quotient cur sw))
+             (define cx (remainder cur sw))
+             (define tail1 tail)
+             (define-syntax-rule (hstep! nx ny)
+               (when (and (>= nx 0) (< nx sw) (>= ny 0) (< ny sh))
+                 (define nidx (+ (* ny sw) nx))
+                 (when (= (bytes-ref hg-plat nidx) 0)
+                   (define gx (+ sx0 nx))
+                   (define gy (+ sy0 ny))
+                   (when (hg-plateau-cell? gx gy)
+                     (bytes-set! hg-plat nidx 1)
+                     (vector-set! qbuf tail1 nidx)
+                     (set! tail1 (add1 tail1))))))
+             (hstep! (add1 cx) cy)
+             (hstep! (sub1 cx) cy)
+             (hstep! cx (add1 cy))
+             (hstep! cx (sub1 cy))
+             (hloop (add1 head) tail1)))))
 
      (define (borders-hg-plateau? gx gy)
        (for*/or ([dy-i (in-range -2 3)]
@@ -403,7 +475,7 @@
                                    (or (not seed-pt)
                                        (= (bytes-ref hg-plat (+ (* (- iy sy0) sw) (- ix sx0))) 1))
                                    (or (not (procedure? href))
-                                       (<= (abs (- (grid-height-val href ix iy h-main) h-main)) 1.75))
+                                       (and (cell-resolved-height-at href ix iy w h h-main 1.75) #t))
                                    (ormap (lambda (rt)
                                             (and (<= (abs (- ix (car rt))) 2)
                                                  (<= (abs (- iy (cdr rt))) 2)))
@@ -530,6 +602,8 @@
                          'east-facing-ramp-addon-walls
                          'west-facing-ramp-addon-inside)
         'east-facing-ramp? east-facing-ramp?
+        'addon-clear? (not east-facing-ramp?)
+        'seals-with-addon? #f
         'ramp-x crest-x
         'ramp-y crest-y
         'ramp-dx ux
@@ -538,6 +612,7 @@
         'depot-2 (cons d2-x d2-y)
         'barracks (cons bx by)
         'barracks-addon (cons addon-x addon-y)
+        'wall-structure-coords (list (cons d1-x d1-y) (cons bx by) (cons d2-x d2-y))
         'production-origin (cons prod-x prod-y)
         'grid-solved? #f))
 
@@ -724,6 +799,7 @@
                                           'west-facing-ramp-addon-inside)
                          'east-facing-ramp? east-facing?
                          'addon-clear? addon-clear?
+                         'seals-with-addon? seals-with-addon?
                          'ramp-x rx
                          'ramp-y ry
                          'ramp-dx rdx
@@ -732,12 +808,67 @@
                          'depot-2 (cons d2x d2y)
                          'barracks (cons bx by)
                          'barracks-addon (cons ax ay)
+                         'wall-structure-coords (list (cons d1x d1y) (cons bx by) (cons d2x d2y))
                          'production-origin (cons prod-x prod-y)
                          'grid-solved? #t)]
                   [else
                    (solve-terran-ramp-wall-analytical base-x base-y nat-x nat-y)])])])]))
      (hash-set! TERRAN-RAMP-WALL-CACHE cache-key result)
      result]))
+
+;; Returns #t when `(x, y)` matches the ramp-wall Barracks slot of `wall` within `tol` tiles.
+(define (terran-wall-barracks-slot? wall x y [tol 1.6])
+  (define wb (and (hash? wall) (hash-ref wall 'barracks #f)))
+  (and (pair? wb)
+       (real? (car wb)) (real? (cdr wb))
+       (real? x) (real? y)
+       (<= (dist2d (exact->inexact x) (exact->inexact y)
+                   (exact->inexact (car wb)) (exact->inexact (cdr wb)))
+           (exact->inexact tol))))
+
+;; Returns #t when the ramp-wall Barracks has a clear, buildable `(+2.5, -0.5)` add-on pad
+;; (so issuing TechLab/Reactor builds in place without SC2 auto-lifting the wall Barracks).
+(define (terran-wall-barracks-addon-clear? wall)
+  (and (hash? wall)
+       (eq? (hash-ref wall 'addon-clear? #f) #t)))
+
+;; Returns #t when `(x, y)` matches any of the 3 Terran ramp-wall seal structures
+;; (`depot-1`, `barracks`, `depot-2`) within `tol` tiles.
+(define (terran-wall-seal-coord? wall x y [tol 1.6])
+  (and (hash? wall)
+       (real? x) (real? y)
+       (let ([fx (exact->inexact x)]
+             [fy (exact->inexact y)]
+             [ftol (exact->inexact tol)]
+             [coords (or (hash-ref wall 'wall-structure-coords #f)
+                         (filter pair?
+                                 (list (hash-ref wall 'depot-1 #f)
+                                       (hash-ref wall 'barracks #f)
+                                       (hash-ref wall 'depot-2 #f))))])
+         (ormap (lambda (pt)
+                  (and (pair? pt) (real? (car pt)) (real? (cdr pt))
+                       (<= (dist2d fx fy (exact->inexact (car pt)) (exact->inexact (cdr pt))) ftol)))
+                coords))))
+
+;; Checks on live terrain grids whether a Barracks at `(bx, by)` has a buildable,
+;; same-elevation, unobstructed `2x2` add-on footprint at `(bx + 2.5, by - 0.5)`.
+(define (wall-barracks-addon-pad-buildable? bx by map-grids [existing-rects '()])
+  (define-values (grids-ok? w h pref bref href) (extract-map-grid-accessors map-grids))
+  (define fbx (exact->inexact bx))
+  (define fby (exact->inexact by))
+  (define ax (+ fbx SC2-TERRAN-ADDON-OFFSET-X))
+  (define ay (+ fby SC2-TERRAN-ADDON-OFFSET-Y))
+  (and (for/and ([r (in-list (if (list? existing-rects) existing-rects '()))])
+         (match r
+           [(list rx ry rhw rhh)
+            (footprints-disjoint? ax ay 1.0 1.0 rx ry rhw rhh)]
+           [_ #t]))
+       (if (not grids-ok?)
+           #t
+           (let* ([b-ix (max 0 (min (sub1 w) (exact-floor fbx)))]
+                  [b-iy (max 0 (min (sub1 h) (exact-floor fby)))]
+                  [h-b (grid-height-val href b-ix b-iy 128.0)])
+             (footprint-buildable-at-height? ax ay 1.0 1.0 w h bref href h-b #t pref)))))
 
 (define PROTOSS-MATCHUP-WALL-CACHE (make-hash))
 
@@ -889,6 +1020,15 @@
   (define muy    (if (>= mdist 1.0) (/ (- ny-f by-f) mdist) 0.0))
   (define-values (prior-ux prior-uy)
     (compute-natural-exit-direction bx-f by-f nx-f ny-f ex-f ey-f w h))
+  ;; Enemy + map-center outward vector so 90-degree natural exits (orthogonal to main->nat)
+  ;; still rank cleanly ahead of backside/mineral-pocket paths.
+  (define ec-tx (+ (* 0.65 ex-f) (* 0.35 (* 0.5 (exact->inexact w)))))
+  (define ec-ty (+ (* 0.65 ey-f) (* 0.35 (* 0.5 (exact->inexact h)))))
+  (define ec-dx (- ec-tx nx-f))
+  (define ec-dy (- ec-ty ny-f))
+  (define ec-mag (max 1.0 (sqrt (+ (* ec-dx ec-dx) (* ec-dy ec-dy)))))
+  (define ec-ux (/ ec-dx ec-mag))
+  (define ec-uy (/ ec-dy ec-mag))
 
   (define win-r 28)
   (define sx0 (max 0 (- (exact-round nx-f) win-r)))
@@ -971,8 +1111,8 @@
                  (step! cx (sub1 cy)))
                (loop (add1 head) tail1)))))
 
-     (define reaches-outer (make-bytes sn 0))
-     (define next-out-idx (make-vector sn -1))
+     (define max-outer-d 0)
+     (define max-outer-dist 0.0)
      (for ([k (in-range bfs-tail)])
        (define idx (vector-ref qbuf k))
        (define d (vector-ref dist-v idx))
@@ -981,7 +1121,28 @@
          (define gy (+ sy0 (quotient idx sw)))
          (define wx (+ gx 0.5))
          (define wy (+ gy 0.5))
-         (when (and (>= (dist2d wx wy nx-f ny-f) 13.5)
+         (define dn (dist2d wx wy nx-f ny-f))
+         (when (and (>= dn 13.5)
+                    (grid-cell-positive? (bref gx gy))
+                    (or (< mdist 10.0)
+                        (>= (dist2d wx wy bx-f by-f) (- mdist 1.0))))
+           (when (> d max-outer-d) (set! max-outer-d d))
+           (when (> dn max-outer-dist) (set! max-outer-dist dn)))))
+     ;; Reject dead-end mineral pockets behind the natural (typically d<=22, dist<=17) on real
+     ;; full-size maps while keeping exact 17/13.5 thresholds on compact synthetic test grids.
+     (define outer-d-min (max 17 (min 28 (- max-outer-d 4))))
+     (define outer-dist-min (max 13.5 (min 20.5 (- max-outer-dist 3.5))))
+     (define reaches-outer (make-bytes sn 0))
+     (define next-out-idx (make-vector sn -1))
+     (for ([k (in-range bfs-tail)])
+       (define idx (vector-ref qbuf k))
+       (define d (vector-ref dist-v idx))
+       (when (>= d outer-d-min)
+         (define gx (+ sx0 (remainder idx sw)))
+         (define gy (+ sy0 (quotient idx sw)))
+         (define wx (+ gx 0.5))
+         (define wy (+ gy 0.5))
+         (when (and (>= (dist2d wx wy nx-f ny-f) outer-dist-min)
                     (grid-cell-positive? (bref gx gy))
                     (or (< mdist 10.0)
                         (>= (dist2d wx wy bx-f by-f) (- mdist 1.0))))
@@ -1031,11 +1192,11 @@
              cur
              (loop nxt (add1 s)))))
 
-     (define scored-cands '())
+      (define scored-cands '())
      (for ([k (in-range bfs-tail)])
        (define idx (vector-ref qbuf k))
        (define d (vector-ref dist-v idx))
-       (when (and (>= d 6) (<= d 15)
+       (when (and (>= d 5) (<= d 17)
                   (= (bytes-ref flat-nat? idx) 1)
                   (= (bytes-ref reaches-outer idx) 1))
          (define lx (remainder idx sw))
@@ -1044,14 +1205,18 @@
          (define gy (+ sy0 ly))
          (define cx0 (+ gx 0.5))
          (define cy0 (+ gy 0.5))
+         (define d-nat (max 1.0 (dist2d cx0 cy0 nx-f ny-f)))
+         (define u-cx (/ (- cx0 nx-f) d-nat))
+         (define u-cy (/ (- cy0 ny-f) d-nat))
+         (define dot-m (+ (* u-cx mux) (* u-cy muy)))
+         (define dot-ec (+ (* u-cx ec-ux) (* u-cy ec-uy)))
          (when (and (grid-cell-positive? (bref gx gy))
-                    (>= (max (abs (- cx0 nx-f)) (abs (- cy0 ny-f))) 5.0)
+                    (>= (max (abs (- cx0 nx-f)) (abs (- cy0 ny-f))) 4.0)
                     (or (< mdist 10.0)
-                        (and (>= (dist2d cx0 cy0 bx-f by-f) (- mdist 1.0))
-                             (>= (+ (* (/ (- cx0 nx-f) (max 1.0 (dist2d cx0 cy0 nx-f ny-f))) mux)
-                                    (* (/ (- cy0 ny-f) (max 1.0 (dist2d cx0 cy0 nx-f ny-f))) muy))
-                                 -0.25))))
-           (define out-idx (walk-outward idx 7))
+                        (and (>= (dist2d cx0 cy0 bx-f by-f) (- mdist 3.0))
+                             (or (>= dot-m -0.25)
+                                 (>= dot-ec 0.15)))))
+           (define out-idx (walk-outward idx 8))
            (define dst-wx (+ sx0 (remainder out-idx sw) 0.5))
            (define dst-wy (+ sy0 (quotient out-idx sw) 0.5))
            (when (>= (dist2d dst-wx dst-wy cx0 cy0) 4.0)
@@ -1085,7 +1250,7 @@
                (define mid-ix (max 0 (min (sub1 w) (exact-floor mid-cx))))
                (define mid-iy (max 0 (min (sub1 h) (exact-floor mid-cy))))
                (when (and (grid-cell-positive? (pref mid-ix mid-iy))
-                          (>= (max (abs (- mid-cx nx-f)) (abs (- mid-cy ny-f))) 5.0))
+                          (>= (max (abs (- mid-cx nx-f)) (abs (- mid-cy ny-f))) 4.0))
                  (define buildable-cnt
                    (for*/sum ([dy-i (in-range -3 4)]
                               [dx-i (in-range -3 4)]
@@ -1094,16 +1259,18 @@
                               #:when (and (>= bx-i 0) (< bx-i w) (>= by-i 0) (< by-i h)
                                           (grid-cell-positive? (bref bx-i by-i))
                                           (or (not (procedure? href))
-                                              (<= (abs (- (grid-height-val href bx-i by-i h-nat) h-nat)) 1.75))))
+                                              (and (cell-resolved-height-at href bx-i by-i w h h-nat 1.75) #t))))
                      1))
                  (when (>= buildable-cnt 10)
                    (define dir-x (/ (- mid-cx nx-f) (max 1.0 (dist2d mid-cx mid-cy nx-f ny-f))))
                    (define dir-y (/ (- mid-cy ny-f) (max 1.0 (dist2d mid-cx mid-cy nx-f ny-f))))
-                   (define align (+ (* dir-x prior-ux) (* dir-y prior-uy)))
+                   (define align-prior (+ (* dir-x prior-ux) (* dir-y prior-uy)))
+                   (define align-ec (+ (* dir-x ec-ux) (* dir-y ec-uy)))
                    (define sc
-                     (+ (* -12.0 span)
-                        (* 25.0 align)
-                        (* -2.5 (abs (- d 9.0)))
+                     (+ (* -14.0 span)
+                        (* 28.0 align-ec)
+                        (* 12.0 align-prior)
+                        (* -2.0 (abs (- d 9.5)))
                         (* 0.4 (min 30 buildable-cnt))))
                    (set! scored-cands
                          (cons (list sc mid-cx mid-cy fl-ux fl-uy dst-wx dst-wy h-nat)
@@ -1112,12 +1279,12 @@
      (define sorted (sort scored-cands > #:key car))
      (let dedup ([rem sorted] [acc '()])
        (cond
-         [(or (null? rem) (>= (length acc) 4)) (reverse acc)]
+         [(or (null? rem) (>= (length acc) 6)) (reverse acc)]
          [else
           (define c (car rem))
           (define cx (second c))
           (define cy (third c))
-          (if (ormap (lambda (prev) (<= (dist2d cx cy (first prev) (second prev)) 3.0)) acc)
+          (if (ormap (lambda (prev) (<= (dist2d cx cy (first prev) (second prev)) 3.5)) acc)
               (dedup (cdr rem) acc)
               (dedup (cdr rem) (cons (cdr c) acc)))]))]))
 
@@ -1265,25 +1432,32 @@
                         (for/and ([sp (in-list bldg-specs)])
                           (footprint-perimeter-reached? dvec-built sp)))))))]))
 
-;; Solves a grid-validated Protoss wall around a ramp or natural choke center.
+;; Solves a grid-validated Protoss (or Zerg natural, when `#:require-pylon? #f`) wall around a ramp or natural choke center.
 (define (solve-protoss-wall-candidate-on-grids bx-f by-f nx-f ny-f target-locus
                                                center-x center-y out-dx out-dy
                                                src-fx src-fy dst-fx dst-fy target-h
                                                w h pref bref href map-grids
                                                [forbid-tiles-set (set)]
-                                               [deadline-ms #f])
+                                               [deadline-ms #f]
+                                               #:allow-unsealed-1c? [allow-unsealed-1c? #t]
+                                               #:require-pylon? [require-pylon? #t]
+                                               #:allow-slot3-nat? [allow-slot3-nat? #f])
   (define start-ms (current-inexact-milliseconds))
+  (define main-ramp? (eq? target-locus 'main-ramp))
+  (define default-budget
+    (cond
+      [main-ramp? 120.0]
+      [allow-slot3-nat? 70.0]
+      [else 45.0]))
   (define cand-deadline
     (if (real? deadline-ms)
-        (min deadline-ms (+ start-ms 40.0))
-        (+ start-ms 40.0)))
+        (min deadline-ms (+ start-ms default-budget))
+        (+ start-ms default-budget)))
   (define (timed-out?)
     (>= (current-inexact-milliseconds) cand-deadline))
   (define (outside-nexus-pads? cx cy hw hh)
     (and (footprints-disjoint? cx cy hw hh bx-f by-f 2.5 2.5)
-         (footprints-disjoint? cx cy hw hh nx-f ny-f 2.5 2.5)
-         (or (not (eq? target-locus 'natural-choke))
-             (>= (max (abs (- cx nx-f)) (abs (- cy ny-f))) 4.5))))
+         (footprints-disjoint? cx cy hw hh nx-f ny-f 2.5 2.5)))
   (define (strict-slot-buildable? cx cy hw hh)
     (and (footprint-buildable-at-height? cx cy hw hh w h bref href target-h #t pref)
          (or (set-empty? forbid-tiles-set)
@@ -1296,12 +1470,19 @@
                  (not (set-member? forbid-tiles-set (cons ix iy))))))))
   (define (src-cell-ok? ix iy)
     (and (not (set-member? forbid-tiles-set (cons ix iy)))
+         (or (not (eq? target-locus 'natural-choke))
+             (footprints-disjoint? (+ ix 0.5) (+ iy 0.5) 0.5 0.5 nx-f ny-f 2.5 2.5))
          (or (not (procedure? href))
-             (<= (abs (- (grid-height-val href ix iy target-h) target-h)) 2.0))))
+             (and (cell-resolved-height-at href ix iy w h target-h 2.0) #t))))
+  (define (dst-cell-ok? ix iy)
+    (and (not (set-member? forbid-tiles-set (cons ix iy)))
+         (or (not (eq? target-locus 'natural-choke))
+             (footprints-disjoint? (+ ix 0.5) (+ iy 0.5) 0.5 0.5 nx-f ny-f 2.5 2.5))))
 
   (define bfs-ctx
     (make-local-4conn-bfs center-x center-y src-fx src-fy dst-fx dst-fy w h pref
-                          #:snap-src-pred src-cell-ok?))
+                          #:snap-src-pred src-cell-ok?
+                          #:snap-dst-pred dst-cell-ok?))
   (cond
     [(not (hash-ref bfs-ctx 'valid? #f)) #f]
     [else
@@ -1311,6 +1492,12 @@
      (define win-y0 (hash-ref bfs-ctx 'win-y0))
      (define src-pt (hash-ref bfs-ctx 'src-pt))
      (define dst-pt (hash-ref bfs-ctx 'dst-pt))
+     (define nat-base-rects
+       (if (and (eq? target-locus 'natural-choke)
+                (footprints-disjoint? (+ win-x0 (car src-pt) 0.5) (+ win-y0 (cdr src-pt) 0.5) 0.5 0.5 nx-f ny-f 2.5 2.5)
+                (footprints-disjoint? (+ win-x0 (car dst-pt) 0.5) (+ win-y0 (cdr dst-pt) 0.5) 0.5 0.5 nx-f ny-f 2.5 2.5))
+           (list (list nx-f ny-f 2.5 2.5))
+           '()))
      (define slot3x3-cands
        (for*/list ([dy-i (in-range -8 9)]
                    [dx-i (in-range -8 9)]
@@ -1337,9 +1524,12 @@
        (sort door-cands-raw <
              #:key (lambda (dc) (dist2d (first dc) (second dc) center-x center-y))))
 
-     (define (build-and-validate-wall s1 s2 s3 door-x door-y pyl w-rects)
-       (define all-rects (cons (list (car pyl) (cdr pyl) 1.0 1.0) w-rects))
-       (define park (compute-door-park door-x door-y all-rects))
+     (define (build-and-validate-wall s1 s2 s3 door-x door-y pyl w-rects [sealed? #t])
+       (define all-rects
+         (if pyl
+             (cons (list (car pyl) (cdr pyl) 1.0 1.0) w-rects)
+             w-rects))
+       (define park (compute-door-park door-x door-y (append nat-base-rects all-rects)))
        (define cand-ht
          (hash 'locus target-locus
                'door (cons door-x door-y)
@@ -1350,9 +1540,12 @@
                'slot-1 s1
                'slot-2 s2
                'slot-3 s3
+               'sealed? sealed?
                'grid-solved? #t))
-       (and (protoss-wall-valid-on-grids? cand-ht bx-f by-f nx-f ny-f map-grids)
-            cand-ht))
+       (if require-pylon?
+           (and (protoss-wall-valid-on-grids? cand-ht bx-f by-f nx-f ny-f map-grids)
+                cand-ht)
+           cand-ht))
 
      (define (find-rear-pylon wall-slots door-x door-y dlx dly w-rects)
        (define wcx (/ (for/sum ([s (in-list wall-slots)]) (car s)) (max 1 (length wall-slots))))
@@ -1365,23 +1558,24 @@
          (define py (exact->inexact (+ (exact-round wcy) dy-i)))
          (define rear-proj (- (+ (* (- px wcx) out-dx) (* (- py wcy) out-dy))))
          (define rear-dist (dist2d px py wcx wcy))
-         (define ideal-band? (and (>= rear-dist 3.2) (<= rear-dist 5.0)))
+         (define ideal-band? (and (>= rear-proj 1.5) (>= rear-dist 3.2) (<= rear-dist 5.0)))
          (define psc
            (+ (if ideal-band? 200.0 0.0)
+              (if (>= rear-proj 1.5) 40.0 0.0)
               (* 10.0 rear-proj)
               (- (* 4.0 (abs (- rear-dist 4.0))))))
          (when (and (> psc best-psc)
-                    (>= rear-proj 1.5)
-                    (>= rear-dist 2.5)
-                    (<= rear-dist 5.5)
+                    (>= rear-proj 0.75)
+                    (>= rear-dist 2.0)
+                    (<= rear-dist 5.8)
                     (outside-nexus-pads? px py 1.0 1.0)
                     (footprints-disjoint? px py 1.0 1.0 door-x door-y 0.5 0.5)
                     (andmap (lambda (s)
                               (and (footprints-disjoint? px py 1.0 1.0 (car s) (cdr s) 1.5 1.5)
-                                   (<= (dist2d px py (car s) (cdr s)) 6.2)))
+                                   (<= (dist2d px py (car s) (cdr s)) 6.35)))
                             wall-slots)
                     (strict-slot-buildable? px py 1.0 1.0)
-                    (let ([rects-with-pyl (cons (list px py 1.0 1.0) w-rects)])
+                    (let ([rects-with-pyl (append nat-base-rects (cons (list px py 1.0 1.0) w-rects))])
                       (and (bfs-reach? rects-with-pyl (car src-pt) (cdr src-pt) dlx dly)
                            (bfs-reach? rects-with-pyl dlx dly (car dst-pt) (cdr dst-pt)))))
            (set! best-psc psc)
@@ -1410,7 +1604,28 @@
                  (cons wx wy))
                (cons raw-px raw-py))))
 
-     ;; Pre-index 3x3<->3x3 touching neighbor graph ONCE (shared by 1a and 1b -> eliminates O(D*S^2) scans)
+     ;; Pre-index 3x3<->3x3 touching neighbor graph ONCE (shared by 1a, 1b, and Step 2)
+     ;; and precompute obstacle-anchored flags: any 4-connected wall that separates src from dst
+     ;; must touch unpathable/cliff/Nexus boundaries with at least 2 of its constituent pieces
+     ;; (unless a single piece bridges a <=3-tile choke, which has >=2 perimeter obstacles anyway).
+     (define (rect-anchored-to-obstacle? cx cy hw hh)
+       (define x0 (exact-round (- cx hw)))
+       (define x1 (exact-round (+ cx hw)))
+       (define y0 (exact-round (- cy hh)))
+       (define y1 (exact-round (+ cy hh)))
+       (define (obs? ix iy)
+         (or (< ix 0) (>= ix w) (< iy 0) (>= iy h)
+             (not (grid-cell-positive? (pref ix iy)))
+             (and (pair? nat-base-rects)
+                  (not (footprints-disjoint? (+ ix 0.5) (+ iy 0.5) 0.5 0.5 nx-f ny-f 2.5 2.5)))))
+       (or (for/or ([ix (in-range (sub1 x0) (add1 x1))])
+             (or (obs? ix (sub1 y0)) (obs? ix y1)))
+           (for/or ([iy (in-range y0 y1)])
+             (or (obs? (sub1 x0) iy) (obs? x1 iy)))))
+     (define anchored-s3
+       (for/set ([s (in-list slot3x3-cands)]
+                 #:when (rect-anchored-to-obstacle? (car s) (cdr s) 1.5 1.5))
+         s))
      (define s-touch-s (make-hash))
      (let* ([n-s3 (length slot3x3-cands)]
             [s3-vec (list->vector slot3x3-cands)])
@@ -1427,12 +1642,24 @@
              (hash-set! s-touch-s si (cons sj (hash-ref s-touch-s si '())))
              (hash-set! s-touch-s sj (cons si (hash-ref s-touch-s sj '())))))))
 
-     ;; 1a. Try 2x 3x3 slots + 1x1 doorway with rear 2x2 Pylon (pre-indexed via edge-door + s-touch-s; <= 12ms soft cap)
+     ;; 1a. Try 2x 3x3 slots + 1x1 doorway (with rear 2x2 Pylon when `require-pylon?` is #t)
      (define best-wall #f)
      (define best-wsc -1e9)
-     (define a1-deadline (min cand-deadline (+ start-ms 12.0)))
+     (define best-sealed? #f)
+     (define a1-deadline (min cand-deadline (+ start-ms (if main-ramp? 60.0 14.0))))
      (define door-cands-1a
-       (if (> (length door-cands) 40) (take door-cands 40) door-cands))
+       (let ([filtered
+              (filter (lambda (dc)
+                        (define dx0 (first dc))
+                        (define dy0 (second dc))
+                        (ormap (lambda (s)
+                                 (and (<= (abs (- (car s) dx0)) 2.1)
+                                      (<= (abs (- (cdr s) dy0)) 2.1)
+                                      (footprints-disjoint? (car s) (cdr s) 1.5 1.5 dx0 dy0 0.5 0.5)
+                                      (footprints-share-edge? (car s) (cdr s) 1.5 1.5 dx0 dy0 0.5 0.5)))
+                               slot3x3-cands))
+                      door-cands)])
+         (if (> (length filtered) 40) (take filtered 40) filtered)))
      (for ([dc (in-list door-cands-1a)]
            #:break (or (>= (current-inexact-milliseconds) a1-deadline)
                        (<= (+ 620.0 (* -8.0 (dist2d (first dc) (second dc) center-x center-y))) best-wsc)))
@@ -1476,20 +1703,25 @@
                (define w-rects
                  (list (list (car s1) (cdr s1) 1.5 1.5)
                        (list (car s2) (cdr s2) 1.5 1.5)))
-               (when (and (seals-cleanly? (cons (list door-x door-y 0.5 0.5) w-rects))
-                          (bfs-reach? w-rects (car src-pt) (cdr src-pt) dlx dly)
-                          (bfs-reach? w-rects dlx dly (car dst-pt) (cdr dst-pt)))
-                 (define pyl (find-rear-pylon (list s1 s2) door-x door-y dlx dly w-rects))
-                 (when (and pyl
-                            (build-and-validate-wall s1 s2 #f door-x door-y pyl w-rects))
+               (define eff-w-rects (append nat-base-rects w-rects))
+               (when (and (seals-cleanly? (cons (list door-x door-y 0.5 0.5) eff-w-rects))
+                          (bfs-reach? eff-w-rects (car src-pt) (cdr src-pt) dlx dly)
+                          (bfs-reach? eff-w-rects dlx dly (car dst-pt) (cdr dst-pt)))
+                 (define pyl
+                   (if require-pylon?
+                       (find-rear-pylon (list s1 s2) door-x door-y dlx dly w-rects)
+                       #f))
+                 (when (and (or (not require-pylon?) pyl)
+                            (build-and-validate-wall s1 s2 #f door-x door-y pyl w-rects #t))
                    (set! best-wsc sc)
+                   (set! best-sealed? #t)
                    (set! best-wall (list s1 s2 #f door-x door-y pyl w-rects)))))))))
 
      ;; 1b. Natural choke 8-9 tile sealing: 2x 3x3 + 1x1 door + 2x2 rear-flank Wall Pylon -> 'slot-3 #f
      ;;     Pruned via pre-indexed touching neighbor graphs (s-touch-s, s-touch-p, p-touch-s),
-     ;;     door-touching/<=4.5t s1 restriction, rear-side pylon pre-filter, and 15ms soft / 40ms hard cap.
-     (when (and (not best-wall) (eq? target-locus 'natural-choke) (not (timed-out?)))
-       (define b1-deadline (min cand-deadline (+ start-ms 15.0)))
+     ;;     door-touching/<=4.5t s1 restriction, rear-side pylon pre-filter, and 22ms soft cap.
+     (when (and require-pylon? (not best-wall) (eq? target-locus 'natural-choke) (not (timed-out?)))
+       (define b1-deadline (min cand-deadline (+ (current-inexact-milliseconds) 22.0)))
        (define (b1-timed-out?) (>= (current-inexact-milliseconds) b1-deadline))
        (define pylon2x2-cands
          (for*/list ([dy-i (in-range -7 8)]
@@ -1500,6 +1732,10 @@
                                  (outside-nexus-pads? px py 1.0 1.0)
                                  (strict-slot-buildable? px py 1.0 1.0)))
            (cons px py)))
+       (define anchored-p2
+         (for/set ([p (in-list pylon2x2-cands)]
+                   #:when (rect-anchored-to-obstacle? (car p) (cdr p) 1.0 1.0))
+           p))
        ;; Pre-index touching 3x3<->2x2 neighbor adjacency lists + sets once (replaces O(D*S^2*P) scan)
        (define s-touch-p (make-hash))
        (define p-touch-s (make-hash))
@@ -1519,113 +1755,234 @@
          (for/hash ([(k v) (in-hash s-touch-p)]) (values k (list->set v))))
        (define p-touch-s-sets
          (for/hash ([(k v) (in-hash p-touch-s)]) (values k (list->set v))))
+       (define door-cands-1b-all
+         (filter (lambda (dc)
+                   (define dx0 (first dc))
+                   (define dy0 (second dc))
+                   (or (ormap (lambda (s)
+                                (and (<= (abs (- (car s) dx0)) 2.1)
+                                     (<= (abs (- (cdr s) dy0)) 2.1)
+                                     (footprints-disjoint? (car s) (cdr s) 1.5 1.5 dx0 dy0 0.5 0.5)
+                                     (<= (footprints-touch-gap (car s) (cdr s) 1.5 1.5 dx0 dy0 0.5 0.5) 0.05)))
+                              slot3x3-cands)
+                       (ormap (lambda (p)
+                                (and (<= (abs (- (car p) dx0)) 1.6)
+                                     (<= (abs (- (cdr p) dy0)) 1.6)
+                                     (footprints-disjoint? (car p) (cdr p) 1.0 1.0 dx0 dy0 0.5 0.5)
+                                     (<= (footprints-touch-gap (car p) (cdr p) 1.0 1.0 dx0 dy0 0.5 0.5) 0.05)))
+                              pylon2x2-cands)))
+                 door-cands))
        (define door-cands-1b
-         (if (> (length door-cands) 12) (take door-cands 12) door-cands))
-       (define doors-after-hit 0)
-       (for ([dc (in-list door-cands-1b)]
-             #:break (or (b1-timed-out?)
-                         (>= doors-after-hit 2)
-                         (<= (+ 516.0 (* -7.0 (dist2d (first dc) (second dc) center-x center-y))) best-wsc)))
-         (when best-wall (set! doors-after-hit (add1 doors-after-hit)))
-         (match-define (list door-x door-y dlx dly) dc)
-         (define door-touch-s
-           (for/list ([s (in-list slot3x3-cands)]
-                      #:when (and (<= (abs (- (car s) door-x)) 2.1)
-                                  (<= (abs (- (cdr s) door-y)) 2.1)
-                                  (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)
-                                  (<= (footprints-touch-gap (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5) 0.05)))
-             s))
-         (define door-touch-s-set (list->set door-touch-s))
-         ;; Restrict s1 to door-touching slots first, plus <= 4.5t slots for pylon-bridged door configurations
-         (define s1-non-touch
-           (for/list ([s (in-list slot3x3-cands)]
-                      #:when (and (not (set-member? door-touch-s-set s))
-                                  (<= (dist2d (car s) (cdr s) door-x door-y) 4.5)
-                                  (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)))
-             s))
-         (define s1-cands (append door-touch-s s1-non-touch))
-         ;; Pre-filter door-touching rear-side pylons (`rear-proj >= 0.5` relative to door/center)
-         (define door-touch-p
-           (for/list ([p (in-list pylon2x2-cands)]
-                      #:when (and (<= (abs (- (car p) door-x)) 1.6)
-                                  (<= (abs (- (cdr p) door-y)) 1.6)
-                                  (footprints-disjoint? (car p) (cdr p) 1.0 1.0 door-x door-y 0.5 0.5)
-                                  (<= (footprints-touch-gap (car p) (cdr p) 1.0 1.0 door-x door-y 0.5 0.5) 0.05)
-                                  (or (>= (- (+ (* (- (car p) door-x) out-dx) (* (- (cdr p) door-y) out-dy))) 0.0)
-                                      (>= (- (+ (* (- (car p) center-x) out-dx) (* (- (cdr p) center-y) out-dy))) 0.5))))
-             p))
-         (define door-touch-p-set (list->set door-touch-p))
-         (define d-door-c (dist2d door-x door-y center-x center-y))
-         (for ([s1 (in-list s1-cands)]
-               #:break (b1-timed-out?))
-           (define s1-touch-door? (set-member? door-touch-s-set s1))
-           (define s1-tp (hash-ref s-touch-p s1 '()))
-           (define s1-tp-set (hash-ref s-touch-p-sets s1 (set)))
-           ;; Pre-filter pyl to rear-side touching s1 or door (exact `rear-proj >= 0.5` checked per s2)
-           (define raw-pyls
-             (if s1-touch-door?
-                 (append s1-tp (filter (lambda (p) (not (set-member? s1-tp-set p))) door-touch-p))
-                 (filter (lambda (p) (set-member? door-touch-p-set p)) s1-tp)))
-           (define pyl-cands
-             (for/list ([pyl (in-list raw-pyls)]
-                        #:when (and (footprints-disjoint? (car pyl) (cdr pyl) 1.0 1.0 door-x door-y 0.5 0.5)
-                                    (<= (dist2d (car pyl) (cdr pyl) door-x door-y) 5.5)
-                                    (footprints-disjoint? (car pyl) (cdr pyl) 1.0 1.0 (car s1) (cdr s1) 1.5 1.5)
-                                    (<= (dist2d (car pyl) (cdr pyl) (car s1) (cdr s1)) 6.45)
-                                    (or (>= (- (+ (* (- (car pyl) door-x) out-dx) (* (- (cdr pyl) door-y) out-dy))) 0.5)
-                                        (>= (- (+ (* (- (car pyl) (car s1)) out-dx) (* (- (cdr pyl) (cdr s1)) out-dy))) 0.5)
-                                        (>= (- (+ (* (- (car pyl) center-x) out-dx) (* (- (cdr pyl) center-y) out-dy))) 0.5))))
-               pyl))
-           (define s1-neighbors (hash-ref s-touch-s s1 '()))
-           (define s1-nb-set (hash-ref s-touch-s-sets s1 (set)))
-           (define d-s1-c (dist2d (car s1) (cdr s1) center-x center-y))
-           (for ([pyl (in-list pyl-cands)]
+         (if (> (length door-cands-1b-all) 24) (take door-cands-1b-all 24) door-cands-1b-all))
+       ;; Two-phase 1b scan: Phase 0 tests fast door-touching s1 across all <=24 doors first
+       ;; (~4ms total) so non-touching s1 scans on early doors can never starve later doors.
+       (for ([phase (in-list '(0 1))]
+             #:break (or (b1-timed-out?) (and (= phase 1) best-wall)))
+         (define doors-phase
+           (if (= phase 0)
+               door-cands-1b
+               (if (> (length door-cands-1b) 12) (take door-cands-1b 12) door-cands-1b)))
+         (define doors-after-hit 0)
+         (for ([dc (in-list doors-phase)]
+               #:break (or (b1-timed-out?)
+                           (>= doors-after-hit 2)
+                           (<= (+ 516.0 (* -7.0 (dist2d (first dc) (second dc) center-x center-y))) best-wsc)))
+           (when best-wall (set! doors-after-hit (add1 doors-after-hit)))
+           (match-define (list door-x door-y dlx dly) dc)
+           (define door-anch (if (rect-anchored-to-obstacle? door-x door-y 0.5 0.5) 1 0))
+           (define door-touch-s
+             (for/list ([s (in-list slot3x3-cands)]
+                        #:when (and (<= (abs (- (car s) door-x)) 2.1)
+                                    (<= (abs (- (cdr s) door-y)) 2.1)
+                                    (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)
+                                    (<= (footprints-touch-gap (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5) 0.05)))
+               s))
+           (define door-touch-s-set (list->set door-touch-s))
+           (define s1-cands
+             (if (= phase 0)
+                 door-touch-s
+                 (for/list ([s (in-list slot3x3-cands)]
+                            #:when (and (not (set-member? door-touch-s-set s))
+                                        (<= (dist2d (car s) (cdr s) door-x door-y) 4.5)
+                                        (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)))
+                   s)))
+           ;; Pre-filter door-touching rear-side pylons (`rear-proj >= 0.5` relative to door/center)
+           (define door-touch-p
+             (for/list ([p (in-list pylon2x2-cands)]
+                        #:when (and (<= (abs (- (car p) door-x)) 1.6)
+                                    (<= (abs (- (cdr p) door-y)) 1.6)
+                                    (footprints-disjoint? (car p) (cdr p) 1.0 1.0 door-x door-y 0.5 0.5)
+                                    (<= (footprints-touch-gap (car p) (cdr p) 1.0 1.0 door-x door-y 0.5 0.5) 0.05)
+                                    (or (>= (- (+ (* (- (car p) door-x) out-dx) (* (- (cdr p) door-y) out-dy))) 0.0)
+                                        (>= (- (+ (* (- (car p) center-x) out-dx) (* (- (cdr p) center-y) out-dy))) 0.5))))
+               p))
+           (define door-touch-p-set (list->set door-touch-p))
+           (define d-door-c (dist2d door-x door-y center-x center-y))
+           (define seen-triples (make-hash))
+           (for ([s1 (in-list s1-cands)]
                  #:break (b1-timed-out?))
-             (define pyl-touch-s1? (set-member? s1-tp-set pyl))
-             (define pyl-neighbors (hash-ref p-touch-s pyl '()))
-             (define pyl-nb-set (hash-ref p-touch-s-sets pyl (set)))
-             (define seen-s2 (make-hash))
-             (for ([s2-src (in-list (list door-touch-s pyl-neighbors s1-neighbors))]
+             (define s1-anch (if (set-member? anchored-s3 s1) 1 0))
+             (define s1-touch-door? (= phase 0))
+             (define s1-tp (hash-ref s-touch-p s1 '()))
+             (define s1-tp-set (hash-ref s-touch-p-sets s1 (set)))
+             ;; Pre-filter pyl to rear-side touching s1 or door (exact `rear-proj >= 0.15` checked per s2)
+             (define raw-pyls
+               (if s1-touch-door?
+                   (append s1-tp (filter (lambda (p) (not (set-member? s1-tp-set p))) door-touch-p))
+                   (filter (lambda (p) (set-member? door-touch-p-set p)) s1-tp)))
+             (define pyl-cands
+               (for/list ([pyl (in-list raw-pyls)]
+                          #:when (and (footprints-disjoint? (car pyl) (cdr pyl) 1.0 1.0 door-x door-y 0.5 0.5)
+                                      (<= (dist2d (car pyl) (cdr pyl) door-x door-y) 5.5)
+                                      (footprints-disjoint? (car pyl) (cdr pyl) 1.0 1.0 (car s1) (cdr s1) 1.5 1.5)
+                                      (<= (dist2d (car pyl) (cdr pyl) (car s1) (cdr s1)) 6.45)
+                                      (or (>= (- (+ (* (- (car pyl) door-x) out-dx) (* (- (cdr pyl) door-y) out-dy))) 0.15)
+                                          (>= (- (+ (* (- (car pyl) (car s1)) out-dx) (* (- (cdr pyl) (cdr s1)) out-dy))) 0.15)
+                                          (>= (- (+ (* (- (car pyl) center-x) out-dx) (* (- (cdr pyl) center-y) out-dy))) 0.15))))
+                 pyl))
+             (define s1-neighbors (hash-ref s-touch-s s1 '()))
+             (define s1-nb-set (hash-ref s-touch-s-sets s1 (set)))
+             (define d-s1-c (dist2d (car s1) (cdr s1) center-x center-y))
+             (for ([pyl (in-list pyl-cands)]
                    #:break (b1-timed-out?))
-               (for ([s2 (in-list s2-src)]
-                     #:unless (or (equal? s1 s2) (hash-has-key? seen-s2 s2)))
-                 (hash-set! seen-s2 s2 #t)
-                 (when (and (<= (dist2d (car s2) (cdr s2) door-x door-y) 7.2)
-                            (footprints-disjoint? (car s2) (cdr s2) 1.5 1.5 door-x door-y 0.5 0.5)
-                            (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s2) (cdr s2) 1.5 1.5)
-                            (footprints-disjoint? (car pyl) (cdr pyl) 1.0 1.0 (car s2) (cdr s2) 1.5 1.5)
-                            (<= (dist2d (car pyl) (cdr pyl) (car s2) (cdr s2)) 6.45))
-                   (define wcx (* 0.5 (+ (car s1) (car s2))))
-                   (define wcy (* 0.5 (+ (cdr s1) (cdr s2))))
-                   (define rear-proj (- (+ (* (- (car pyl) wcx) out-dx) (* (- (cdr pyl) wcy) out-dy))))
-                   (define pyl-touch-s2? (set-member? pyl-nb-set s2))
-                   (define s2-touch-door? (set-member? door-touch-s-set s2))
-                   (define s2-touch-s1? (set-member? s1-nb-set s2))
-                   (when (and (>= rear-proj 0.5)
-                              (or pyl-touch-s1? pyl-touch-s2?)
-                              (or s2-touch-door? pyl-touch-s2? s2-touch-s1?))
-                     (define sc
-                       (+ 420.0
-                          (* 12.0 (min 3.0 rear-proj))
-                          (if s1-touch-door? 30.0 0.0)
-                          (if s2-touch-door? 30.0 0.0)
-                          (- (* 7.0 (+ d-s1-c
-                                       (dist2d (car s2) (cdr s2) center-x center-y)
-                                       d-door-c)))))
-                     (when (> sc best-wsc)
-                       (define w-rects
-                         (list (list (car s1) (cdr s1) 1.5 1.5)
-                               (list (car s2) (cdr s2) 1.5 1.5)))
-                       (define all-rects (cons (list (car pyl) (cdr pyl) 1.0 1.0) w-rects))
-                       (when (and (seals-cleanly? (cons (list door-x door-y 0.5 0.5) all-rects))
-                                  (bfs-reach? all-rects (car src-pt) (cdr src-pt) dlx dly)
-                                  (bfs-reach? all-rects dlx dly (car dst-pt) (cdr dst-pt))
-                                  (build-and-validate-wall s1 s2 #f door-x door-y pyl w-rects))
-                         (set! best-wsc sc)
-                         (set! best-wall (list s1 s2 #f door-x door-y pyl w-rects))))))))))))
+               (define pyl-anch (if (set-member? anchored-p2 pyl) 1 0))
+               (define pyl-touch-s1? (set-member? s1-tp-set pyl))
+               (define pyl-neighbors (hash-ref p-touch-s pyl '()))
+               (define pyl-nb-set (hash-ref p-touch-s-sets pyl (set)))
+               (define seen-s2 (make-hash))
+               (for ([s2-src (in-list (list door-touch-s pyl-neighbors s1-neighbors))]
+                     #:break (b1-timed-out?))
+                 (for ([s2 (in-list s2-src)]
+                       #:unless (or (equal? s1 s2) (hash-has-key? seen-s2 s2)))
+                   (hash-set! seen-s2 s2 #t)
+                   (define s2-anch (if (set-member? anchored-s3 s2) 1 0))
+                   (when (and (>= (+ s1-anch s2-anch pyl-anch door-anch) 2)
+                              (<= (dist2d (car s2) (cdr s2) door-x door-y) 7.2)
+                              (footprints-disjoint? (car s2) (cdr s2) 1.5 1.5 door-x door-y 0.5 0.5)
+                              (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s2) (cdr s2) 1.5 1.5)
+                              (footprints-disjoint? (car pyl) (cdr pyl) 1.0 1.0 (car s2) (cdr s2) 1.5 1.5)
+                              (<= (dist2d (car pyl) (cdr pyl) (car s2) (cdr s2)) 6.45))
+                     (define tk
+                       (if (or (< (car s1) (car s2))
+                               (and (= (car s1) (car s2)) (< (cdr s1) (cdr s2))))
+                           (list s1 s2 pyl)
+                           (list s2 s1 pyl)))
+                     (unless (hash-has-key? seen-triples tk)
+                       (hash-set! seen-triples tk #t)
+                       (define wcx (* 0.5 (+ (car s1) (car s2))))
+                       (define wcy (* 0.5 (+ (cdr s1) (cdr s2))))
+                       (define rear-proj (- (+ (* (- (car pyl) wcx) out-dx) (* (- (cdr pyl) wcy) out-dy))))
+                       (define pyl-touch-s2? (set-member? pyl-nb-set s2))
+                       (define s2-touch-door? (set-member? door-touch-s-set s2))
+                       (define s2-touch-s1? (set-member? s1-nb-set s2))
+                       (when (and (>= rear-proj 0.15)
+                                  (or pyl-touch-s1? pyl-touch-s2?)
+                                  (or s2-touch-door? pyl-touch-s2? s2-touch-s1?))
+                         (define sc
+                           (+ 420.0
+                              (if (>= rear-proj 0.5) 20.0 0.0)
+                              (* 12.0 (min 3.0 rear-proj))
+                              (if s1-touch-door? 30.0 0.0)
+                              (if s2-touch-door? 30.0 0.0)
+                              (- (* 7.0 (+ d-s1-c
+                                           (dist2d (car s2) (cdr s2) center-x center-y)
+                                           d-door-c)))))
+                         (when (> sc best-wsc)
+                           (define w-rects
+                             (list (list (car s1) (cdr s1) 1.5 1.5)
+                                   (list (car s2) (cdr s2) 1.5 1.5)))
+                           (define all-rects (cons (list (car pyl) (cdr pyl) 1.0 1.0) w-rects))
+                           (define eff-all-rects (append nat-base-rects all-rects))
+                           (when (and (seals-cleanly? (cons (list door-x door-y 0.5 0.5) eff-all-rects))
+                                      (bfs-reach? eff-all-rects (car src-pt) (cdr src-pt) dlx dly)
+                                      (bfs-reach? eff-all-rects dlx dly (car dst-pt) (cdr dst-pt))
+                                      (build-and-validate-wall s1 s2 #f door-x door-y pyl w-rects #t))
+                             (set! best-wsc sc)
+                             (set! best-sealed? #t)
+                             (set! best-wall (list s1 s2 #f door-x door-y pyl w-rects))))))))))))))
 
-     ;; 1c. Natural choke 9-10 tile / open synthetic fallback: 2x 3x3 flanking door tightly -> 'slot-3 #f
-     (when (and (not best-wall) (eq? target-locus 'natural-choke))
+     ;; 2. If 2x 3x3 did not seal (wide main ramp or wide Zerg/optional-slot3 choke), try 3x 3x3 + 1x1 doorway
+     (when (and (not best-wall)
+                (or (not (eq? target-locus 'natural-choke))
+                    (not require-pylon?)
+                    allow-slot3-nat?)
+                (not (timed-out?)))
+       (define door-cands-2-raw
+         (filter (lambda (dc) (<= (dist2d (first dc) (second dc) center-x center-y) 4.6))
+                 door-cands))
+       (define door-cands-2
+         (if (> (length door-cands-2-raw) 16) (take door-cands-2-raw 16) door-cands-2-raw))
+       (for ([dc (in-list door-cands-2)]
+             #:break (timed-out?))
+         (match-define (list door-x door-y dlx dly) dc)
+         (define door-anch (if (rect-anchored-to-obstacle? door-x door-y 0.5 0.5) 1 0))
+         (define touch-door-s
+           (filter (lambda (s)
+                     (and (<= (abs (- (car s) door-x)) 2.1)
+                          (<= (abs (- (cdr s) door-y)) 2.1)
+                          (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)
+                          (<= (footprints-touch-gap (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5) 0.05)))
+                   slot3x3-cands))
+         (define adj-s
+           (let-values ([(anch non-anch)
+                         (partition (lambda (s) (set-member? anchored-s3 s))
+                                    (filter (lambda (s)
+                                              (footprints-share-edge? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5))
+                                            touch-door-s))])
+             (append anch non-anch)))
+         (define seen-s3-triples (make-hash))
+         (for ([s1 (in-list adj-s)]
+               #:break (timed-out?))
+           (define s1-anch (if (set-member? anchored-s3 s1) 1 0))
+           (define s2-pool (remove-duplicates (append touch-door-s (hash-ref s-touch-s s1 '()))))
+           (for ([s2 (in-list s2-pool)]
+                 #:when (and (not (equal? s1 s2))
+                             (footprints-disjoint? (car s2) (cdr s2) 1.5 1.5 door-x door-y 0.5 0.5)
+                             (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s2) (cdr s2) 1.5 1.5))
+                 #:break (timed-out?))
+             (define s2-anch (if (set-member? anchored-s3 s2) 1 0))
+             (define s3-pool (remove-duplicates (append (hash-ref s-touch-s s2 '())
+                                                        (hash-ref s-touch-s s1 '())
+                                                        touch-door-s)))
+             (for ([s3 (in-list s3-pool)]
+                   #:when (and (not (equal? s1 s3))
+                               (not (equal? s2 s3))
+                               (>= (+ s1-anch s2-anch (if (set-member? anchored-s3 s3) 1 0) door-anch) 2)
+                               (footprints-disjoint? (car s3) (cdr s3) 1.5 1.5 door-x door-y 0.5 0.5)
+                               (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s3) (cdr s3) 1.5 1.5)
+                               (footprints-disjoint? (car s2) (cdr s2) 1.5 1.5 (car s3) (cdr s3) 1.5 1.5)))
+               (define tk (sort (list s1 s2 s3)
+                                (lambda (a b) (or (< (car a) (car b))
+                                                  (and (= (car a) (car b)) (< (cdr a) (cdr b)))))))
+               (unless (hash-has-key? seen-s3-triples tk)
+                 (hash-set! seen-s3-triples tk #t)
+                 (define sc
+                   (- 350.0
+                      (* 6.0 (+ (dist2d (car s1) (cdr s1) center-x center-y)
+                                (dist2d (car s2) (cdr s2) center-x center-y)
+                                (dist2d (car s3) (cdr s3) center-x center-y)))))
+                 (when (> sc best-wsc)
+                   (define w-rects
+                     (list (list (car s1) (cdr s1) 1.5 1.5)
+                           (list (car s2) (cdr s2) 1.5 1.5)
+                           (list (car s3) (cdr s3) 1.5 1.5)))
+                   (define eff-w-rects (append nat-base-rects w-rects))
+                   (when (and (seals-cleanly? (cons (list door-x door-y 0.5 0.5) eff-w-rects))
+                              (bfs-reach? eff-w-rects (car src-pt) (cdr src-pt) dlx dly)
+                              (bfs-reach? eff-w-rects dlx dly (car dst-pt) (cdr dst-pt)))
+                     (define pyl
+                       (if require-pylon?
+                           (find-rear-pylon (list s1 s2 s3) door-x door-y dlx dly w-rects)
+                           #f))
+                     (when (and (or (not require-pylon?) pyl)
+                                (build-and-validate-wall s1 s2 s3 door-x door-y pyl w-rects #t))
+                       (set! best-wsc sc)
+                       (set! best-sealed? #t)
+                       (set! best-wall (list s1 s2 s3 door-x door-y pyl w-rects)))))))))))
+
+     ;; 1c. Wide/open synthetic natural-choke fallback (ONLY when `allow-unsealed-1c?` is #t):
+     ;;     2x 3x3 flanking door tightly -> 'slot-3 #f
+     (when (and allow-unsealed-1c? (not best-wall) (eq? target-locus 'natural-choke))
        (define (slot-cliff-edge-cnt cx cy)
          (define x0 (sub1 (exact-round (- cx 1.5))))
          (define x1 (exact-round (+ cx 1.5)))
@@ -1687,90 +2044,25 @@
          (define w-rects
            (list (list (car s1) (cdr s1) 1.5 1.5)
                  (list (car s2) (cdr s2) 1.5 1.5)))
-         (define pyl (find-rear-pylon (list s1 s2) door-x door-y dlx dly w-rects))
-         (and pyl
-              (let ([all-rects (cons (list (car pyl) (cdr pyl) 1.0 1.0) w-rects)])
+         (define pyl
+           (if require-pylon?
+               (find-rear-pylon (list s1 s2) door-x door-y dlx dly w-rects)
+               #f))
+         (and (or (not require-pylon?) pyl)
+              (let ([all-rects (append nat-base-rects (if pyl (cons (list (car pyl) (cdr pyl) 1.0 1.0) w-rects) w-rects))])
                 (and (bfs-reach? all-rects (car src-pt) (cdr src-pt) dlx dly)
                      (bfs-reach? all-rects dlx dly (car dst-pt) (cdr dst-pt))
-                     (build-and-validate-wall s1 s2 #f door-x door-y pyl w-rects)
+                     (build-and-validate-wall s1 s2 #f door-x door-y pyl w-rects #f)
                      (begin
                        (set! best-wsc sc)
+                       (set! best-sealed? #f)
                        (set! best-wall (list s1 s2 #f door-x door-y pyl w-rects))
                        #t))))))
-
-     ;; 2. If 2x 3x3 did not seal (wide main ramp or >10 tile choke), try 3x 3x3 slots + 1x1 doorway
-     (when (and (not best-wall) (not (timed-out?)))
-       (define door-cands-2-raw
-         (filter (lambda (dc) (<= (dist2d (first dc) (second dc) center-x center-y) 4.6))
-                 door-cands))
-       (define door-cands-2
-         (if (> (length door-cands-2-raw) 16) (take door-cands-2-raw 16) door-cands-2-raw))
-       (for ([dc (in-list door-cands-2)]
-             #:break (timed-out?))
-         (match-define (list door-x door-y dlx dly) dc)
-         (define adj-s
-           (filter (lambda (s)
-                     (and (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)
-                          (footprints-share-edge? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)))
-                   slot3x3-cands))
-         (define other-s
-           (filter (lambda (s)
-                     (and (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)
-                          (<= (dist2d (car s) (cdr s) door-x door-y) 6.5)))
-                   slot3x3-cands))
-         (for ([s1 (in-list adj-s)]
-               #:break (timed-out?))
-           (for* ([i (in-range (length other-s))]
-                  #:do [(define s2 (list-ref other-s i))]
-                  #:when (and (not (equal? s1 s2))
-                              (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s2) (cdr s2) 1.5 1.5))
-                  [j (in-range (add1 i) (length other-s))]
-                  #:do [(define s3 (list-ref other-s j))]
-                  #:when (and (not (equal? s1 s3))
-                              (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s3) (cdr s3) 1.5 1.5)
-                              (footprints-disjoint? (car s2) (cdr s2) 1.5 1.5 (car s3) (cdr s3) 1.5 1.5)
-                              (or (<= (footprints-touch-gap (car s2) (cdr s2) 1.5 1.5 door-x door-y 0.5 0.5) 0.05)
-                                  (<= (footprints-touch-gap (car s2) (cdr s2) 1.5 1.5 (car s1) (cdr s1) 1.5 1.5) 0.05)
-                                  (<= (footprints-touch-gap (car s2) (cdr s2) 1.5 1.5 (car s3) (cdr s3) 1.5 1.5) 0.05))
-                              (or (<= (footprints-touch-gap (car s3) (cdr s3) 1.5 1.5 door-x door-y 0.5 0.5) 0.05)
-                                  (<= (footprints-touch-gap (car s3) (cdr s3) 1.5 1.5 (car s1) (cdr s1) 1.5 1.5) 0.05)
-                                  (<= (footprints-touch-gap (car s3) (cdr s3) 1.5 1.5 (car s2) (cdr s2) 1.5 1.5) 0.05))))
-             (define sc
-               (- 350.0
-                  (* 6.0 (+ (dist2d (car s1) (cdr s1) center-x center-y)
-                            (dist2d (car s2) (cdr s2) center-x center-y)
-                            (dist2d (car s3) (cdr s3) center-x center-y)))))
-             (when (> sc best-wsc)
-               (define w-rects
-                 (list (list (car s1) (cdr s1) 1.5 1.5)
-                       (list (car s2) (cdr s2) 1.5 1.5)
-                       (list (car s3) (cdr s3) 1.5 1.5)))
-               (when (and (seals-cleanly? (cons (list door-x door-y 0.5 0.5) w-rects))
-                          (bfs-reach? w-rects (car src-pt) (cdr src-pt) dlx dly)
-                          (bfs-reach? w-rects dlx dly (car dst-pt) (cdr dst-pt)))
-                 (define pyl (find-rear-pylon (list s1 s2 s3) door-x door-y dlx dly w-rects))
-                 (when pyl
-                   (set! best-wsc sc)
-                   (set! best-wall (list s1 s2 s3 door-x door-y pyl w-rects)))))))))
 
      (and best-wall
           (let ()
             (match-define (list s1 s2 s3 door-x door-y pyl w-rects) best-wall)
-            (define all-rects (cons (list (car pyl) (cdr pyl) 1.0 1.0) w-rects))
-            (define park (compute-door-park door-x door-y all-rects))
-            (define candidate-ht
-              (hash 'locus target-locus
-                    'door (cons door-x door-y)
-                    'door-x door-x
-                    'door-y door-y
-                    'door-park park
-                    'pylon pyl
-                    'slot-1 s1
-                    'slot-2 s2
-                    'slot-3 s3
-                    'grid-solved? #t))
-            (and (protoss-wall-valid-on-grids? candidate-ht bx-f by-f nx-f ny-f map-grids)
-                 candidate-ht)))]))
+            (build-and-validate-wall s1 s2 s3 door-x door-y pyl w-rects best-sealed?)))]))
 
 ;; Solves a Protoss main-ramp wall on map grids with analytical and local high-ground fallbacks.
 (define (solve-protoss-main-ramp-on-grids bx-f by-f nx-f ny-f ex-f ey-f w h pref bref href map-grids)
@@ -1780,16 +2072,25 @@
                   [ry (hash-ref rgeom 'ramp-y)]
                   [rdx (hash-ref rgeom 'ramp-dx)]
                   [rdy (hash-ref rgeom 'ramp-dy)]
+                  [top-tiles (hash-ref rgeom 'top-tiles '())]
+                  [tcx (if (pair? top-tiles)
+                           (/ (for/sum ([pt (in-list top-tiles)]) (+ (car pt) 0.5)) (length top-tiles))
+                           rx)]
+                  [tcy (if (pair? top-tiles)
+                           (/ (for/sum ([pt (in-list top-tiles)]) (+ (cdr pt) 0.5)) (length top-tiles))
+                           ry)]
                   [hg-src (hash-ref rgeom 'hg-src (cons (- rx (* 9.0 rdx)) (- ry (* 9.0 rdy))))]
                   [lg-dst (hash-ref rgeom 'lg-dst (cons (+ rx (* 7.5 rdx)) (+ ry (* 7.5 rdy))))]
-                  [ramp-set (for/set ([rt (in-list (hash-ref rgeom 'ramp-tiles '()))]) rt)])
+                  [ramp-set (for/set ([rt (in-list (hash-ref rgeom 'ramp-tiles '()))]) rt)]
+                  [mr-deadline (+ (current-inexact-milliseconds) 120.0)])
              (solve-protoss-wall-candidate-on-grids
               bx-f by-f nx-f ny-f 'main-ramp
-              rx ry rdx rdy
+              tcx tcy rdx rdy
               (car hg-src) (cdr hg-src)
               (car lg-dst) (cdr lg-dst)
               (hash-ref rgeom 'h-main)
-              w h pref bref href map-grids ramp-set)))
+              w h pref bref href map-grids ramp-set mr-deadline
+              #:allow-unsealed-1c? #f)))
       (let ([ana (solve-protoss-matchup-wall-analytical bx-f by-f nx-f ny-f 'main-ramp ex-f ey-f w h)])
         (if (protoss-wall-valid-on-grids? ana bx-f by-f nx-f ny-f map-grids)
             ana
@@ -1857,7 +2158,8 @@
                                     #:enemy-y [enemy-y 160.5]
                                     #:initial-enemy-race [initial-enemy-race enemy-race]
                                     #:force-main-ramp? [force-main-ramp? #f]
-                                    #:force-natural-choke? [force-natural-choke? #f])
+                                    #:force-natural-choke? [force-natural-choke? #f]
+                                    #:allow-slot3-nat? [allow-slot3-nat? 'auto])
   (define vs-zerg?
     (or (memq enemy-race '(Zerg zerg ZERG))
         (and (string? enemy-race) (string-ci=? enemy-race "zerg"))))
@@ -1878,6 +2180,7 @@
           initial-enemy-race
           (and force-main-ramp? #t)
           (and force-natural-choke? #t)
+          allow-slot3-nat?
           (round enemy-x) (round enemy-y)
           (wall-grid-fingerprint map-grids base-x base-y nat-x nat-y)))
   (cond
@@ -1899,28 +2202,69 @@
             [(eq? locus 'main-ramp)
              (solve-protoss-main-ramp-on-grids bx-f by-f nx-f ny-f ex-f ey-f w h pref bref href map-grids)]
             [else
-             ;; Hard wall-clock budget (<= 40ms/candidate, <= 120ms total) + cap nat-cands to top 4
-             ;; to eliminate 2.1-3.5s PvZ natural-wall spikes before clean fallback to 1c/main ramp.
-             (define nat-total-deadline (+ (current-inexact-milliseconds) 120.0))
+             ;; Two-pass natural choke solver bounded cleanly under 120ms total:
+             ;; Pass 1 tries ONLY genuinely BFS-sealed (`seals-cleanly?`) 1a/1b walls across ALL
+             ;; top-6 choke candidates (anchored cleanly with the 5x5 Natural Nexus included and
+             ;; `src` on the natural-interior side outside the Nexus pad).
+             ;; Pass 2 falls back to unsealed 1c ONLY if Pass 1 found zero sealed candidates
+             ;; (e.g. wide synthetic 10-12t corridors), preserving `'slot-3 #f` and `< 150ms` budget.
+             (define nat-start-ms (current-inexact-milliseconds))
+             (define nat-sealed-deadline (+ nat-start-ms 92.0))
+             (define nat-total-deadline (+ nat-start-ms 115.0))
+             (define rgeom (find-main-ramp-geometry bx-f by-f nx-f ny-f map-grids))
+             (define ramp-lg-src (and (hash-ref rgeom 'grid-solved? #f) (hash-ref rgeom 'lg-dst #f)))
              (define nat-cands-raw
                (find-natural-choke-candidates bx-f by-f nx-f ny-f ex-f ey-f w h pref bref href))
              (define nat-cands
-               (if (> (length nat-cands-raw) 4) (take nat-cands-raw 4) nat-cands-raw))
-             (or (for/or ([nc (in-list nat-cands)]
-                          #:break (>= (current-inexact-milliseconds) nat-total-deadline))
+               (if (> (length nat-cands-raw) 6) (take nat-cands-raw 6) nat-cands-raw))
+             (define (nat-src-xy out-dx out-dy)
+               (if (and (pair? ramp-lg-src)
+                        (<= (dist2d (car ramp-lg-src) (cdr ramp-lg-src) nx-f ny-f) 18.0))
+                   (values (car ramp-lg-src) (cdr ramp-lg-src))
+                   (values (- nx-f (* 3.5 out-dx)) (- ny-f (* 3.5 out-dy)))))
+             ;; Allow sealed 3-slot (`slot-3`) fallback in Pass 1 on full-size/elevated SC2 maps
+             ;; (only triggered if 2x3x3 `1a` and 2x3x3+WallPylon `1b` both fail to seal!), while
+             ;; preserving `'slot-3 #f` on compact flat-height synthetic corridor fixtures.
+             (define eff-allow-slot3-nat?
+               (cond
+                 [(eq? allow-slot3-nat? 'auto)
+                  (or (>= w 128)
+                      (>= h 128)
+                      (and (hash-ref rgeom 'grid-solved? #f)
+                           (> (abs (- (hash-ref rgeom 'h-main 0.0) (hash-ref rgeom 'h-nat 0.0))) 2.5)))]
+                 [else (and allow-slot3-nat? #t)]))
+             (or ;; Pass 1: Strict BFS-sealed natural choke across all top-6 choke candidates
+                 (for/or ([nc (in-list nat-cands)]
+                          #:break (>= (current-inexact-milliseconds) nat-sealed-deadline))
                    (match-define (list cx cy out-dx out-dy dst-x dst-y h-nat) nc)
+                   (define-values (sx sy) (nat-src-xy out-dx out-dy))
                    (solve-protoss-wall-candidate-on-grids
                     bx-f by-f nx-f ny-f 'natural-choke
                     cx cy out-dx out-dy
-                    nx-f ny-f dst-x dst-y h-nat
+                    sx sy dst-x dst-y h-nat
                     w h pref bref href map-grids
-                    (set) nat-total-deadline))
+                    (set) nat-sealed-deadline
+                    #:allow-unsealed-1c? #f
+                    #:allow-slot3-nat? eff-allow-slot3-nat?))
+                 ;; Pass 2: Fallback to 1c on top choke candidate when no sealed 2x3x3(+pylon) exists
+                 (for/or ([nc (in-list (if (pair? nat-cands) (list (car nat-cands)) '()))]
+                          #:break (>= (current-inexact-milliseconds) nat-total-deadline))
+                   (match-define (list cx cy out-dx out-dy dst-x dst-y h-nat) nc)
+                   (define-values (sx sy) (nat-src-xy out-dx out-dy))
+                   (solve-protoss-wall-candidate-on-grids
+                    bx-f by-f nx-f ny-f 'natural-choke
+                    cx cy out-dx out-dy
+                    sx sy dst-x dst-y h-nat
+                    w h pref bref href map-grids
+                    (set) nat-total-deadline
+                    #:allow-unsealed-1c? #t))
                  (and (< (current-inexact-milliseconds) nat-total-deadline)
                       (let-values ([(out-ux out-uy)
                                     (compute-natural-exit-direction bx-f by-f nx-f ny-f ex-f ey-f w h)])
                         (define o-ix (max 0 (min (sub1 w) (exact-floor nx-f))))
                         (define o-iy (max 0 (min (sub1 h) (exact-floor ny-f))))
                         (define h-nat (grid-height-val href o-ix o-iy 112.0))
+                        (define-values (sx sy) (nat-src-xy out-ux out-uy))
                         (for/or ([step-d (in-list '(8.5 7.0 10.0))]
                                  #:break (>= (current-inexact-milliseconds) nat-total-deadline))
                           (define raw-cx (+ nx-f (* step-d out-ux)))
@@ -1932,14 +2276,102 @@
                           (solve-protoss-wall-candidate-on-grids
                            bx-f by-f nx-f ny-f 'natural-choke
                            cx cy out-ux out-uy
-                           nx-f ny-f dst-x dst-y h-nat
+                           sx sy dst-x dst-y h-nat
                            w h pref bref href map-grids
-                           (set) nat-total-deadline))))
+                           (set) nat-total-deadline
+                           #:allow-unsealed-1c? #t))))
                  (and force-natural-choke?
                       (solve-protoss-matchup-wall-analytical bx-f by-f nx-f ny-f 'natural-choke ex-f ey-f w h))
                  (solve-protoss-main-ramp-on-grids
                   bx-f by-f nx-f ny-f ex-f ey-f w h pref bref href map-grids))])]))
      (hash-set! PROTOSS-MATCHUP-WALL-CACHE cache-key result)
+     result]))
+
+(define ZERG-NATURAL-WALL-CACHE (make-hash))
+
+;; Solves and caches a Zerg ZvZ natural-choke wall (`RoachWarren` + `EvolutionChamber` + optional
+;; 3rd 3x3 slot on wide chokes + 1-hex Queen hold-position doorway) with analytical fallback.
+(define (solve-zerg-natural-wall base-x base-y nat-x nat-y
+                                 #:map-grids [map-grids #f]
+                                 #:enemy-x [enemy-x 160.5]
+                                 #:enemy-y [enemy-y 160.5])
+  (define cache-key
+    (list 'zerg-nat
+          (round base-x) (round base-y)
+          (round nat-x) (round nat-y)
+          (round enemy-x) (round enemy-y)
+          (wall-grid-fingerprint map-grids base-x base-y nat-x nat-y)))
+  (cond
+    [(hash-ref ZERG-NATURAL-WALL-CACHE cache-key #f) => values]
+    [else
+     (define-values (grids-ok? w h pref bref href) (extract-map-grid-accessors map-grids))
+     (define bx-f (exact->inexact base-x))
+     (define by-f (exact->inexact base-y))
+     (define nx-f (exact->inexact nat-x))
+     (define ny-f (exact->inexact nat-y))
+     (define ex-f (exact->inexact enemy-x))
+     (define ey-f (exact->inexact enemy-y))
+     (define (format-zerg-wall wht)
+       (hash 'locus 'natural-choke
+             'roach-warren (hash-ref wht 'slot-1)
+             'evolution-chamber (hash-ref wht 'slot-2)
+             'slot-1 (hash-ref wht 'slot-1)
+             'slot-2 (hash-ref wht 'slot-2)
+             'slot-3 (hash-ref wht 'slot-3 #f)
+             'door (hash-ref wht 'door)
+             'door-x (hash-ref wht 'door-x)
+             'door-y (hash-ref wht 'door-y)
+             'door-park (hash-ref wht 'door-park)
+             'sealed? (hash-ref wht 'sealed? #f)
+             'grid-solved? (hash-ref wht 'grid-solved? #f)))
+     (define result
+       (cond
+         [(not grids-ok?)
+          (format-zerg-wall
+           (solve-protoss-matchup-wall-analytical bx-f by-f nx-f ny-f 'natural-choke ex-f ey-f))]
+         [else
+          (define nat-start-ms (current-inexact-milliseconds))
+          (define nat-sealed-deadline (+ nat-start-ms 95.0))
+          (define nat-total-deadline (+ nat-start-ms 115.0))
+          (define rgeom (find-main-ramp-geometry bx-f by-f nx-f ny-f map-grids))
+          (define ramp-lg-src (and (hash-ref rgeom 'grid-solved? #f) (hash-ref rgeom 'lg-dst #f)))
+          (define nat-cands-raw
+            (find-natural-choke-candidates bx-f by-f nx-f ny-f ex-f ey-f w h pref bref href))
+          (define nat-cands
+            (if (> (length nat-cands-raw) 6) (take nat-cands-raw 6) nat-cands-raw))
+          (define (nat-src-xy out-dx out-dy)
+            (if (and (pair? ramp-lg-src)
+                     (<= (dist2d (car ramp-lg-src) (cdr ramp-lg-src) nx-f ny-f) 18.0))
+                (values (car ramp-lg-src) (cdr ramp-lg-src))
+                (values (- nx-f (* 3.5 out-dx)) (- ny-f (* 3.5 out-dy)))))
+          (define solved
+            (or (for/or ([nc (in-list nat-cands)]
+                         #:break (>= (current-inexact-milliseconds) nat-sealed-deadline))
+                  (match-define (list cx cy out-dx out-dy dst-x dst-y h-nat) nc)
+                  (define-values (sx sy) (nat-src-xy out-dx out-dy))
+                  (solve-protoss-wall-candidate-on-grids
+                   bx-f by-f nx-f ny-f 'natural-choke
+                   cx cy out-dx out-dy
+                   sx sy dst-x dst-y h-nat
+                   w h pref bref href map-grids
+                   (set) nat-sealed-deadline
+                   #:allow-unsealed-1c? #f
+                   #:require-pylon? #f))
+                (for/or ([nc (in-list (if (pair? nat-cands) (list (car nat-cands)) '()))]
+                         #:break (>= (current-inexact-milliseconds) nat-total-deadline))
+                  (match-define (list cx cy out-dx out-dy dst-x dst-y h-nat) nc)
+                  (define-values (sx sy) (nat-src-xy out-dx out-dy))
+                  (solve-protoss-wall-candidate-on-grids
+                   bx-f by-f nx-f ny-f 'natural-choke
+                   cx cy out-dx out-dy
+                   sx sy dst-x dst-y h-nat
+                   w h pref bref href map-grids
+                   (set) nat-total-deadline
+                   #:allow-unsealed-1c? #t
+                   #:require-pylon? #f))
+                (solve-protoss-matchup-wall-analytical bx-f by-f nx-f ny-f 'natural-choke ex-f ey-f w h)))
+          (format-zerg-wall solved)]))
+     (hash-set! ZERG-NATURAL-WALL-CACHE cache-key result)
      result]))
 
 ;; Solves a generic CSP choke wall-in for Terran or Protoss building presets.

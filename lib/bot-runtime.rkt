@@ -62,6 +62,9 @@
                   situational-counter-plan-active-situations
                   situational-counter-plan-recommended-upgrades
                   situational-counter-plan-ability-actions)
+         (only-in "plan/wall-and-block.rkt"
+                  plan-protoss-emergency-walloff-and-cancel
+                  plan-pro-offensive-expansion-block)
          "plan/macro-ability-policy.rkt"
          "engine/arbiter.rkt"
          "tactics/staging-groups.rkt"
@@ -658,12 +661,12 @@
 (define RUNTIME-TUMOR-SET
   (hasheq 'creep-tumor #t 'creep-tumor-burrowed #t 'creep-tumor-queen #t))
 (define RUNTIME-ALLY-HARASS-SET
-  (hasheq 'baneling #t 'baneling-burrowed #t 'adept #t 'widow-mine #t
+  (hasheq 'baneling #t 'baneling-burrowed #t 'adept #t 'adept-phase-shift #t 'widow-mine #t
           'widow-mine-burrowed #t 'medivac #t 'oracle #t 'raven #t
           'viking-fighter #t 'viking-assault #t 'zergling #t 'hellion #t
           'reaper #t 'zealot #t))
 (define RUNTIME-ENEMY-HARASS-SET
-  (hasheq 'baneling #t 'baneling-burrowed #t 'adept #t 'widow-mine #t
+  (hasheq 'baneling #t 'baneling-burrowed #t 'adept #t 'adept-phase-shift #t 'widow-mine #t
           'widow-mine-burrowed #t 'medivac #t 'warp-prism #t 'oracle #t 'raven #t
           'mutalisk #t 'banshee #t 'liberator #t 'zergling #t 'hellion #t 'reaper #t))
 (define RUNTIME-STATIC-DEF-AND-NYDUS-SET
@@ -4193,7 +4196,7 @@
          (cons (vector-ref last-exp-rec 2) (vector-ref last-exp-rec 3))))
   (define allow-1base-backpad-fallback?
     (and (= active-bases 1)
-         (or (>= minerals 400)
+         (or (>= minerals (sc2-race-townhall-min-cost (l2-ctx-race ctx)))
              (and (>= minerals 250) (eq? prio-saving-for-sym race-th-sym)))))
     (define key (and prefer-natural? #t))
     (define step-cached (hash-ref uncamped-pad-cache key #f))
@@ -6488,7 +6491,9 @@
                            (and node
                                 (cond
                                   [(eq? (sc2-tech-node-kind node) 'build)
-                                   (not (l2-building-present-or-pending? ctx u-sym))]
+                                   (and (not (l2-building-present-or-pending? ctx u-sym))
+                                        (or (not (memq u-sym '(barracks-techlab barracks-reactor)))
+                                            (l2-any-unblocked-bare-barracks? ctx)))]
                                   [(eq? (sc2-tech-node-kind node) 'research)
                                    (and (l2-upgrade-needed? ctx u-sym)
                                         (or (not (eq? (l2-ctx-race ctx) 'Terran))
@@ -7073,6 +7078,37 @@
             (max 1.0 (exact->inexact (sc2-supply-cost (fast-canonical-unit-sym (unit-type-sym e)) 1))))
           4.0)))
 
+;; Loop 82 (`norman` 0-3 Expansion-Block Defense): True when 1-base Natural is blocked ONLY
+;; by a non-combat expansion block (worker, lone Pylon, or lone Engineering Bay — NOT camped
+;; by enemy combat army, NOT Cannon Rush/cheese/attack) AND we have a clean immediate pivot
+;; (Terran high-ground in-base CC, or Zerg/Protoss uncamped 3rd-as-Natural pad).
+(define (l2-nat-block-has-safe-pivot? ctx)
+  (define live-game? (l2-ctx-live-obs-harvesters? ctx))
+  (define race (l2-ctx-race ctx))
+  (define active-bases (l2-ctx-active-bases ctx))
+  (define nat-x (l2-ctx-nat-x ctx))
+  (define nat-y (l2-ctx-nat-y ctx))
+  (and live-game?
+       (<= active-bases 1)
+       (l2-ctx-natural-blocked? ctx)
+       (not (l2-ctx-under-early-cheese? ctx))
+       (not (l2-ctx-early-survival-crisis? ctx))
+       (not (l2-ctx-under-base-attack? ctx))
+       (not (l2-ctx-worker-rush-active? ctx))
+       (not (l2-pad-camped-by-enemy? ctx nat-x nat-y 11.5))
+       (cond
+         [(eq? race 'Terran)
+          (and (memq 'barracks (l2-ctx-bldg-types ctx)) #t)]
+         [else
+          (or (let-values ([(px py) (l2-select-uncamped-expansion-pad ctx #f)])
+                (and px py (> (dist2d px py nat-x nat-y) 6.0)))
+              (let ([tx (l2-ctx-third-x ctx)]
+                    [ty (l2-ctx-third-y ctx)])
+                (and (real? tx) (real? ty)
+                     (> (dist2d tx ty nat-x nat-y) 6.0)
+                     (> (dist2d tx ty (l2-ctx-base-x ctx) (l2-ctx-base-y ctx)) 8.0)
+                     (not (l2-pad-camped-by-enemy? ctx tx ty 11.5)))))])))
+
 (define (l2-saving-for-expansion-now? ctx cur-base-count)
   (define ally-combat-units (l2-ctx-ally-combat-units ctx))
   (define blocked-nat-expanded-early? (l2-ctx-blocked-nat-expanded-early? ctx))
@@ -7143,7 +7179,8 @@
          (or (not crisis-freeze-expand-or-gas?) brain-saving-1base-nat?)
          (or (not blocked-nat-expanded-early?) brain-saving-1base-nat?)
          (or (not (and live-game? (= cur-base-count 1) natural-blocked?))
-             brain-saving-1base-nat?)
+             brain-saving-1base-nat?
+             (l2-nat-block-has-safe-pivot? ctx))
          (not (and live-game? (<= cur-base-count 1) forward-proxy-detected?))
          (not (and live-game?
                    (= cur-base-count 1)
@@ -7389,12 +7426,48 @@
 ;; addon pads `(fx + 2.5, fy - 0.5)` and exponentially back off failing `(fac-id . addon-sym)`
 ;; retries (`36f -> 160f -> 448f -> 1344f`) so blocked Barracks/Factory/Starport facilities
 ;; NEVER steal `open-prod-slots` to 0 or phantom-drain minerals ahead of SCV/Marine/Tank training!
+;; Loop 82 (Terran Bug T1 Auto-Lift Guard): Identify whether `fac` is our Terran ramp-wall
+;; Barracks and whether its `(+2.5, -0.5)` add-on pad is clear on the terrain grid.
+(define (l2-terran-wall-barracks-info ctx fac)
+  (define obs (l2-ctx-obs ctx))
+  (define rw (or (l2-ctx-terran-ramp-wall ctx)
+                 (and (hash? obs) (hash-ref obs 'terran-ramp-wall #f))))
+  (define map-grids (l2-ctx-map-grids ctx))
+  (if (and (hash? fac)
+           (eq? (unit-type-sym fac) 'barracks)
+           (hash? rw))
+      (let ([fx0 (hash-ref fac 'x #f)]
+            [fy0 (hash-ref fac 'y #f)])
+        (if (and (real? fx0) (real? fy0)
+                 (placement:terran-wall-barracks-slot? rw fx0 fy0 2.5))
+            (values #t
+                    (and (placement:terran-wall-barracks-addon-clear? rw)
+                         (or (not (hash? map-grids))
+                             (placement:wall-barracks-addon-pad-buildable? fx0 fy0 map-grids))))
+            (values #f #t)))
+      (values #f #t)))
+
+(define (l2-terran-wall-barracks-addon-blocked? ctx fac)
+  (define-values (is-wall-rax? addon-clear?) (l2-terran-wall-barracks-info ctx fac))
+  (or (and is-wall-rax? (not addon-clear?))
+      (and (hash? fac) (eq? (hash-ref fac 'addon-clear? #t) #f))))
+
+(define (l2-any-unblocked-bare-barracks? ctx)
+  (for/or ([b (in-list (or (l2-ctx-ally-bldgs ctx) '()))])
+    (and (hash? b)
+         (eq? (unit-type-sym b) 'barracks)
+         (l2-building-grounded-and-powered? ctx b)
+         (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+         (not (l2-terran-facility-has-addon? ctx b))
+         (not (l2-addon-pad-blocked? ctx b)))))
+
 (define (l2-addon-pad-blocked? ctx fac)
   (define live-game? (l2-ctx-live-obs-harvesters? ctx))
   (define obs (l2-ctx-obs ctx))
   (define fid (hash-ref fac 'id -1))
   (and live-game?
-       (or (and (hash? obs)
+       (or (l2-terran-wall-barracks-addon-blocked? ctx fac)
+           (and (hash? obs)
                 (exact-integer? fid) (> fid 0)
                 (for/or ([k (in-list '(addon-blocked-facility-ids addon-blocked-tags failed-addon-tags addon-cooldown-tags))])
                   (define v (hash-ref obs k #f))
@@ -8004,16 +8077,49 @@
                            (<= (dist2d nat-x nat-y ebx eby) SC2-IN-BASE-PROXY-DETECT-RADIUS))))
                 enemy-bldgs)
         '()))
+  ;; Loop 82 (`norman` 0-3 Expansion-Block Defense): A lone enemy Pylon or Engineering Bay
+  ;; sitting directly on our Natural expansion pad (`dNat <= max(6.5, SC2-NATURAL-BLOCK-RADIUS)`,
+  ;; `dMain > 16.0`) with ZERO Forges, ZERO Photon Cannons, and ZERO other proxy/cheese structures
+  ;; is an expansion block, NOT a Cannon Rush — never trigger `in-base-proxy-detected?` or
+  ;; `under-early-cheese?` panic! Immediately escalates if a Forge, Cannon, 2nd Pylon, or
+  ;; proxy production/static building appears.
+  (define has-any-enemy-forge-or-cannon?
+    (for/or ([eb (in-list enemy-bldgs)])
+      (and (hash? eb)
+           (memq (fast-canonical-structure-sym (unit-type-sym eb))
+                 '(forge photon-cannon)))))
+  (define near-main-or-nat-enemy-bldgs
+    (if (and (< frame SC2-IN-BASE-PROXY-MAX-FRAME) (< active-bases 2))
+        (filter (lambda (eb)
+                  (and (hash? eb)
+                       (let ([canon (fast-canonical-structure-sym (unit-type-sym eb))]
+                             [ebx (exact->inexact (hash-ref eb 'x 9999.0))]
+                             [eby (exact->inexact (hash-ref eb 'y 9999.0))])
+                         (and (not (memq canon '(nexus command-center orbital-command assimilator extractor refinery)))
+                              (or (<= (dist2d base-x base-y ebx eby)
+                                      (max (exact->inexact SC2-CHEESE-RUSH-RADIUS)
+                                           (exact->inexact SC2-IN-BASE-PROXY-DETECT-RADIUS)))
+                                  (<= (dist2d nat-x nat-y ebx eby) SC2-IN-BASE-PROXY-DETECT-RADIUS))))))
+                enemy-bldgs)
+        '()))
+  (define lone-nat-pad-exp-block-bldg
+    (and (< frame SC2-IN-BASE-PROXY-MAX-FRAME)
+         (< active-bases 2)
+         (not has-any-enemy-forge-or-cannon?)
+         (= (length near-main-or-nat-enemy-bldgs) 1)
+         (let* ([eb0 (car near-main-or-nat-enemy-bldgs)]
+                [canon0 (fast-canonical-structure-sym (unit-type-sym eb0))]
+                [ebx0 (exact->inexact (hash-ref eb0 'x 9999.0))]
+                [eby0 (exact->inexact (hash-ref eb0 'y 9999.0))])
+           (and (memq canon0 '(pylon engineering-bay))
+                (> (dist2d base-x base-y ebx0 eby0) 16.0)
+                (<= (dist2d nat-x nat-y ebx0 eby0)
+                    (max (exact->inexact SC2-NATURAL-BLOCK-RADIUS) 6.5))
+                eb0))))
   (define in-base-proxy-structures
-    (if (and (not live-obs-harvesters?)
-             (< active-bases 2)
-             (= (length raw-in-base-proxy-structures) 1)
-             (let ([eb0 (car raw-in-base-proxy-structures)])
-               (and (eq? (fast-canonical-structure-sym (unit-type-sym eb0)) 'pylon)
-                    (> (dist2d base-x base-y (hash-ref eb0 'x 9999.0) (hash-ref eb0 'y 9999.0)) 24.0)
-                    (<= (dist2d nat-x nat-y (hash-ref eb0 'x 9999.0) (hash-ref eb0 'y 9999.0))
-                        SC2-NATURAL-BLOCK-RADIUS))))
-        '()
+    (if lone-nat-pad-exp-block-bldg
+        (filter (lambda (eb) (not (eq? eb lone-nat-pad-exp-block-bldg)))
+                raw-in-base-proxy-structures)
         raw-in-base-proxy-structures))
   (set-l2-ctx-in-base-proxy-structures! ctx in-base-proxy-structures)
   (define in-base-proxy-detected?
@@ -8064,6 +8170,7 @@
             (<= (+ (* dx dx) (* dy dy)) cheese-r2))
           (define (cheese-bldg-candidate? eb)
             (and (near-cheese? eb)
+                 (not (eq? eb lone-nat-pad-exp-block-bldg))
                  (not (and live-obs-harvesters?
                            (memq (fast-canonical-structure-sym (unit-type-sym eb))
                                  '(nexus command-center orbital-command assimilator extractor refinery))))))
@@ -8081,7 +8188,8 @@
         (and (not (null? proxy-or-cheese-enemies))
              (or (hash-ref obs 'under-cheese-rush #f)
                  (ormap (lambda (e)
-                          (and (<= (dist2d base-x base-y (hash-ref e 'x 9999) (hash-ref e 'y 9999)) cheese-dist-thresh)
+                          (and (not (eq? e lone-nat-pad-exp-block-bldg))
+                               (<= (dist2d base-x base-y (hash-ref e 'x 9999) (hash-ref e 'y 9999)) cheese-dist-thresh)
                                (memq (unit-type-sym e) '(photon-cannon pylon bunker spine-crawler barracks))))
                         enemy-bldgs)
                  (and (>= (length proxy-or-cheese-enemies) 2)
@@ -11989,71 +12097,117 @@
   (set-l2-ctx-pad-last-r! ctx #f)
   (set-l2-ctx-pad-last-val! ctx 0.0)
   (define nat-block-thresh2
-    (let ([r (exact->inexact SC2-NATURAL-BLOCK-RADIUS)]) (* r r)))
+    (let ([r (max (exact->inexact SC2-NATURAL-BLOCK-RADIUS) 6.5)]) (* r r)))
   (set-l2-ctx-nat-block-thresh2! ctx nat-block-thresh2)
+  (define nat-blocker-now?
+    (and (<= (length townhalls) 1)
+         (< frame 4800)
+         (l2-any-natural-blocker? ctx)))
+  ;; Loop 82B: Latch enemy structure block on Natural pad for 224f (~10s) so brief scout fog-outs
+  ;; never forget a Pylon/Ebay on Natural; clear immediately when an ally unit has vision (`<= 10t`)
+  ;; of an empty Natural or once `>= 2` townhalls exist.
+  (define nat-blk-door-st (rt-door-state rt))
+  (define ally-sees-nat-now?
+    (for/or ([u (in-list (or (l2-ctx-ally-units ctx) '()))])
+      (and (hash? u)
+           (real? (hash-ref u 'x #f))
+           (real? (hash-ref u 'y #f))
+           (<= (dist2d nat-x nat-y
+                       (exact->inexact (hash-ref u 'x -999.0))
+                       (exact->inexact (hash-ref u 'y -999.0)))
+               10.0))))
+  (cond
+    [(or (>= (length townhalls) 2) (>= frame 4800))
+     (hash-remove! nat-blk-door-st 'l82-nat-pad-blocked-until)]
+    [(and nat-blocker-now?
+          (for/or ([eb (in-list enemy-bldgs)])
+            (and (hash? eb)
+                 (let ([dx (- (exact->inexact nat-x) (exact->inexact (hash-ref eb 'x 9999.0)))]
+                       [dy (- (exact->inexact nat-y) (exact->inexact (hash-ref eb 'y 9999.0)))])
+                   (<= (+ (* dx dx) (* dy dy)) nat-block-thresh2)))))
+     (hash-set! nat-blk-door-st 'l82-nat-pad-blocked-until (+ frame 224))]
+    [(and ally-sees-nat-now? (not nat-blocker-now?))
+     (hash-remove! nat-blk-door-st 'l82-nat-pad-blocked-until)])
+  (define nat-blocker-latched?
+    (and (<= (length townhalls) 1)
+         (< frame 4800)
+         (let ([u (hash-ref nat-blk-door-st 'l82-nat-pad-blocked-until -1)])
+           (and (exact-integer? u) (<= frame u)))))
   (define natural-blocked?
     (or (hash-ref obs 'natural-blocked #f)
         (l2-pad-camped-by-enemy? ctx nat-x nat-y 11.5)
-        (and (<= (length townhalls) 1)
-             (< frame 2500)
-             (l2-any-natural-blocker? ctx))))
+        nat-blocker-now?
+        nat-blocker-latched?))
   (set-l2-ctx-natural-blocked?! ctx natural-blocked?)
   (define uncamped-pad-cache (pooled-hasheq! l2-sc 'uncamped-pad-cache))
   (set-l2-ctx-uncamped-pad-cache! ctx uncamped-pad-cache)
+  (define early-combat-near-home?
+    (let ([fbx (if (real? base-x) (exact->inexact base-x) #f)]
+          [fby (if (real? base-y) (exact->inexact base-y) #f)]
+          [fnx (if (real? nat-x) (exact->inexact nat-x) #f)]
+          [fny (if (real? nat-y) (exact->inexact nat-y) #f)])
+      (for/or ([e (in-list enemy-units)])
+        (and (combat-unit-record? e)
+             (let ([ex (hash-ref e 'x 9999.0)]
+                   [ey (hash-ref e 'y 9999.0)])
+               (if (and (real? ex) (= (- ex ex) 0)
+                        (real? ey) (= (- ey ey) 0)
+                        fbx fby fnx fny)
+                   (let* ([fex (exact->inexact ex)]
+                          [fey (exact->inexact ey)]
+                          [dx1 (fl- fex fbx)]
+                          [dy1 (fl- fey fby)]
+                          [d1sq (fl+ (fl* dx1 dx1) (fl* dy1 dy1))])
+                     (or (fl<= d1sq 784.0)
+                         (and (or (>= active-bases 2) live-obs-harvesters?)
+                              (let* ([dx2 (fl- fex fnx)]
+                                     [dy2 (fl- fey fny)]
+                                     [d2sq (fl+ (fl* dx2 dx2) (fl* dy2 dy2))])
+                                (or (and (>= active-bases 2) (fl<= d2sq 784.0))
+                                    (and live-obs-harvesters? (fl<= d2sq 256.0)))))))
+                   (or (<= (min (dist2d base-x base-y ex ey)
+                                (if (>= active-bases 2)
+                                    (dist2d nat-x nat-y ex ey)
+                                    +inf.0))
+                           28.0)
+                       (and live-obs-harvesters?
+                            (<= (dist2d nat-x nat-y ex ey) 16.0)))))))))
   (define early-base-under-attack?
     (or early-survival-crisis?
         (for/or ([b (in-list ally-bldgs)])
           (eq? (hash-ref b 'under-attack #f) #t))
-        (let ([fbx (if (real? base-x) (exact->inexact base-x) #f)]
-              [fby (if (real? base-y) (exact->inexact base-y) #f)]
-              [fnx (if (real? nat-x) (exact->inexact nat-x) #f)]
-              [fny (if (real? nat-y) (exact->inexact nat-y) #f)])
-          (for/or ([e (in-list enemy-units)])
-            (and (combat-unit-record? e)
-                 (let ([ex (hash-ref e 'x 9999.0)]
-                       [ey (hash-ref e 'y 9999.0)])
-                   (if (and (real? ex) (= (- ex ex) 0)
-                            (real? ey) (= (- ey ey) 0)
-                            fbx fby fnx fny)
-                       (let* ([fex (exact->inexact ex)]
-                              [fey (exact->inexact ey)]
-                              [dx1 (fl- fex fbx)]
-                              [dy1 (fl- fey fby)]
-                              [d1sq (fl+ (fl* dx1 dx1) (fl* dy1 dy1))])
-                         (or (fl<= d1sq 784.0)
-                             (and (or (>= active-bases 2) live-obs-harvesters?)
-                                  (let* ([dx2 (fl- fex fnx)]
-                                         [dy2 (fl- fey fny)]
-                                         [d2sq (fl+ (fl* dx2 dx2) (fl* dy2 dy2))])
-                                    (or (and (>= active-bases 2) (fl<= d2sq 784.0))
-                                        (and live-obs-harvesters? (fl<= d2sq 256.0)))))))
-                       (or (<= (min (dist2d base-x base-y ex ey)
-                                    (if (>= active-bases 2)
-                                        (dist2d nat-x nat-y ex ey)
-                                        +inf.0))
-                               28.0)
-                           (and live-obs-harvesters?
-                                (<= (dist2d nat-x nat-y ex ey) 16.0))))))))))
+        early-combat-near-home?))
   (define blocked-nat-expanded-early? #f)
   (set-l2-ctx-blocked-nat-expanded-early?! ctx blocked-nat-expanded-early?)
+  ;; Loop 82 (`norman` 0-3 Expansion-Block Defense):
+  ;; - Remove Zerg Spawning Pool prerequisite so 16-Hatch Zerg pivots immediately to 3rd-as-Natural!
+  ;; - Separate `(clear-expansion-block nat-x nat-y)` cooldown from expansion cooldown so clearing at
+  ;;   < 300M/400M NEVER burns the cooldown needed to place 3rd-as-Natural / in-base high-ground CC!
+  ;; - Propagate `set-l2-ctx-blocked-nat-expanded-early?!` cleanly to downstream phases!
   (when (and natural-blocked?
              (not early-survival-crisis?)
-             (not early-base-under-attack?)
+             (or (not early-base-under-attack?)
+                 (and (not early-combat-near-home?)
+                      (not (l2-pad-camped-by-enemy? ctx nat-x nat-y 11.5))))
              (< active-bases SC2-MAX-ACTIVE-BASES)
              (= (order-ledger-pending-count-for-type oledger-early early-race-th-sym frame) 0)
              (or (not (eq? race 'Terran)) (memq 'barracks (l2-ctx-bldg-types ctx)))
              (or (not live-obs-harvesters?)
                  (and (<= active-bases 1)
-                      (or (memq 'barracks (l2-ctx-bldg-types ctx))
+                      (or (and (eq? race 'Zerg) (>= total-workers 15))
+                          (memq 'barracks (l2-ctx-bldg-types ctx))
                           (memq 'spawning-pool (l2-ctx-bldg-types ctx))
                           (memq 'gateway (l2-ctx-bldg-types ctx))
-                          (memq 'warp-gate (l2-ctx-bldg-types ctx)))))
-             (or (hash-ref obs 'natural-blocked #f)
-                 (refractory-allow-action?! cd-tracker (list 'blocked-nat-expand race) frame SC2-EXPANSION-COOLDOWN-FRAMES)))
-    (l2-emit! ctx (list 'clear-expansion-block nat-x nat-y))
+                          (memq 'warp-gate (l2-ctx-bldg-types ctx))))))
+    (when (or (hash-ref obs 'natural-blocked #f)
+              (refractory-allow-action?! cd-tracker (list 'clear-nat-block race) frame 64))
+      (l2-emit! ctx (list 'clear-expansion-block nat-x nat-y)))
     (if (eq? race 'Terran)
-        (when (>= (l2-ctx-minerals ctx) (sc2-min-cost 'command-center))
+        (when (and (>= (l2-ctx-minerals ctx) (sc2-min-cost 'command-center))
+                   (or (hash-ref obs 'natural-blocked #f)
+                       (refractory-allow-action?! cd-tracker (list 'blocked-nat-expand race) frame SC2-EXPANSION-COOLDOWN-FRAMES)))
           (set! blocked-nat-expanded-early? #t)
+          (set-l2-ctx-blocked-nat-expanded-early?! ctx #t)
           (if live-obs-harvesters?
               (let*-values ([(in-cc-x in-cc-y) (l2-interior-offset ctx 6.0 -2.0)]
                             [(ccx ccy)
@@ -12071,14 +12225,26 @@
               (let-values ([(in-cc-x in-cc-y) (l2-interior-offset ctx 4.0 0.0)])
                 (l2-emit! ctx (list 'build 'command-center in-cc-x in-cc-y))))
           (set-l2-ctx-minerals! ctx (max 0 (- (l2-ctx-minerals ctx) (sc2-min-cost 'command-center)))))
-        (when (>= (l2-ctx-minerals ctx) (sc2-race-townhall-min-cost race))
-          (define-values (bx3 by3)
+        (when (and (>= (l2-ctx-minerals ctx) (sc2-race-townhall-min-cost race))
+                   (or (hash-ref obs 'natural-blocked #f)
+                       (refractory-allow-action?! cd-tracker (list 'blocked-nat-expand race) frame SC2-EXPANSION-COOLDOWN-FRAMES)))
+          (define-values (bx3-raw by3-raw)
             (if live-obs-harvesters?
                 (l2-select-uncamped-expansion-pad ctx #f)
                 (values third-x third-y)))
+          (define-values (bx3 by3)
+            (if (and bx3-raw by3-raw (> (dist2d bx3-raw by3-raw nat-x nat-y) 6.0))
+                (values bx3-raw by3-raw)
+                (if (and (real? third-x) (real? third-y)
+                         (> (dist2d third-x third-y nat-x nat-y) 6.0)
+                         (not (l2-pad-camped-by-enemy? ctx third-x third-y 11.5)))
+                    (values third-x third-y)
+                    (values bx3-raw by3-raw))))
           (when (and bx3 by3)
             (set! blocked-nat-expanded-early? #t)
+            (set-l2-ctx-blocked-nat-expanded-early?! ctx #t)
             (l2-emit! ctx (list 'expand bx3 by3))
+            (l2-record-expand-pad-issued! ctx bx3 by3)
             (order-ledger-record-issued! oledger-early (+ 830000 (modulo frame 10000))
                                          'expand early-race-th-sym bx3 by3 frame)
             (set-l2-ctx-minerals! ctx (max 0 (- (l2-ctx-minerals ctx) (sc2-race-townhall-min-cost race))))))))
@@ -13468,8 +13634,24 @@
       [(Terran) 'supply-depot]
       [else 'overlord]))
   (set-l2-ctx-supply-provider-sym! ctx supply-provider-sym)
+  ;; Loop 82B: Exclude distant offensive cancel-Pylons (`> 40t` from main & `> 30t` from natural)
+  ;; from home pending supply so an enemy-natural block Pylon NEVER suppresses home Pylon #2!
+  (define distant-off-inc-pylon-cnt
+    (if (and (eq? race 'Protoss) (<= frame 4500) (< active-bases 3))
+        (count (lambda (b)
+                 (and (hash? b)
+                      (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'pylon)
+                      (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                      (real? (hash-ref b 'x #f))
+                      (real? (hash-ref b 'y #f))
+                      (let ([bx (exact->inexact (hash-ref b 'x base-x))]
+                            [by (exact->inexact (hash-ref b 'y base-y))])
+                        (and (> (dist2d base-x base-y bx by) 40.0)
+                             (> (dist2d nat-x nat-y bx by) 30.0)))))
+               ally-bldgs)
+        0))
   (set-l2-ctx-pending-supply! ctx
-        (max (l2-ctx-pending-supply ctx)
+        (max (max 0 (- (l2-ctx-pending-supply ctx) distant-off-inc-pylon-cnt))
              (order-ledger-pending-count-for-type oledger supply-provider-sym frame)))
   (define ready-bldgs
     (filter (lambda (b)
@@ -14449,14 +14631,14 @@
                      (let ([p (and (not bypass-wall-pylon?) (hash-ref protoss-matchup-wall 'slot-3 #f))])
                        (and (pair? p) (reserved-aabb (car p) (cdr p) 1.5 1.5 'wall-slot 0 0)))
                      (let ([p (and (not bypass-wall-pylon?) (hash-ref protoss-matchup-wall 'door #f))])
-                       (and (pair? p) (reserved-aabb (car p) (cdr p) 1.2 1.2 'doorway-corridor 0 0)))
+                       (and (pair? p) (reserved-aabb (car p) (cdr p) 0.5 0.5 'doorway-corridor 0 0)))
                      (let ([p (and (not bypass-wall-pylon?) (hash-ref protoss-matchup-wall 'door-park #f))])
-                       (and (pair? p) (reserved-aabb (car p) (cdr p) 1.2 1.2 'doorway-corridor 0 0)))))]
+                       (and (pair? p) (reserved-aabb (car p) (cdr p) 0.5 0.5 'doorway-corridor 0 0)))))]
       [else '()]))
   (set-l2-ctx-step-wall-aabbs! ctx step-wall-aabbs)
   (set-box! (rt-wall-aabbs-box rt) step-wall-aabbs)
   (define allow-exact-wall-slot?
-    (and (< frame 4000) (<= active-bases 2)))
+    (and (< frame 4800) (<= active-bases 2)))
   (set-l2-ctx-allow-exact-wall-slot?! ctx allow-exact-wall-slot?)
   (define early-larvae-consumed 0)
   (define unfinished-wire-pylon-cnt-p
@@ -14464,7 +14646,19 @@
         (+ (count (lambda (b)
                     (and (hash? b)
                          (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'pylon)
-                         (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
+                         (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                         (not (and (<= frame 4500)
+                                   (< active-bases 3)
+                                   (real? (hash-ref b 'x #f))
+                                   (real? (hash-ref b 'y #f))
+                                   (> (dist2d base-x base-y
+                                              (exact->inexact (hash-ref b 'x base-x))
+                                              (exact->inexact (hash-ref b 'y base-y)))
+                                      40.0)
+                                   (> (dist2d nat-x nat-y
+                                              (exact->inexact (hash-ref b 'x base-x))
+                                              (exact->inexact (hash-ref b 'y base-y)))
+                                      30.0)))))
                   ally-bldgs)
            (order-ledger-pending-count-for-type oledger 'pylon frame))
         0))
@@ -15330,6 +15524,164 @@
         0))
   (define arb-gas-boost-active? (>= arb-gas-ov-cnt 3))
   (define arb-fac-boost-active? (>= arb-fac-ov-cnt 4))
+  (define eff-natural-blocked-for-brain?
+    (and natural-blocked? (not (l2-nat-block-has-safe-pivot? ctx))))
+  ;; Loop 82 (Track C/D): Evaluate & latch scout-gated `EnemyWallAssessment` + monotonic lifetime
+  ;; Adept/Zergling produced counts in `rt-wall-state` for `step-priority-macro-brain` (`#2601`).
+  (define rt-p8 (l2-ctx-rt ctx))
+  (define wall-st-p8 (rt-wall-state rt-p8))
+  (define scout-st-p8 (rt-scout-state rt-p8))
+  (when (<= frame 4)
+    (hash-remove! wall-st-p8 'l82-enemy-wall-assessment)
+    (hash-remove! wall-st-p8 'l82-enemy-wall-open?)
+    (hash-remove! wall-st-p8 'l82-seen-adept-tags)
+    (hash-remove! wall-st-p8 'l82-seen-zergling-tags))
+  (define seen-adept-tags-p8 (hash-ref! wall-st-p8 'l82-seen-adept-tags mutable-seteqv))
+  (define seen-ling-tags-p8 (hash-ref! wall-st-p8 'l82-seen-zergling-tags mutable-seteqv))
+  (for ([u (in-list (or (l2-ctx-ally-units ctx) '()))] #:when (hash? u))
+    (define ut (unit-type-sym u))
+    (define uid (hash-ref u 'id 0))
+    (when (and (exact-integer? uid) (> uid 0))
+      (cond
+        [(eq? ut 'adept) (set-add! seen-adept-tags-p8 uid)]
+        [(eq? ut 'zergling) (set-add! seen-ling-tags-p8 uid)])))
+  (define l82-total-adepts-produced
+    (max (safe-nonneg-int (hash-ref obs 'total-adepts-produced 0) 0)
+         (l2-unit-count ctx 'adept)
+         (+ (set-count seen-adept-tags-p8)
+            (order-ledger-pending-count-for-type oledger 'adept frame))))
+  (define l82-total-zerglings-produced
+    (max (safe-nonneg-int (hash-ref obs 'total-zerglings-produced 0) 0)
+         (l2-unit-count ctx 'zergling)
+         (+ (set-count seen-ling-tags-p8)
+            (* 2 (order-ledger-pending-count-for-type oledger 'zergling frame)))))
+  (hash-set! wall-st-p8 'l82-total-adepts-produced l82-total-adepts-produced)
+  (hash-set! wall-st-p8 'l82-total-zerglings-produced l82-total-zerglings-produced)
+  (define ex-p8 (exact->inexact (l2-ctx-enemy-x ctx)))
+  (define ey-p8 (exact->inexact (l2-ctx-enemy-y ctx)))
+  (define enx-p8 (exact->inexact (fast-finite-real (hash-ref obs 'enemy-natural-x (- ex-p8 16.0)) (- ex-p8 16.0))))
+  (define eny-p8 (exact->inexact (fast-finite-real (hash-ref obs 'enemy-natural-y (- ey-p8 16.0)) (- ey-p8 16.0))))
+  (define l82-has-explicit-wall-key?
+    (or (hash-has-key? obs 'enemy-wall-open?)
+        (hash-has-key? obs 'enemy-wall-assessment)))
+  (define erx-p8 (hash-ref obs 'enemy-ramp-x #f))
+  (define ery-p8 (hash-ref obs 'enemy-ramp-y #f))
+  (define has-eramp-p8? (and (real? erx-p8) (real? ery-p8)))
+  (define erx-f8 (if has-eramp-p8? (exact->inexact erx-p8) ex-p8))
+  (define ery-f8 (if has-eramp-p8? (exact->inexact ery-p8) ey-p8))
+  ;; Loop 82B: Strict separation of high-ground enemy main-ramp vision vs low-ground natural scout!
+  ;; NEVER forge `'scouted-enemy-main? #t` from a low-ground natural scout (`<= 22t` of enemy natural);
+  ;; default fogged Terran main ramps (and fogged 1-base Protoss main ramps) to CLOSED (`#f`).
+  (define l82-ally-saw-enemy-main-unit?
+    (for/or ([u (in-list (or (l2-ctx-ally-units ctx) '()))])
+      (and (hash? u)
+           (let ([ux (exact->inexact (hash-ref u 'x -999.0))]
+                 [uy (exact->inexact (hash-ref u 'y -999.0))])
+             (or (fl<= (fast-dist2d ux uy ex-p8 ey-p8) 12.0)
+                 (and has-eramp-p8?
+                      (fl<= (fast-dist2d ux uy erx-f8 ery-f8) 12.0)))))))
+  (define l82-enemy-main-bldg-seen?
+    (let ([main-non-th?
+           (for/or ([eb (in-list enemy-bldgs)])
+             (and (hash? eb)
+                  (not (memq (fast-canonical-structure-sym (unit-type-sym eb))
+                             '(nexus command-center orbital-command planetary-fortress hatchery lair hive)))
+                  (let ([bx (exact->inexact (hash-ref eb 'x -999.0))]
+                        [by (exact->inexact (hash-ref eb 'y -999.0))])
+                    (and (fl<= (fast-dist2d bx by ex-p8 ey-p8) 16.0)
+                         (> (fast-dist2d bx by enx-p8 eny-p8) 8.0)))))]
+          [main-any-cnt
+           (count (lambda (eb)
+                    (and (hash? eb)
+                         (let ([bx (exact->inexact (hash-ref eb 'x -999.0))]
+                               [by (exact->inexact (hash-ref eb 'y -999.0))])
+                           (fl<= (fast-dist2d bx by ex-p8 ey-p8) 18.0))))
+                  enemy-bldgs)])
+      (or main-non-th? (>= main-any-cnt 2))))
+  (define l82-enemy-nat-th-seen?
+    (for/or ([eb (in-list enemy-bldgs)])
+      (and (hash? eb)
+           (memq (fast-canonical-structure-sym (unit-type-sym eb))
+                 '(nexus command-center orbital-command planetary-fortress hatchery lair hive))
+           (fl<= (fast-dist2d (exact->inexact (hash-ref eb 'x -999.0))
+                              (exact->inexact (hash-ref eb 'y -999.0))
+                              enx-p8 eny-p8)
+                 10.0))))
+  (define l82-ally-saw-enemy-nat-unit?
+    (for/or ([u (in-list (or (l2-ctx-ally-units ctx) '()))])
+      (and (hash? u)
+           (fl<= (fast-dist2d (exact->inexact (hash-ref u 'x -999.0))
+                              (exact->inexact (hash-ref u 'y -999.0))
+                              enx-p8 eny-p8)
+                 15.0))))
+  (define l82-scouted-enemy-main-now?
+    (or (eq? (hash-ref obs 'scouted-enemy-main? #f) #t)
+        (eq? (hash-ref scout-st-p8 'visited-main? #f) #t)
+        l82-ally-saw-enemy-main-unit?
+        l82-enemy-main-bldg-seen?))
+  (define l82-scouted-enemy-choke-now?
+    (or (eq? (hash-ref obs 'scouted-enemy-choke? #f) #t)
+        (eq? (hash-ref scout-st-p8 'visited-nat? #f) #t)
+        l82-ally-saw-enemy-nat-unit?
+        l82-scouted-enemy-main-now?))
+  ;; Decide whether we actually have sufficient vision to classify this enemy race's wall:
+  ;; - Terran/Unknown: walls on high-ground main ramp -> MUST have real main-ramp vision (`l82-scouted-enemy-main-now?`)!
+  ;; - Protoss: if 2-base (`l82-enemy-nat-th-seen?`) or explicit `scouted-enemy-choke?`, natural scout suffices;
+  ;;            if 1-base (no natural Nexus seen), Protoss may wall main ramp -> require `l82-scouted-enemy-main-now?`!
+  ;; - Zerg: natural choke / main scout suffices.
+  (define l82-wall-vision-sufficient?
+    (cond
+      [(memq effective-enemy-race '(Terran Unknown Random))
+       l82-scouted-enemy-main-now?]
+      [(eq? effective-enemy-race 'Protoss)
+       (or l82-scouted-enemy-main-now?
+           (and l82-scouted-enemy-choke-now?
+                (or l82-enemy-nat-th-seen?
+                    (eq? (hash-ref obs 'scouted-enemy-choke? #f) #t))))]
+      [else
+       (or l82-scouted-enemy-choke-now? l82-scouted-enemy-main-now?)]))
+  (define-values (l82-enemy-wall-assessment l82-enemy-wall-open?)
+    (cond
+      [l82-has-explicit-wall-key?
+       (define raw-a (hash-ref obs 'enemy-wall-assessment #f))
+       (define raw-o
+         (if (hash-has-key? obs 'enemy-wall-open?)
+             (and (hash-ref obs 'enemy-wall-open? #f) #t)
+             (and raw-a (enemy-wall-assessment->open? raw-a))))
+       (hash-set! wall-st-p8 'l82-enemy-wall-assessment raw-a)
+       (hash-set! wall-st-p8 'l82-enemy-wall-open? raw-o)
+       (values raw-a raw-o)]
+      [(and (<= frame 6720)
+            l82-wall-vision-sufficient?
+            (or l82-ally-saw-enemy-main-unit?
+                l82-ally-saw-enemy-nat-unit?
+                l82-enemy-main-bldg-seen?
+                l82-enemy-nat-th-seen?
+                (eq? (hash-ref obs 'scouted-enemy-choke? #f) #t)
+                (eq? (hash-ref obs 'scouted-enemy-main? #f) #t)
+                (not (hash-has-key? wall-st-p8 'l82-enemy-wall-open?))))
+       (define wobs
+         (hash-set* obs
+                    'frame frame
+                    'enemy-race effective-enemy-race
+                    'base-x base-x 'base-y base-y
+                    'enemy-x ex-p8 'enemy-y ey-p8
+                    'enemy-natural-x enx-p8 'enemy-natural-y eny-p8
+                    'ally-units (l2-ctx-ally-units ctx)
+                    'enemy-buildings enemy-bldgs
+                    'enemy-units enemy-units
+                    'scouted-enemy-choke? l82-scouted-enemy-choke-now?
+                    'scouted-enemy-main? l82-scouted-enemy-main-now?))
+       (define assmt (classify-enemy-wall-state wobs))
+       (define open? (enemy-wall-assessment->open? assmt))
+       (hash-set! wall-st-p8 'l82-enemy-wall-assessment assmt)
+       (hash-set! wall-st-p8 'l82-enemy-wall-open? open?)
+       (values assmt open?)]
+      [(<= frame 6720)
+       (values (hash-ref wall-st-p8 'l82-enemy-wall-assessment #f)
+               (and (hash-ref wall-st-p8 'l82-enemy-wall-open? #f) #t))]
+      [else
+       (values #f #f)]))
   (define macro-cache-ok?
     (and live-game?
          (> frame 60)
@@ -15382,13 +15734,17 @@
          (eq? (vector-ref mc-cv 45) ms-trust)
          (eq? (vector-ref mc-cv 46) ms-strat)
          (equal? (vector-ref mc-cv 47) depleting-bases)
-         (eq? (vector-ref mc-cv 48) (not (not natural-blocked?)))
+         (eq? (vector-ref mc-cv 48) (not (not eff-natural-blocked-for-brain?)))
          (equal? (vector-ref mc-cv 80) enemy-b-counts)
          (equal? (vector-ref mc-cv 81) owm-believed-sup-bkt)
          (eq? (vector-ref mc-cv 82) owm-stopped-exp?)
          (equal? (vector-ref mc-cv 83) owm-siege-cnt)
          (eq? (vector-ref mc-cv 84) arb-gas-boost-active?)
-         (eq? (vector-ref mc-cv 85) arb-fac-boost-active?)))
+         (eq? (vector-ref mc-cv 85) arb-fac-boost-active?)
+         (eqv? (hash-ref wall-st-p8 'l82-mc-key -1)
+               (+ (if l82-enemy-wall-open? 1 0)
+                  (* 2 l82-total-adepts-produced)
+                  (* 1024 l82-total-zerglings-produced)))))
   (define-values (macro-world macro-decision dyn-plan plan-next-actions-ht repaired-prereqs)
     (if macro-cache-ok?
         (values (vector-ref mc-cv 1)
@@ -15457,7 +15813,11 @@
                     #:third-x third-x #:third-y third-y
                     #:mirror-signals mirror-signals-ht
                     #:depleting-bases depleting-bases
-                    #:natural-blocked? natural-blocked?)]
+                    #:natural-blocked? eff-natural-blocked-for-brain?
+                    #:enemy-wall-open? l82-enemy-wall-open?
+                    #:enemy-wall-assessment l82-enemy-wall-assessment
+                    #:total-adepts-produced l82-total-adepts-produced
+                    #:total-zerglings-produced l82-total-zerglings-produced)]
                [md (step-priority-macro-brain
                     mw
                     #:arbiter-gas-override-count arb-gas-ov-cnt
@@ -15516,13 +15876,17 @@
             (vector-set! mc-cv 45 ms-trust)
             (vector-set! mc-cv 46 ms-strat)
             (vector-set! mc-cv 47 depleting-bases)
-            (vector-set! mc-cv 48 (not (not natural-blocked?)))
+            (vector-set! mc-cv 48 (not (not eff-natural-blocked-for-brain?)))
             (vector-set! mc-cv 80 enemy-b-counts)
             (vector-set! mc-cv 81 owm-believed-sup-bkt)
             (vector-set! mc-cv 82 owm-stopped-exp?)
             (vector-set! mc-cv 83 owm-siege-cnt)
             (vector-set! mc-cv 84 arb-gas-boost-active?)
-            (vector-set! mc-cv 85 arb-fac-boost-active?))
+            (vector-set! mc-cv 85 arb-fac-boost-active?)
+            (hash-set! wall-st-p8 'l82-mc-key
+                       (+ (if l82-enemy-wall-open? 1 0)
+                          (* 2 l82-total-adepts-produced)
+                          (* 1024 l82-total-zerglings-produced))))
           (values mw md dp pn rp))))
   (set-l2-ctx-macro-decision! ctx macro-decision)
   ;; L59 Tier-1A (`#1502`/`#1507`): Expose Watchdog Law 1 `'stage2-expand-ring` stalled goal
@@ -17323,7 +17687,8 @@
                 (refractory-ready? cd-tracker '(macro-expand Zerg) frame
                                    (if (and live-game? (< (length hatcheries) 2)) 196 SC2-EXPANSION-COOLDOWN-FRAMES))
                 (let-values ([(cand-ex cand-ey)
-                              (l2-select-uncamped-expansion-pad ctx (< (length hatcheries) SC2-MIN-DESIRED-BASES))])
+                              (l2-select-uncamped-expansion-pad ctx (and (< (length hatcheries) SC2-MIN-DESIRED-BASES)
+                                                                         (not (l2-ctx-natural-blocked? ctx))))])
                   (and cand-ex cand-ey
                        (or (not live-game?)
                            (< (length hatcheries) 2)
@@ -17393,7 +17758,8 @@
          (not forward-proxy-detected?)
          (not zerg-early-pool-rush?)
          (not blocked-nat-expanded-early?)
-         (not (l2-ctx-natural-blocked? ctx))
+         (or (not (l2-ctx-natural-blocked? ctx))
+             (l2-nat-block-has-safe-pivot? ctx))
          (null? orphaned-prereqs)
          (not (eq? bo-goal-sym 'spawning-pool))
          (< frame 1650)
@@ -18795,7 +19161,8 @@
             (not under-early-cheese?)
             (not early-survival-crisis?)
             (not blocked-nat-expanded-early?)
-            (not (l2-ctx-natural-blocked? ctx))
+            (or (not (l2-ctx-natural-blocked? ctx))
+                (l2-nat-block-has-safe-pivot? ctx))
             (not (l2-ctx-forward-proxy-detected? ctx))
             (not (l2-ctx-escrow-suppressed-active? ctx))
             (<= (length hatcheries) 1)
@@ -19004,7 +19371,44 @@
          (< total-workers 34)
          (>= total-workers 16)
          (not zerg-peaceful-essential-bo-reserve?)))
-  (when zerg-drone-priority?
+  ;; Loop 82 (Track C/D): Scout-Triggered Unwalled Speedling Flood -> Macro Transition (`ZvP`/`ZvT`):
+  ;; When scout confirmed open opponent wall (`2:00..4:15`), `Spawning Pool` ready, `Metabolic Boost`
+  ;; started/ready, and Macro Brain scheduled `zergling`, train capped Speedlings up to 16 total
+  ;; BEFORE Drones (while preserving 2-base Queens), then immediately resume Droning + 3rd Hatch!
+  (define zerg-l82-wall-st (rt-wall-state (l2-ctx-rt ctx)))
+  (define zerg-l82-lings-produced (hash-ref zerg-l82-wall-st 'l82-total-zerglings-produced 0))
+  (define zerg-l82-unwalled-speedling-punish-now?
+    (and live-game?
+         (>= frame 2688)
+         (<= frame 5712)
+         (memq effective-enemy-race '(Protoss Terran))
+         (>= (length hatcheries) 2)
+         (>= total-workers 19)
+         (not under-base-attack?)
+         (not early-survival-crisis?)
+         (not zerg-saving-for-expand?)
+         (memq 'spawning-pool ready-bldg-types)
+         (or (memq 'zergling-movementspeed researched-upgs)
+             (memq 'metabolic-boost researched-upgs)
+             (memq 'zergling-movementspeed (l2-ctx-pending-upgs ctx))
+             (memq 'metabolic-boost (l2-ctx-pending-upgs ctx)))
+         (eq? (hash-ref zerg-l82-wall-st 'l82-enemy-wall-open? #f) #t)
+         (let ([md (l2-ctx-macro-decision ctx)])
+           (and (macro-brain-decision? md)
+                (memq 'zergling (macro-brain-decision-scheduled-ids md))))
+         (< (l2-unit-count ctx 'zergling) 16)
+         (< zerg-l82-lings-produced 16)))
+  (when zerg-l82-unwalled-speedling-punish-now?
+    (define cur-q-l82
+      (+ (l2-unit-count ctx 'queen)
+         (order-ledger-pending-count-for-type (l2-ctx-oledger ctx) 'queen frame)))
+    (define need-queen-res? (and (< cur-q-l82 (min 2 (length hatcheries))) (< (l2-ctx-minerals ctx) 200)))
+    (define rem-ling-pairs (quotient (max 0 (- 16 (max (l2-unit-count ctx 'zergling) zerg-l82-lings-produced))) 2))
+    (when (and (not need-queen-res?) (> rem-ling-pairs 0))
+      (l2-try-train-unit! ctx 'zergling 'larva 4
+                          #:max-batch (min 4 rem-ling-pairs)
+                          #:respect-bo-reserve? #f)))
+  (when (and zerg-drone-priority? (not zerg-l82-unwalled-speedling-punish-now?))
        (l2-try-train-unit! ctx 'drone 'larva 4
                         #:max-batch zerg-drone-batch
                         #:respect-bo-reserve?
@@ -19529,6 +19933,79 @@
                           (not (eq? (hash-ref b 'powered? #t) #f))))
                    (l2-ctx-ally-bldgs ctx)))))
 
+;; Loop 82 (Track B/D): Cleanly budgeted L2 helper for Pro Offensive Natural Expansion-Block
+;; + Auto-Cancel (`25M` PvZ Pylon-cancel / `31.25M` TvP Ebay-cancel, bounded to 1 early scout
+;; worker at 0:45-1:45 when safe, with unconditional auto-cancel `314` up to frame 4500!).
+(define (l2-try-pro-offensive-expansion-block! ctx has-core-prod?)
+  (define frame (l2-ctx-frame ctx))
+  (define race (l2-ctx-race ctx))
+  (define live-game? (l2-ctx-live-obs-harvesters? ctx))
+  (when (and live-game?
+             (memq race '(Protoss Terran))
+             (>= frame 1008)
+             (<= frame 4500))
+    (define obs (l2-ctx-obs ctx))
+    (define ally-bldgs (l2-ctx-ally-bldgs ctx))
+    (define has-inc-block?
+      (for/or ([b (in-list ally-bldgs)])
+        (and (hash? b)
+             (memq (fast-canonical-structure-sym (unit-type-sym b)) '(pylon engineering-bay))
+             (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+             (> (dist2d (l2-ctx-base-x ctx) (l2-ctx-base-y ctx)
+                        (exact->inexact (hash-ref b 'x (l2-ctx-base-x ctx)))
+                        (exact->inexact (hash-ref b 'y (l2-ctx-base-y ctx))))
+                40.0))))
+    (define allow-new-off-block?
+      (and (<= frame 2016)
+           has-core-prod?
+           (>= (l2-ctx-supply-left ctx) 3)
+           (not (l2-ctx-supply-at-risk? ctx))
+           (not (l2-saving-for-expansion-now? ctx (l2-ctx-active-bases ctx)))
+           (not (memq (l2-ctx-prio-saving-for-sym ctx)
+                      '(nexus command-center pylon supply-depot)))
+           (not (l2-ctx-under-base-attack? ctx))
+           (not (l2-ctx-early-survival-crisis? ctx))
+           (not (l2-ctx-worker-rush-active? ctx))
+           (not (l2-ctx-under-early-cheese? ctx))
+           (>= (l2-ctx-minerals ctx) (if (eq? race 'Protoss) 125 150))))
+    (when (or has-inc-block? allow-new-off-block?)
+      (define blk-obs
+        (hash-set* obs
+                   'our-race race
+                   'race race
+                   'enemy-race (l2-ctx-effective-enemy-race ctx)
+                   'frame frame
+                   'minerals (l2-ctx-minerals ctx)
+                   'base-x (l2-ctx-base-x ctx)
+                   'base-y (l2-ctx-base-y ctx)
+                   'enemy-x (l2-ctx-enemy-x ctx)
+                   'enemy-y (l2-ctx-enemy-y ctx)
+                   'ally-units (l2-ctx-ally-units ctx)
+                   'ally-buildings ally-bldgs
+                   'enemy-buildings (l2-ctx-enemy-bldgs ctx)
+                   'under-attack? (or (l2-ctx-under-base-attack? ctx)
+                                      (l2-ctx-early-survival-crisis? ctx)
+                                      (l2-ctx-worker-rush-active? ctx))))
+      (define cmds (plan-pro-offensive-expansion-block blk-obs))
+      (define cd-tracker (l2-ctx-cd-tracker ctx))
+      (for ([a (in-list cmds)] #:when (pair? a))
+        (cond
+          [(eq? (car a) 'cancel-building)
+           (l2-emit! ctx a)]
+          [(and (eq? (car a) 'build)
+                (>= (length a) 4)
+                allow-new-off-block?)
+           (define bsym (second a))
+           (define bx (third a))
+           (define by (fourth a))
+           (define mcost (sc2-min-cost bsym))
+           (when (and (>= (l2-ctx-minerals ctx) mcost)
+                      (refractory-allow-action?! cd-tracker (list 'l82-pro-off-exp-block race) frame 448))
+             (l2-emit! ctx (list 'build bsym bx by))
+             ;; Loop 82B: Do NOT record offensive cancel-Pylon as home supply `'pylon` in `oledger`
+             ;; so home Pylon #2 is NEVER blocked while this forward Pylon awaits `314` cancel!
+             (l2-spend-resources-and-supply! ctx mcost 0 0))])))))
+
 (define (l2-protoss-phase1-chrono-wall! ctx)
   (define allow-exact-wall-slot? (l2-ctx-allow-exact-wall-slot? ctx))
   (define ally-bldgs (l2-ctx-ally-bldgs ctx))
@@ -19593,6 +20070,90 @@
   (set-l2-ctx-active-assimilators! ctx active-assimilators)
   (define gateways (reverse gateways-rev))
   (set-l2-ctx-gateways! ctx gateways)
+  ;; Loop 82 (Track B/D): Protoss Emergency Pylon / Shield Battery Wall-Off + Auto-Cancel (`314`)
+  ;; budgeted directly inside Layer 2 (`<= 8064f`) so incoming Adept Shades / Speedling floods
+  ;; immediately seal the solved 1-hex doorway (`25M` net after `75%` cancel refund) without L34 leaks!
+  (when (and (<= frame 8064) (pair? ally-bldgs))
+    (define has-ew-threat-or-plug?
+      (or (for/or ([e (in-list enemy-units)])
+            (and (hash? e)
+                 (memq (fast-canonical-unit-sym (unit-type-sym e))
+                       '(adept-phase-shift adept zergling))))
+          (for/or ([b (in-list ally-bldgs)])
+            (and (hash? b)
+                 (memq (fast-canonical-structure-sym (unit-type-sym b))
+                       '(pylon shield-battery))
+                 (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))))
+    (when has-ew-threat-or-plug?
+      (define wall-door (and (hash? protoss-matchup-wall) (hash-ref protoss-matchup-wall 'door #f)))
+      (define resolved-ew-door
+        (cond
+          [(pair? (hash-ref obs 'door-pos #f)) (hash-ref obs 'door-pos)]
+          [(and (real? (hash-ref obs 'wall-door-x #f)) (real? (hash-ref obs 'wall-door-y #f)))
+           (cons (hash-ref obs 'wall-door-x) (hash-ref obs 'wall-door-y))]
+          [(pair? wall-door) wall-door]
+          [else #f]))
+      ;; Only drop a NEW emergency doorway Pylon/Battery when a real wall doorway actually exists
+      ;; (`>= 2` friendly wall structures within `<= 5.5t` of the solved/explicit door) so we never
+      ;; waste `100M` on an open-field plug while Zerglings breach an unwalled base (`L57-R1`)!
+      ;; Cancel (`314`) on any already-warping-in emergency plug ALWAYS runs regardless.
+      (define ew-door-has-real-wall?
+        (and (pair? resolved-ew-door)
+             (real? (car resolved-ew-door))
+             (real? (cdr resolved-ew-door))
+             (let ([dx0 (exact->inexact (car resolved-ew-door))]
+                   [dy0 (exact->inexact (cdr resolved-ew-door))])
+               (>= (count (lambda (b)
+                            (and (hash? b)
+                                 (memq (fast-canonical-structure-sym (unit-type-sym b))
+                                       '(gateway warp-gate cybernetics-core forge pylon
+                                         shield-battery stargate robotics-facility twilight-council))
+                                 (real? (hash-ref b 'x #f))
+                                 (real? (hash-ref b 'y #f))
+                                 (<= (dist2d dx0 dy0
+                                             (exact->inexact (hash-ref b 'x 9999.0))
+                                             (exact->inexact (hash-ref b 'y 9999.0)))
+                                     5.5)))
+                          ally-bldgs)
+                   2))))
+      (define ew-obs-0
+        (hash-set* obs
+                   'our-race 'Protoss
+                   'race 'Protoss
+                   'frame frame
+                   'minerals (l2-ctx-minerals ctx)
+                   'base-x base-x
+                   'base-y base-y
+                   'natural-x nat-x
+                   'natural-y nat-y
+                   'enemy-x (l2-ctx-enemy-x ctx)
+                   'enemy-y (l2-ctx-enemy-y ctx)
+                   'ally-buildings ally-bldgs
+                   'ally-units ally-units
+                   'enemy-units enemy-units))
+      (define ew-obs
+        (if (and (pair? wall-door)
+                 (not (hash-has-key? obs 'door-pos))
+                 (not (hash-has-key? obs 'wall-door-x)))
+            (hash-set ew-obs-0 'door-pos wall-door)
+            ew-obs-0))
+      (for ([a (in-list (plan-protoss-emergency-walloff-and-cancel ew-obs))]
+            #:when (pair? a))
+        (cond
+          [(eq? (car a) 'cancel-building)
+           (l2-emit! ctx a)]
+          [(and ew-door-has-real-wall? (eq? (car a) 'build) (>= (length a) 4))
+           (define bsym (second a))
+           (define dx (third a))
+           (define dy (fourth a))
+           (define mcost (sc2-min-cost bsym))
+           (when (and (>= (l2-ctx-minerals ctx) mcost)
+                      (refractory-allow-action?! cd-tracker (list 'l82-emergency-walloff bsym) frame 32))
+             (l2-emit! ctx (list 'build bsym dx dy))
+             (order-ledger-record-issued! oledger (+ 840000 (modulo frame 10000)) 'build bsym dx dy frame)
+             (l2-spend-resources-and-supply! ctx mcost 0 0))]))))
+  ;; Loop 82 (Track B/D): Pro `25M` PvZ Natural Pylon-Cancel Block (only after Gateway #1 started).
+  (l2-try-pro-offensive-expansion-block! ctx (pair? gateways))
   (define ready-nexuses
        (let ([rev '()])
          (for ([b (in-list ready-bldgs)])
@@ -21014,7 +21575,22 @@
                          (>= eff-phase-supply 72))))
            2
            1))
+  ;; Loop 82B: Protect 1-base peaceful PvT Natural Nexus #2 (< 2:20) from Robotics Facility #1 drain!
+  (define pvt-1base-defer-robo-for-nat?
+    (and live-game?
+         (eq? effective-enemy-race 'Terran)
+         (= (length nexuses) 1)
+         (= (order-ledger-pending-count-for-type oledger 'nexus frame) 0)
+         (< frame 3136)
+         (not under-base-attack?)
+         (not early-survival-crisis?)
+         (not (l2-ctx-worker-rush-active? ctx))
+         (not (l2-ctx-in-base-proxy-detected? ctx))
+         (not (l2-ctx-forward-proxy-detected? ctx))
+         (not protoss-cloak-det-emergency?)
+         (< (l2-ctx-minerals ctx) (+ (sc2-min-cost 'nexus) (sc2-min-cost 'robotics-facility)))))
   (when (and (memq 'cybernetics-core ready-bldg-types)
+                (not pvt-1base-defer-robo-for-nat?)
                 (or (not early-breach-defer-tech?) (and (= cur-robo-cnt 0) protoss-cloak-det-emergency?))
                 (or (not p2-anti-reaper-defer-robo?) (and (= cur-robo-cnt 0) protoss-cloak-det-emergency?))
                 (or (not protoss-saving-for-expand?)
@@ -21626,6 +22202,20 @@
                   (and (< gw-tot 3)
                        (>= (l2-ctx-minerals ctx) 300)
                        (member '(build gateway) prio-scheduled-actions))))))
+  ;; Loop 82B: Protect 1-base peaceful PvT Natural Nexus #2 (< 2:20 = 3136f) from Gateway #2 /
+  ;; premature 1-base tech drains so Natural Nexus lands on time (~1:50-2:05 instead of 3:48)!
+  (define pvt-protect-1base-nat-nexus?
+    (and live-game?
+         (eq? (l2-ctx-effective-enemy-race ctx) 'Terran)
+         (= (length nexuses) 1)
+         (= pending-nexus-count 0)
+         (< frame 3136)
+         (not under-base-attack?)
+         (not early-survival-crisis?)
+         (not (l2-ctx-worker-rush-active? ctx))
+         (not (l2-ctx-in-base-proxy-detected? ctx))
+         (not (l2-ctx-forward-proxy-detected? ctx))
+         (memq 'gateway (l2-ctx-bldg-types ctx))))
   ;; Loop 68 B5 + Loop 81: Keep 1-base Natural Nexus mineral reserve alive from >= 100M
   ;; (even at 0 army supply when zero enemy threat is present) in peaceful < 4:00 (5376f)
   ;; openings so timeout expiry or PvP 2-Gate/2-Assim gating never delays Natural Nexus!
@@ -21636,7 +22226,8 @@
          (not under-base-attack?)
          (not early-survival-crisis?)
          (or (>= live-army-supply 1) (<= live-enemy-threat-supply 0))
-         (eq? (l2-ctx-prio-saving-for-sym ctx) 'nexus)
+         (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'nexus)
+             pvt-protect-1base-nat-nexus?)
          (memq 'cybernetics-core (l2-ctx-bldg-types ctx))
          (>= (l2-ctx-minerals ctx) 100)))
   (define protoss-nat-reserve
@@ -21660,7 +22251,7 @@
             #:workers total-workers
             #:under-attack? under-base-attack?
             #:enemy-threat-supply live-enemy-threat-supply
-            #:natural-blocked? natural-blocked?
+            #:natural-blocked? (and natural-blocked? (not (l2-nat-block-has-safe-pivot? ctx)))
             #:escrow-expired? (or escrow-suppressed-active?
                                   (l2-macro-brain-expand-backed-off? ctx)
                                   (and (not protoss-1base-nat-nexus-escrow-keep?)
@@ -21788,7 +22379,11 @@
     (and brain-sched-gate-now? (>= gw-ref-minerals 300)))
   (when (and (or (not protoss-saving-for-expand?)
                  protoss-early-rush-2nd-gate?
-                 brain-sched-gate-cleared-nexus?)
+                 (and brain-sched-gate-cleared-nexus?
+                      (not pvt-protect-1base-nat-nexus?)))
+                (not (and pvt-protect-1base-nat-nexus?
+                          (>= (length gateways) 1)
+                          (< (l2-ctx-minerals ctx) (+ (sc2-min-cost 'nexus) (sc2-min-cost 'gateway)))))
                 (not p2-early-ling-rush-hold-gate2?)
                 (or (< (+ (length gateways) (order-ledger-pending-count-for-type oledger 'gateway frame)) 2)
                     (p2-urgent-stalker-res-ok? (sc2-min-cost 'gateway) 0))
@@ -21869,7 +22464,7 @@
                (not early-survival-crisis?)
                (not under-base-attack?)
                (not protoss-early-rush-2nd-gate?)
-               (< frame 2600)
+               (< frame 4800)
                (< cur-escrow-age-frames 64)
                (<= (length nexuses) 2)
                (= gw-idx 1)
@@ -22620,6 +23215,32 @@
                                   (and (>= (l2-ctx-gas ctx) 120) (>= (length ally-combat-units) 2))))
                          (< (l2-unit-count ctx 'sentry) 2)))
             (l2-try-train-unit! ctx 'sentry 'gateway 5 #:respect-bo-reserve? #t))
+          ;; Loop 82 (Track C/D): Scout-Triggered Unwalled-Opponent Adept Punish (`2` vs Z/P, `3` vs T):
+          ;; When scout confirmed open opponent wall (`1:45..4:30`, `CyberCore` ready, peaceful at home)
+          ;; and Macro Brain scheduled `adept` (`u=562.0`), train the capped Adept(s) ahead of Stalker/Zealot
+          ;; without cutting Probes or Natural Nexus, then seamlessly resume standard macro!
+          (let* ([pw-st (rt-wall-state (l2-ctx-rt ctx))]
+                 [adept-cap-l82 (protoss-unwalled-adept-target effective-enemy-race)]
+                 [adepts-prod-l82 (hash-ref pw-st 'l82-total-adepts-produced 0)])
+            (when (and live-game?
+                       (>= frame 2352)
+                       (<= frame 6048)
+                       (not under-base-attack?)
+                       (not (l2-ctx-early-survival-crisis? ctx))
+                       (not protoss-saving-for-expand?)
+                       ;; Loop 82B: In PvT, never let unwalled-punish Adepts preempt 1-base Natural Nexus (< 2:10)!
+                       (or (not (eq? effective-enemy-race 'Terran))
+                           (>= (length nexuses) 2)
+                           (>= frame 2912))
+                       (not p3-anti-reaper-stalker-only?)
+                       (eq? (hash-ref pw-st 'l82-enemy-wall-open? #f) #t)
+                       (let ([md (l2-ctx-macro-decision ctx)])
+                         (and (macro-brain-decision? md)
+                              (memq 'adept (macro-brain-decision-scheduled-ids md))))
+                       (< (l2-unit-count ctx 'adept) adept-cap-l82)
+                       (< adepts-prod-l82 adept-cap-l82)
+                       (gateway-unit-colossus-ok? 'adept))
+              (l2-try-train-unit! ctx 'adept 'gateway 5 #:respect-bo-reserve? #t)))
           ;; Counter-composition sensors: Zergling/Baneling floods (#5122350) vs Reaper/proxy Terran (#5122354)
           (define-values (enemy-reaper-cnt enemy-light-swarm-cnt enemy-armored-or-air-cnt pvz-unit? pvz-air?)
             (for/fold ([reap 0] [light 0] [arm-air 0] [pvz? #f] [pvz-air? #f])
@@ -23368,6 +23989,75 @@
              (when (and chosen-patch-id (> chosen-patch-id 0))
                (set-add! claimed-mule-patches chosen-patch-id)
                (l2-emit! ctx (list 'cast-spell cid 'calldown-mule chosen-patch-id)))])]))
+  ;; Loop 82 (`norman` 0-3 Expansion-Block Defense): Float Terran's high-ground in-base 2nd CC/OC
+  ;; cleanly down to the Natural once the block is cleared (and land any idle flying CC/OC).
+  (when (and live-game?
+             (not under-base-attack?)
+             (not early-survival-crisis?)
+             (not (l2-ctx-worker-rush-active? ctx)))
+    (define nat-th-occupied?
+      (for/or ([cc (in-list ccs)])
+        (and (hash? cc)
+             (<= (dist2d nat-x nat-y
+                         (exact->inexact (hash-ref cc 'x 9999.0))
+                         (exact->inexact (hash-ref cc 'y 9999.0)))
+                 8.0))))
+    (define nat-clear-for-float?
+      (and (not nat-th-occupied?)
+           (> (dist2d base-x base-y nat-x nat-y) 10.0)
+           (not natural-blocked?)
+           (not (l2-pad-camped-by-enemy? ctx nat-x nat-y 11.5))))
+    ;; Phase A: Land any idle flying Command Center / Orbital Command on Natural (or safe uncamped pad).
+    (for ([fb (in-list ally-bldgs)]
+          #:when (and (hash? fb)
+                      (memq (unit-type-sym fb) '(command-center-flying orbital-command-flying))
+                      (<= (hash-ref fb 'order-count 0) 0)
+                      (= (hash-ref fb 'order-ability-id 0) 0)))
+      (define fid (hash-ref fb 'id 0))
+      (when (and (> fid 0)
+                 (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                            (list 'terran-float-cc-land fid)
+                                            frame
+                                            48))
+        (define-values (lx ly)
+          (if nat-clear-for-float?
+              (values nat-x nat-y)
+              (l2-select-uncamped-expansion-pad ctx #f)))
+        (when (and (real? lx) (real? ly))
+          (l2-emit! ctx (list 'land-building fid lx ly)))))
+    ;; Phase B: Lift an idle completed 2nd CC/OC built on the high ground inside Main once Natural is clear.
+    (when (and nat-clear-for-float?
+               (< frame 8064)
+               (>= (length ccs) 2)
+               (for/or ([cc (in-list ccs)])
+                 (<= (dist2d base-x base-y
+                             (exact->inexact (hash-ref cc 'x 9999.0))
+                             (exact->inexact (hash-ref cc 'y 9999.0)))
+                     6.0)))
+      (define high-ground-2nd-cc
+        (for/first ([cc (in-list ccs)]
+                    #:when (let* ([ct (unit-type-sym cc)]
+                                  [ccx (exact->inexact (hash-ref cc 'x 9999.0))]
+                                  [ccy (exact->inexact (hash-ref cc 'y 9999.0))]
+                                  [d-main (dist2d base-x base-y ccx ccy)])
+                             (and (memq ct '(command-center orbital-command))
+                                  (l2-building-grounded-and-powered? ctx cc)
+                                  (>= (hash-ref cc 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                                  (<= (hash-ref cc 'order-count 0) 0)
+                                  (= (hash-ref cc 'order-ability-id 0) 0)
+                                  (not (order-ledger-facility-busy? oledger cc frame))
+                                  (> d-main 2.5)
+                                  (<= d-main 18.0))))
+          cc))
+      (when high-ground-2nd-cc
+        (define hid (hash-ref high-ground-2nd-cc 'id 0))
+        (when (and (> hid 0)
+                   (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                              (list 'terran-float-cc-lift hid)
+                                              frame
+                                              112))
+          (l2-emit! ctx (list 'cast-spell hid 'lift))
+          (order-ledger-record-issued! oledger hid 'cast-spell 'lift nat-x nat-y frame)))))
   (when (and live-game?
                 (memq 'starport ready-bldg-types)
                 (memq 'starport-techlab ready-bldg-types)
@@ -23549,16 +24239,23 @@
          (l2-emit! ctx (list 'swap-addon
                       (hash-ref rax-with-reactor 'id 704)
                       (hash-ref fac-needing-addon 'id 705)))))
+  ;; Loop 82 (Track B/D): Pro `31.25M` TvP Natural Ebay-Cancel Block (only after Barracks #1 started).
+  (l2-try-pro-offensive-expansion-block! ctx (pair? barracks-list))
   ;; Activate Terran addon swaps by coordinating donor release when a bare Factory/Starport needs an addon.
   (define door-st-swap (rt-door-state rt))
   (define allow-rax-tl-strip-now?
     (and (>= (length barracks-list) 2)
          (not (l2-building-present-or-pending? ctx 'factory-techlab #t))))
-  (define swap-obs
+  (define swap-obs-0
     (if (and allow-rax-tl-strip-now?
              (not (eq? (hash-ref obs 'allow-barracks-techlab-strip? #f) #t)))
         (hash-set obs 'allow-barracks-techlab-strip? #t)
         obs))
+  (define swap-obs
+    (let ([rw (l2-ctx-terran-ramp-wall ctx)])
+      (if (and (hash? rw) (not (hash-empty? rw)))
+          (hash-set swap-obs-0 'terran-ramp-wall rw)
+          swap-obs-0)))
   (define addon-swap-acts (plan-terran-addon-swap swap-obs))
   (set-l2-ctx-addon-swap-acts! ctx addon-swap-acts)
   (for ([swap-act (in-list addon-swap-acts)])
@@ -23583,8 +24280,15 @@
                                                              ally-bldgs))]
                                          [ad (or (hash-ref b 'addon #f)
                                                  (and ad-rec (unit-type-sym ad-rec)))])
+                                    (define-values (is-wall-rax? _wall-ac?)
+                                      (l2-terran-wall-barracks-info ctx b))
                                     (and (memq bt '(barracks factory))
                                          (not (eq? bt (unit-type-sym bare-recipient)))
+                                         ;; Loop 82 (Bug T1): Do not hold a ramp-wall Barracks idle as swap donor
+                                         ;; unless a Factory is immediately ready to swap-seal or late midgame!
+                                         (or (not is-wall-rax?)
+                                             (>= frame 6720)
+                                             (eq? (unit-type-sym bare-recipient) 'factory))
                                          (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
                                          (l2-building-grounded-and-powered? ctx b)
                                          (l2-terran-facility-has-addon? ctx b)
@@ -23893,21 +24597,34 @@
   ;; Loop 67 Phase D + Loop 68 B5: Keep 1-base Natural CC mineral reserve alive from >= 50M
   ;; while actively saving for 'command-center (or `l2-terran-1base-cc-intent?`) in peaceful
   ;; < 4:00 (5376f) openings so timeout expiry never drains Nat CC!
-  (define terran-1base-nat-cc-escrow-keep?
-    (and (= (length ccs) 1)
+  ;; Loop 82B: When 1-base Terran Natural is non-combat blocked (Pylon/Ebay) and OC #1 is started/ready,
+  ;; protect 400M escrow strictly ahead of Factory / Barracks #2 so high-ground in-base CC #2 lands immediately!
+  (define terran-blocked-nat-inbase-cc-escrow?
+    (and live-game?
+         (= (length ccs) 1)
          (= pending-cc-count 0)
-         (< frame 5376)
-         (not under-base-attack?)
-         (not early-survival-crisis?)
-         (>= live-army-supply 1)
-         (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
-             (l2-terran-1base-cc-intent? ctx))
+         (< frame 4800)
+         (l2-nat-block-has-safe-pivot? ctx)
+         (l2-building-present-or-pending? ctx 'orbital-command)
          (>= (l2-ctx-minerals ctx) 50)))
+  (define terran-1base-nat-cc-escrow-keep?
+    (or terran-blocked-nat-inbase-cc-escrow?
+        (and (= (length ccs) 1)
+             (= pending-cc-count 0)
+             (< frame 5376)
+             (not under-base-attack?)
+             (not early-survival-crisis?)
+             (>= live-army-supply 1)
+             (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+                 (l2-terran-1base-cc-intent? ctx))
+             (>= (l2-ctx-minerals ctx) 50))))
   (define terran-2base-cc-escrow-keep?
     (l2-terran-2base-cc-escrow-ok? ctx (length ccs)))
   (define reserved-expansion-minerals
        (if live-game?
-           (max (if terran-2base-cc-escrow-keep? (sc2-min-cost 'command-center) 0)
+           (max (if (or terran-2base-cc-escrow-keep? terran-blocked-nat-inbase-cc-escrow?)
+                    (sc2-min-cost 'command-center)
+                    0)
                 (compute-natural-expansion-mineral-reserve
                  #:race 'Terran
                  #:frame frame
@@ -23916,17 +24633,18 @@
                  #:workers total-workers
                  #:under-attack? (or under-base-attack? early-survival-crisis?)
                  #:enemy-threat-supply live-enemy-threat-supply
-                 #:natural-blocked? natural-blocked?
-                 #:escrow-expired? (or (and escrow-suppressed-active?
-                                            (not (and terran-1base-nat-cc-escrow-keep?
-                                                      (>= (l2-ctx-minerals ctx) 175)
-                                                      (< cur-escrow-age-frames 960))))
-                                       early-survival-crisis?
-                                       (l2-macro-brain-expand-backed-off? ctx)
-                                       (and (not terran-1base-nat-cc-escrow-keep?)
-                                            (>= cur-escrow-age-frames max-escrow-timeout-frames))
-                                       urgent-combat-or-intel-need?
-                                       (not (null? orphaned-prereqs)))))
+                 #:natural-blocked? (and natural-blocked? (not (l2-nat-block-has-safe-pivot? ctx)))
+                 #:escrow-expired? (and (not terran-blocked-nat-inbase-cc-escrow?)
+                                        (or (and escrow-suppressed-active?
+                                                 (not (and terran-1base-nat-cc-escrow-keep?
+                                                           (>= (l2-ctx-minerals ctx) 175)
+                                                           (< cur-escrow-age-frames 960))))
+                                            early-survival-crisis?
+                                            (l2-macro-brain-expand-backed-off? ctx)
+                                            (and (not terran-1base-nat-cc-escrow-keep?)
+                                                 (>= cur-escrow-age-frames max-escrow-timeout-frames))
+                                            urgent-combat-or-intel-need?
+                                            (not (null? orphaned-prereqs))))))
            0))
   (set-l2-ctx-reserved-expansion-minerals! ctx reserved-expansion-minerals)
   (l2-protect-unemitted-scheduled-expansion! ctx 'command-center)
@@ -24863,9 +25581,24 @@
             (>= (length barracks-list) 1)
             (< cur-rax-total 2)
             (>= (l2-ctx-minerals ctx) 200)))
+  ;; Loop 82B (Terran East-Ramp RaxTL +33s / Stim +35s Fix):
+  ;; When ramp-wall Barracks #1's add-on pad is blocked (`addon-clear? = #f` on east-facing spawns),
+  ;; accelerate an add-on-clear in-base Barracks #2 right after Natural CC #2 & OC #1 (~105-115s,
+  ;; ahead of EngineeringBay and without waiting for 350M / Factory finish) so `BarracksTechLab` &
+  ;; `Stim` start on time while keeping 96.4% ramp walling intact!
+  (define terran-wall-rax1-need-addon-rax2?
+    (and live-game?
+         (< frame 4800)
+         (not (memq 'engineering-bay ready-bldg-types))
+         (not terran-worker-rush-cap-rax1?)
+         (= (length barracks-list) 1)
+         (= cur-rax-total 1)
+         (>= (+ (length ccs) pending-cc-count) 2)
+         (not terran-saving-for-orbital?)
+         (l2-terran-wall-barracks-addon-blocked? ctx (car barracks-list))))
   (define raw-desired-barracks
        (min SC2-MAX-PRODUCTION-FACILITIES
-            (max (if terran-early-rush-2nd-rax? 2 1)
+            (max (if (or terran-early-rush-2nd-rax? terran-wall-rax1-need-addon-rax2?) 2 1)
                  (if (>= (+ (length ccs) pending-cc-count) SC2-MIN-DESIRED-BASES)
                      (* SC2-TERRAN-FACILITIES-PER-BASE (max (length ccs) (+ (length ccs) pending-cc-count)))
                      (if (or terran-early-rush-2nd-rax?
@@ -24970,6 +25703,7 @@
                     (>= (l2-ctx-minerals ctx) (+ (sc2-min-cost 'barracks) (sc2-min-cost 'supply-depot))))
                 (l2-save-cancel-rebuild-ready? ctx 'barracks 60)
                 (or terran-early-rush-2nd-rax?
+                    terran-wall-rax1-need-addon-rax2?
                     brain-sched-rax-now?
                     (and live-game?
                          (memq 'factory (l2-ctx-bldg-types ctx))
@@ -25004,24 +25738,32 @@
                     (>= (l2-ctx-minerals ctx) 350))
                 (< cur-rax-total desired-barracks)
                 (or terran-early-rush-2nd-rax?
+                    terran-wall-rax1-need-addon-rax2?
                     brain-sched-rax-now?
                     (memq 'factory (l2-ctx-bldg-types ctx))
                     (< (l2-ctx-gas ctx) (sc2-gas-cost 'factory))
                     (>= (l2-ctx-minerals ctx) SC2-SURPLUS-MINERAL-BANK-THRESHOLD))
-                (if (or terran-early-rush-2nd-rax? brain-sched-rax-now?)
+                (if (or terran-early-rush-2nd-rax? terran-wall-rax1-need-addon-rax2? brain-sched-rax-now?)
                     (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'barracks))
-                        (if terran-early-rush-2nd-rax?
-                            (max (l2-ctx-hard-supply-lockout-reserve-min ctx)
-                                 (if (> (hash-ref open-prod-slots 'barracks 0) 0)
-                                     (sc2-min-cost 'marine)
-                                     0))
-                            ;; L48-P0-1a: When Macro Brain explicitly scheduled `barracks` (and is NOT
-                            ;; saving for `command-center`/`orbital-command`), waive `reserved-expansion-minerals`
-                            ;; so `160..265M` banks actually build Barracks #5/#7 instead of stalling 132x!
-                            (+ (if (memq (l2-ctx-prio-saving-for-sym ctx) '(command-center orbital-command))
-                                   reserved-expansion-minerals
-                                   0)
-                               (l2-ctx-hard-supply-lockout-reserve-min ctx))))
+                        (cond
+                          [terran-early-rush-2nd-rax?
+                           (max (l2-ctx-hard-supply-lockout-reserve-min ctx)
+                                (if (> (hash-ref open-prod-slots 'barracks 0) 0)
+                                    (sc2-min-cost 'marine)
+                                    0))]
+                          [terran-wall-rax1-need-addon-rax2?
+                           (+ (if (memq (l2-ctx-prio-saving-for-sym ctx) '(command-center orbital-command))
+                                  reserved-expansion-minerals
+                                  0)
+                              (l2-ctx-hard-supply-lockout-reserve-min ctx))]
+                          [else
+                           ;; L48-P0-1a: When Macro Brain explicitly scheduled `barracks` (and is NOT
+                           ;; saving for `command-center`/`orbital-command`), waive `reserved-expansion-minerals`
+                           ;; so `160..265M` banks actually build Barracks #5/#7 instead of stalling 132x!
+                           (+ (if (memq (l2-ctx-prio-saving-for-sym ctx) '(command-center orbital-command))
+                                  reserved-expansion-minerals
+                                  0)
+                              (l2-ctx-hard-supply-lockout-reserve-min ctx))]))
                     (and (>= (- (l2-ctx-minerals ctx)
                                 (+ reserved-expansion-minerals
                                    (max terran-worker-min-floor
@@ -25289,6 +26031,11 @@
                     (memq 'engineering-bay (macro-brain-decision-scheduled-ids md)))))))
   (when (and (not terran-saving-for-expand?)
                 (not terran-saving-for-orbital?)
+                ;; Loop 82B: On east-facing spawns where wall Barracks #1 is add-on blocked,
+                ;; never let non-emergency EngineeringBay jump ahead of add-on-clear in-base Barracks #2!
+                (or need-emergency-ebay-or-turret?
+                    (not terran-wall-rax1-need-addon-rax2?)
+                    (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'engineering-bay)) (sc2-min-cost 'barracks)))
                 (or (not live-game?)
                     (memq 'barracks ready-bldg-types))
                 (or (not urgent-combat-or-intel-need?)
@@ -27372,7 +28119,10 @@
     (define sit-upgs
       (select-situational-upgrades
        race sit-primary enemy-comp-syms
-       researched-upgs (l2-ctx-pending-upgs ctx) ready-bldgs (l2-ctx-minerals ctx) (l2-ctx-gas ctx)))
+       researched-upgs (l2-ctx-pending-upgs ctx) ready-bldgs (l2-ctx-minerals ctx) (l2-ctx-gas ctx)
+       #:enemy-race (l2-ctx-effective-enemy-race ctx)
+       #:hellion-count (+ (l2-unit-count ctx 'hellion) (l2-unit-count ctx 'hellion-tank))
+       #:siege-tank-count (+ (l2-unit-count ctx 'siege-tank) (l2-unit-count ctx 'siege-tank-sieged))))
     (define sit-protoss-air-ships
       (+ (l2-unit-count ctx 'void-ray)
          (l2-unit-count ctx 'carrier)
@@ -38593,11 +39343,125 @@
          (when (hash? sc-p)
            (hash-set! sc-p 'l58-staging-active? #f))
          #f])))
-  ;; L59C (`#1566` Fix #4): Disabled `l59-p7-reserved-harass-tags` — NEVER pull live midgame
-  ;; army units out of Phase 5b into Phase 7 (prevented `ATK_PT 8+` army fragmentation!).
-  (let ([sc-r (l34-ctx-l34-sc ctx)])
+  ;; Loop 82 (Track B/D): Reserve early Protoss 1..3 Adept harass squads (`frame <= 6720` = 5:00,
+  ;; live match with buildings, peaceful at home) cleanly for Phase 7 `step-multitask-harass-and-proxy`
+  ;; so Pro Adept Shade Micro (`5.5s` delayed fake-cancel, `75%` main commit, `2`/`3`-Adept 1-volley
+  ;; worker focus, retreat-out safety Shades, cross-base dual-prong) owns them without Phase 5b
+  ;; interference! Never fragments mid/late armies (`> 6720f` or `>= 4` Adepts) or home defense!
+  (let* ([sc-r (l34-ctx-l34-sc ctx)]
+         [res-set (mutable-seteqv)]
+         [punish-res-set (mutable-seteqv)]
+         [w3h (l34-ctx-wave3-handled-tags ctx)]
+         [fr-r (l34-ctx-frame ctx)]
+         [combat-r (or (l34-ctx-combat-units ctx) '())]
+         [eu-r (or (l34-ctx-enemy-units ctx) '())]
+         [bx-r (exact->inexact (l34-ctx-base-x ctx))]
+         [by-r (exact->inexact (l34-ctx-base-y ctx))]
+         [nx-r (exact->inexact (l34-ctx-nat-x ctx))]
+         [ny-r (exact->inexact (l34-ctx-nat-y ctx))]
+         [enemy-near-22?
+          (for/or ([e (in-list eu-r)])
+            (and (hash? e)
+                 (combat-unit-record? e)
+                 (not (eq? (hash-ref e 'snapshot? #f) #t))
+                 (let ([ex (exact->inexact (hash-ref e 'x 9999.0))]
+                       [ey (exact->inexact (hash-ref e 'y 9999.0))])
+                   (or (fl<= (fast-dist2d ex ey bx-r by-r) 22.0)
+                       (fl<= (fast-dist2d ex ey nx-r ny-r) 22.0)))))])
+    (define rt-r (l34-ctx-rt ctx))
+    (define our-race-r
+      (let ([r (and rt-r (live-bot-runtime-actual-race rt-r))])
+        (if (and (symbol? r) (not (eq? r 'Unknown)))
+            r
+            (hash-ref (l34-ctx-obs ctx) 'race 'Unknown))))
+    (when (and (l34-ctx-live-obs? ctx)
+               (eq? our-race-r 'Protoss)
+               (<= fr-r 6720)
+               (pair? (l34-ctx-ally-bldgs ctx))
+               (not (l34-ctx-under-tactics-base-attack? ctx))
+               (not (l34-ctx-enemy-within-14-of-th? ctx))
+               (not enemy-near-22?))
+      (define ex-r (exact->inexact (l34-ctx-enemy-x ctx)))
+      (define ey-r (exact->inexact (l34-ctx-enemy-y ctx)))
+      (define early-adepts
+        (for/list ([u (in-list combat-r)]
+                   #:when (and (hash? u)
+                               (eq? (unit-type-sym u) 'adept)
+                               (exact-integer? (hash-ref u 'id #f))
+                               (> (hash-ref u 'id 0) 0)))
+          u))
+      (define e-race-r (hash-ref (l34-ctx-obs ctx) 'enemy-race 'Unknown))
+      (when (and (>= (length early-adepts) 1)
+                 (<= (length early-adepts) 3)
+                 (or (>= (length early-adepts) 2)
+                     (> (length combat-r) (length early-adepts))
+                     (not (eq? e-race-r 'Zerg))))
+        (for ([a (in-list early-adepts)])
+          (define ax-r (exact->inexact (hash-ref a 'x bx-r)))
+          (define ay-r (exact->inexact (hash-ref a 'y by-r)))
+          (define near-enemy-base-or-worker?
+            (or (fl<= (fast-dist2d ax-r ay-r ex-r ey-r) 38.0)
+                (for/or ([e (in-list eu-r)])
+                  (and (hash? e)
+                       (memq (fast-canonical-unit-sym (unit-type-sym e)) '(drone probe scv))
+                       (fl<= (fast-dist2d ax-r ay-r
+                                          (exact->inexact (hash-ref e 'x 9999.0))
+                                          (exact->inexact (hash-ref e 'y 9999.0)))
+                             16.0)))))
+          (define midmap-combat-clash?
+            (and (not near-enemy-base-or-worker?)
+                 (for/or ([e (in-list eu-r)])
+                   (and (hash? e)
+                        (combat-unit-record? e)
+                        (not (eq? (hash-ref e 'snapshot? #f) #t))
+                        (fl<= (fast-dist2d ax-r ay-r
+                                           (exact->inexact (hash-ref e 'x 9999.0))
+                                           (exact->inexact (hash-ref e 'y 9999.0)))
+                              10.0)))))
+          (unless midmap-combat-clash?
+            (define aid (hash-ref a 'id 0))
+            (set-add! res-set aid)
+            (when (generic-set? w3h) (set-add! w3h aid))))))
+    ;; Loop 82 (Track C/D): Reserve early Zerg unwalled-punish Speedlings (`4..16` Lings, `frame <= 6720`,
+    ;; latched `l82-enemy-wall-open?`, peaceful home, not actively fighting enemy combat units within `10.0t`)
+    ;; cleanly past Phase 5b/6 straight into Phase 7 `plan-unwalled-opponent-punish`!
+    (when (and (l34-ctx-live-obs? ctx)
+               (eq? our-race-r 'Zerg)
+               (<= fr-r 6720)
+               (pair? (l34-ctx-ally-bldgs ctx))
+               (not (l34-ctx-under-tactics-base-attack? ctx))
+               (not (l34-ctx-enemy-within-14-of-th? ctx))
+               (not enemy-near-22?)
+               rt-r
+               (eq? (hash-ref (rt-wall-state rt-r) 'l82-enemy-wall-open? #f) #t))
+      (define enemy-combat-coords-r
+        (for/list ([e (in-list eu-r)]
+                   #:when (and (hash? e)
+                               (combat-unit-record? e)
+                               (not (eq? (hash-ref e 'snapshot? #f) #t))
+                               (real? (hash-ref e 'x #f))
+                               (real? (hash-ref e 'y #f))))
+          (cons (exact->inexact (hash-ref e 'x 0.0))
+                (exact->inexact (hash-ref e 'y 0.0)))))
+      (define early-punish-lings
+        (for/list ([u (in-list combat-r)]
+                   #:when (and (hash? u)
+                               (eq? (unit-type-sym u) 'zergling)
+                               (exact-integer? (hash-ref u 'id #f))
+                               (> (hash-ref u 'id 0) 0)
+                               (let ([ux (exact->inexact (hash-ref u 'x bx-r))]
+                                     [uy (exact->inexact (hash-ref u 'y by-r))])
+                                 (not (for/or ([ec (in-list enemy-combat-coords-r)])
+                                        (fl<= (fast-dist2d ux uy (car ec) (cdr ec)) 10.0))))))
+          u))
+      (when (>= (length early-punish-lings) 4)
+        (for ([z (in-list (take early-punish-lings (min 16 (length early-punish-lings))))])
+          (define zid (hash-ref z 'id 0))
+          (set-add! punish-res-set zid)
+          (when (generic-set? w3h) (set-add! w3h zid)))))
     (when (hash? sc-r)
-      (hash-set! sc-r 'l59-p7-reserved-harass-tags (mutable-seteqv))))
+      (hash-set! sc-r 'l59-p7-reserved-harass-tags res-set)
+      (hash-set! sc-r 'l82-p7-reserved-punish-tags punish-res-set)))
   ;; L59-P3 + L59C (`#1566` Fix #1) + L60 (`sc2-nc-09` restore): Pre-Phase-5b Destructible Rock
   ;; Breach (`nc-09`), Collapsible Rockslide Seal (`nc-10`), & Post-Clear Follow-Through (`nc-07`/`nc-08`).
   ;; Strictly gated to `(not has-th-rk?)` where `has-th-rk?` means a LIVE-ECONOMY base (`>= 2` ally
@@ -40150,6 +41014,12 @@
                    (l34-emit-preserved! ctx (unit-mode-directive->sexp std))))
                handled))))
 
+    (define p5-p7-reserved-harass-set
+      (let ([s (and (hash? l34-sc) (hash-ref l34-sc 'l59-p7-reserved-harass-tags #f))])
+        (and (generic-set? s) (not (set-empty? s)) s)))
+    (define p5-p7-reserved-punish-set
+      (let ([s (and (hash? l34-sc) (hash-ref l34-sc 'l82-p7-reserved-punish-tags #f))])
+        (and (generic-set? s) (not (set-empty? s)) s)))
     (for ([u (in-list (if endgame-harmless-only-sweep? '() combat-units))])
       (define uid (hash-ref u 'id 101))
       (define u-ab-id (if live-obs? (hash-ref u 'order-ability-id 0) 0))
@@ -40163,6 +41033,8 @@
                (or (not (real? raw-wcd)) (<= (exact->inexact raw-wcd) 0.05)))))
       (define skip?
         (or (and has-combat-skip-tags? (hash-has-key? combat-skip-tags uid))
+            (and p5-p7-reserved-harass-set (set-member? p5-p7-reserved-harass-set uid))
+            (and p5-p7-reserved-punish-set (set-member? p5-p7-reserved-punish-set uid))
             (and p5-tank-splash-handled-set (set-member? p5-tank-splash-handled-set uid))
             (and live-obs? (memq protected-class '(morph channel cast-walk)))
             (and (not post-blink-focus-ready?)
@@ -45462,7 +46334,7 @@
   ;; Phase 5b/6 so `multitask-harass-and-proxy` receives them unclaimed!
   (define p7-reserved-harass-set
     (let ([s (and (hash? l34-sc) (hash-ref l34-sc 'l59-p7-reserved-harass-tags #f))])
-      (if (set? s) s (seteqv))))
+      (if (generic-set? s) s (seteqv))))
   (when (not (set-empty? p7-reserved-harass-set))
     (for ([rid (in-set p7-reserved-harass-set)])
       (hash-remove! direct-claimed-ht rid))
@@ -45471,7 +46343,7 @@
     (and (l34-ctx-live-obs? ctx)
          (eq? (hash-ref l34-sc 'endgame-hunt-active? #f) #t)))
   (when (and (not p7-endgame-hunt-active?)
-             has-any-enemy?
+             (or has-any-enemy? (not (set-empty? p7-reserved-harass-set)))
              (or (not (set-empty? p7-reserved-harass-set))
                  has-ally-harass-sym?
                  has-enemy-harass-sym?
@@ -45579,7 +46451,9 @@
                               ;; L59 Tier-1B (`#1499` L39589): Exempt reserved runby/drop squads & Banelings
                               ;; from the `frontline-combat-engaged?` drop so `plan-baneling-move-past-and-light-clump-detonate`,
                               ;; `plan-coordinated-runby-tactics`, and `plan-multi-base-adept-harass` execute!
-                              [(and (not (memq ut '(medivac warp-prism warp-prism-phasing overlord-transport baneling)))
+                              [(and (not (memq ut '(medivac warp-prism warp-prism-phasing overlord-transport baneling
+                                                    adept-phase-shift)))
+                                    (not (and (eq? ut 'adept) (<= frame 6720) (not enemy-near-home?)))
                                     (not (set-member? p7-reserved-harass-set (hash-ref u 'id -1)))
                                     (or (frontline-combat-engaged? u)
                                         (frontline-raiding-workers? u)))
@@ -45808,10 +46682,31 @@
   ;; `(null? ally-bldgs)` (0-building Arena clashes), where it invents a phantom ramp door at
   ;; `base+14.6t` inside the enemy army and overwrites a frontline Stalker's `attack-unit` with `move`!
   (when (and enemy-near-home? (pair? ally-bldgs))
-    (emit-direct-batch! (plan-own-wall-integrity-defense obs)))
+    (define p-door-p7
+      (let ([cached (and (eq? direct-our-race 'Protoss)
+                         (hash-ref (rt-wall-state rt) 'cached-protoss-wall #f))])
+        (and (pair? cached) (hash? (cdr cached)) (hash-ref (cdr cached) 'door #f))))
+    (define wall-def-obs
+      (if (and (pair? p-door-p7)
+               (not (hash-has-key? obs 'door-pos))
+               (not (hash-has-key? obs 'wall-door-x)))
+          (hash-set obs 'door-pos p-door-p7)
+          obs))
+    (emit-direct-batch! (plan-own-wall-integrity-defense wall-def-obs)))
+  (define l82-latched-wall-open?
+    (and (<= frame 6720)
+         (eq? (hash-ref (rt-wall-state rt) 'l82-enemy-wall-open? #f) #t)))
+  (define p7-reserved-punish-set
+    (let ([s (and (hash? l34-sc) (hash-ref l34-sc 'l82-p7-reserved-punish-tags #f))])
+      (if (generic-set? s) s (seteqv))))
+  (when (not (set-empty? p7-reserved-punish-set))
+    (for ([pid (in-set p7-reserved-punish-set)])
+      (hash-remove! direct-claimed-ht pid))
+    (set! unclaimed-allies-cache #f))
   (when (and (not p7-endgame-hunt-active?)
              has-ally-unwalled-punish-unit?
              (or (pair? enemy-bldgs)
+                 l82-latched-wall-open?
                  (hash-ref obs 'scouted-enemy-choke? #f)
                  (hash-ref obs 'scouted-enemy-main? #f)))
     (define p-ex (exact->inexact (fast-finite-real (hash-ref obs 'enemy-x 160.0) 160.0)))
@@ -45858,8 +46753,16 @@
                  'ally-units p-ally-units
                  'enemy-buildings p-enemy-bldgs
                  'enemy-units p-enemy-units
-                 'scouted-enemy-main? (or (pair? enemy-bldgs) (hash-ref obs 'scouted-enemy-main? #f))))
+                 'scouted-enemy-choke? (or l82-latched-wall-open? (hash-ref obs 'scouted-enemy-choke? #f))
+                 'scouted-enemy-main? (or (pair? enemy-bldgs) l82-latched-wall-open? (hash-ref obs 'scouted-enemy-main? #f))))
     (emit-direct-batch! (UnwalledPunishPlan-commands (plan-unwalled-opponent-punish punish-obs))))
+  (when (not (set-empty? p7-reserved-punish-set))
+    (define fallback-punish-acts
+      (for/list ([pid (in-set p7-reserved-punish-set)]
+                 #:when (not (hash-ref direct-claimed-ht pid #f)))
+        (list 'attack-pos pid enemy-x enemy-y)))
+    (when (pair? fallback-punish-acts)
+      (emit-direct-batch! fallback-punish-acts)))
   (when (or (<= frame 2800) has-ally-wall-block-bldg?)
     (define raw-block-acts (plan-expansion-and-gas-blocks obs))
     (define live-block-obs? (hash-has-key? obs 'mineral-harvesters))
