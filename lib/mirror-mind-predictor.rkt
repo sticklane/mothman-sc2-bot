@@ -119,6 +119,7 @@
          bayesian-posterior-from-likelihoods
          compute-bayesian-strategic-posteriors
          compute-bayesian-pad-camped-posterior
+         compute-bayesian-enemy-turtle-posterior
          horizon-sec->optimal-cognitive-depth
          horizon-sec->calibrated-certainty
          predict-multi-horizon-snapshots
@@ -2781,11 +2782,44 @@
 ;; 3. Component 1: Shadow Economy & Dark-Matter Resource Ledger
 ;; =============================================================================
 
+;; L86D: ABI-preserving weak side-table mapping `mstate -> (hash bid #(family bx by))`
+;; so SC2 Protobuf `Snapshot` tag-churn never double-counts fogged enemy buildings in `bldg-costs`!
+(define MIRROR-BLDG-SPATIAL-TABLE (make-weak-hasheq))
+
+(define (mirror-bldg-spatial-family bt)
+  (cond
+    [(memq bt '(nexus command-center command-center-flying orbital-command orbital-command-flying
+                planetary-fortress hatchery lair hive))
+     'townhall]
+    [(memq bt '(assimilator assimilator-rich refinery refinery-rich extractor extractor-rich))
+     'geyser]
+    [(memq bt '(gateway warp-gate warpgate))
+     'gateway]
+    [(memq bt '(spire greater-spire))
+     'spire]
+    [(memq bt '(supply-depot supply-depot-lowered))
+     'supply-depot]
+    [(memq bt '(spine-crawler spine-crawler-uprooted))
+     'spine-crawler]
+    [(memq bt '(spore-crawler spore-crawler-uprooted))
+     'spore-crawler]
+    [else bt]))
+
+(define (mirror-bldg-spatial-r2 fam)
+  (cond
+    [(memq fam '(townhall geyser)) 16.0] ; 4.0t
+    [(memq fam '(pylon supply-depot photon-cannon shield-battery missile-turret
+                 spine-crawler spore-crawler sensor-tower dark-shrine creep-tumor))
+     2.25] ; 1.5t (strictly < 2.0t adjacent 2x2 center spacing)
+    [else 6.25])) ; 2.5t (strictly < 3.0t adjacent 3x3+ center spacing)
+
 (define (compute-opponent-shadow-ledger mstate raw-frame raw-enemy-units raw-enemy-bldgs
                                         #:base-x [raw-base-x 32]
                                         #:base-y [raw-base-y 32]
                                         #:nat-x [raw-nat-x #f]
                                         #:nat-y [raw-nat-y #f]
+                                        #:remembered-enemy-bases [raw-rem-eb #f]
+                                        #:remembered-enemy-gases [raw-rem-eg #f]
                                         #:observed-effects [observed-effects '()]
                                         #:enemy-workers-killed [raw-enemy-workers-killed 0]
                                         #:our-upgrade-tier [raw-our-upgrade-tier 0]
@@ -2797,6 +2831,14 @@
   (define has-nat? (and (real? raw-nat-x) (real? raw-nat-y)))
   (define nat-x (if has-nat? (safe-coord raw-nat-x 50) 50))
   (define nat-y (if has-nat? (safe-coord raw-nat-y 56) 56))
+  (define rem-enemy-bases
+    (if (and (real? raw-rem-eb) (> raw-rem-eb 0))
+        (min 12 (max 1 (exact-round raw-rem-eb)))
+        0))
+  (define rem-enemy-gases
+    (if (and (real? raw-rem-eg) (>= raw-rem-eg 0))
+        (min 24 (max 0 (exact-round raw-rem-eg)))
+        0))
   (define enemy-workers-killed (max 0 (safe-int raw-enemy-workers-killed 0)))
   (define our-upgrade-tier (max 0 (safe-int raw-our-upgrade-tier 0)))
   (define enemy-units (if (list? raw-enemy-units) raw-enemy-units '()))
@@ -2821,11 +2863,75 @@
         (unless (eq? prev-c new-c)
           (hash-set! unit-costs uid new-c)))))
 
+  ;; L86E O(1) Fast Path: already-tracked `bid` with unchanged `bt` does 2 hash lookups,
+  ;; 0 allocations, and 0 spatial scans! Spatial dedup runs ONLY on genuinely new/Snapshot tags.
+  (define bldg-spatial-tbl
+    (or (hash-ref MIRROR-BLDG-SPATIAL-TABLE mstate #f)
+        (let ([ht (make-hash)])
+          (hash-set! MIRROR-BLDG-SPATIAL-TABLE mstate ht)
+          ht)))
+  (define seen-bldg-ids-this-step #f)
   (for ([b (in-list enemy-bldgs)]
         #:unless (or (hash-ref b 'canceled? #f) (hash-ref b 'canceled #f)))
     (define bid (hash-ref b 'id #f))
-    (when (and bid (not (hash-has-key? bldg-costs bid)))
-      (hash-set! bldg-costs bid (unit-resource-cost (unit-type-sym b)))))
+    (when bid
+      (define bt (unit-type-sym b))
+      (define prev-c (hash-ref bldg-costs bid #f))
+      (cond
+        [prev-c
+         (define sp (hash-ref bldg-spatial-tbl bid #f))
+         (unless (and (vector? sp) (eq? (vector-ref sp 3) bt))
+           ;; Morph or first coordinate record for existing tag
+           (define new-cost (unit-resource-cost bt))
+           (when (or (> (car new-cost) (car prev-c)) (> (cdr new-cost) (cdr prev-c)))
+             (hash-set! bldg-costs bid
+                        (cons (max (car prev-c) (car new-cost))
+                              (max (cdr prev-c) (cdr new-cost)))))
+           (define raw-bx (hash-ref b 'x #f))
+           (define raw-by (hash-ref b 'y #f))
+           (when (and (real? raw-bx) (real? raw-by))
+             (hash-set! bldg-spatial-tbl bid
+                        (vector (mirror-bldg-spatial-family bt)
+                                (exact->inexact raw-bx)
+                                (exact->inexact raw-by)
+                                bt))))]
+        [else
+         ;; Genuinely new/Snapshot `bid`: populate `seen-bldg-ids-this-step` lazily once per step
+         (unless seen-bldg-ids-this-step
+           (set! seen-bldg-ids-this-step (make-hash))
+           (for ([eb (in-list enemy-bldgs)])
+             (define ebid (hash-ref eb 'id #f))
+             (when ebid (hash-set! seen-bldg-ids-this-step ebid #t))))
+         (define new-cost (unit-resource-cost bt))
+         (define raw-bx (hash-ref b 'x #f))
+         (define raw-by (hash-ref b 'y #f))
+         (if (and (real? raw-bx) (real? raw-by))
+             (let* ([bx (exact->inexact raw-bx)]
+                    [by (exact->inexact raw-by)]
+                    [fam (mirror-bldg-spatial-family bt)]
+                    [r2 (mirror-bldg-spatial-r2 fam)]
+                    [replaced-ids
+                     (for/list ([(old-id old-v) (in-hash bldg-spatial-tbl)]
+                                #:when (and (not (equal? old-id bid))
+                                            (eq? (vector-ref old-v 0) fam)
+                                            (let ([dx (- bx (vector-ref old-v 1))]
+                                                  [dy (- by (vector-ref old-v 2))])
+                                              (define d2 (+ (* dx dx) (* dy dy)))
+                                              (if (hash-has-key? seen-bldg-ids-this-step old-id)
+                                                  (<= d2 1.0)
+                                                  (<= d2 r2)))))
+                       old-id)]
+                    [merged-cost
+                     (for/fold ([mc new-cost]) ([old-id (in-list replaced-ids)])
+                       (define oc (hash-ref bldg-costs old-id #f))
+                       (hash-remove! bldg-costs old-id)
+                       (hash-remove! bldg-spatial-tbl old-id)
+                       (if (pair? oc)
+                           (cons (max (car mc) (car oc)) (max (cdr mc) (cdr oc)))
+                           mc))])
+               (hash-set! bldg-costs bid merged-cost)
+               (hash-set! bldg-spatial-tbl bid (vector fam bx by bt)))
+             (hash-set! bldg-costs bid new-cost))])))
 
   ;; Rational opponent worker curve: starts at 12 workers, adds ~1 worker every
   ;; 268 frames (12s) with zero supply blocks, up to 66 workers, minus killed workers.
@@ -2915,7 +3021,9 @@
       (set! seen-gas-bldgs (add1 seen-gas-bldgs)))
     (when (and (not bldg-static-def?)
                (memq bt '(bunker photon-cannon shield-battery spine-crawler
-                          planetary-fortress siege-tank siege-tank-sieged)))
+                          planetary-fortress siege-tank siege-tank-sieged
+                          widow-mine widow-mine-burrowed liberator liberator-ag
+                          lurker lurker-burrowed lurker-mp lurker-mp-burrowed)))
       (set! bldg-static-def? #t))
     (when (not (or (hash-ref b 'canceled? #f) (hash-ref b 'canceled #f)))
       (define bx (safe-real (hash-ref b 'x 160) 160))
@@ -2960,7 +3068,9 @@
       (set! ground-combat-count (add1 ground-combat-count)))
     (when (and (not unit-static-def?)
                (memq ut '(bunker photon-cannon shield-battery spine-crawler
-                          planetary-fortress siege-tank siege-tank-sieged)))
+                          planetary-fortress siege-tank siege-tank-sieged
+                          widow-mine widow-mine-burrowed liberator liberator-ag
+                          lurker lurker-burrowed lurker-mp lurker-mp-burrowed)))
       (set! unit-static-def? #t))
     (when wk?
       (set! visible-enemy-workers (add1 visible-enemy-workers)))
@@ -2979,15 +3089,17 @@
     (or near-enemy-bldg?
         (>= near-enemy-combat-count 1)
         (>= near-enemy-worker-count 3)))
+  (define eff-seen-gas-bldgs (max seen-gas-bldgs rem-enemy-gases))
+  (define eff-known-th-cnt (max (length enemy-townhalls) rem-enemy-bases))
   (define zero-gas-rush?
     (and (>= frame 1800)
          (<= frame 6048)
-         (<= (length enemy-townhalls) 1)
+         (<= eff-known-th-cnt 1)
          (= accounted-gas 0)
          (or (>= enemy-combat-count 5)
              (>= near-enemy-worker-count 5))))
   (define calibrated-geyser-mode?
-    (or (>= seen-gas-bldgs 1)
+    (or (>= eff-seen-gas-bldgs 1)
         (>= ground-combat-count 2)
         (not enemy-near-us?)))
   (define expected-gas
@@ -2995,8 +3107,15 @@
       [zero-gas-rush? 0]
       [calibrated-geyser-mode?
        (define g1 (* (max 0 (- frame 1200)) 0.095))
-       (define g2 (if (>= seen-gas-bldgs 2) (* (max 0 (- frame 2400)) 0.085) 0.0))
-       (exact-round (+ g1 g2))]
+       (define g2 (if (>= eff-seen-gas-bldgs 2) (* (max 0 (- frame 2400)) 0.085) 0.0))
+       ;; L86C Track A: Scale expected gas beyond 2 geysers when >= 3 remembered/estimated!
+       (define g-extra
+         (if (>= eff-seen-gas-bldgs 3)
+             (for/sum ([idx (in-range 3 (add1 (min 12 eff-seen-gas-bldgs)))])
+               (define onset (+ 2400 (* (- idx 2) 1800)))
+               (* (max 0 (- frame onset)) 0.080))
+             0.0))
+       (exact-round (+ g1 g2 g-extra))]
       [else raw-expected-gas]))
 
   (define delta-min (max 0 (- expected-minerals accounted-minerals)))
@@ -3018,11 +3137,11 @@
        'proxy-production-or-all-in]
       [(and (>= delta-gas 200)
             (< seen-unit-gas 150)
-            (or enemy-near-us? (>= seen-gas-bldgs 2)))
+            (or enemy-near-us? (>= eff-seen-gas-bldgs 2)))
        'hidden-air-or-cloak-tech-switch]
       [(and (>= frame 2200)
             (<= frame 6048)
-            (<= (length enemy-townhalls) 1)
+            (<= eff-known-th-cnt 1)
             (>= delta-min 450)
             proxy-attack-near-us?)
        'proxy-production-or-all-in]
@@ -3030,21 +3149,21 @@
             (or (>= delta-gas 100)
                 (and (>= frame 2200)
                      (<= frame 6048)
-                     (<= (length enemy-townhalls) 1))))
+                     (<= eff-known-th-cnt 1))))
        ;; Rational-Opponent Principle: unaccounted resources under 1-base fog in the
        ;; early/mid game are potentially threatening unseen Army/Tech — NEVER free greed!
        'imminent-fog-timing-wave]
       [(or (and (>= (length enemy-townhalls) 3) (<= enemy-combat-count 4))
            (and (> frame 6048)
-                (<= (length enemy-townhalls) 1)
+                (<= eff-known-th-cnt 1)
                 (>= delta-min 750)
                 (< delta-gas 150)))
        'hidden-expansion-or-macro-boom]
       [else
        'accounted-visible-macro]))
 
-  ;; Predict enemy bases: active visible townhalls + post-early-window unscouted expansion
-  (define visible-enemy-bases (max 1 (length enemy-townhalls)))
+  ;; Predict enemy bases: active visible/remembered townhalls + post-early-window unscouted expansion
+  (define visible-enemy-bases (max 1 eff-known-th-cnt))
   (define dark-matter-imminent-bases
     (cond
       [(or proxy-attack-near-us? (eq? hypothesis 'proxy-production-or-all-in)) 0]
@@ -3073,7 +3192,7 @@
     (if (> frame 4000) pred-enemy-bases visible-enemy-bases))
   (define initial-verdict
     (cond
-      [(and (>= visible-enemy-bases 3) (<= enemy-combat-count 4) (not proxy-attack-near-us?))
+      [(and (>= (length enemy-townhalls) 3) (<= enemy-combat-count 4) (not proxy-attack-near-us?))
        ;; Strictly require POSITIVELY OBSERVED greedy expansions — never trigger on unscouted fog!
        'punish-And-Deny-Greedy-Expand]
       [(and (<= pred-enemy-bases 2) static-defense? (not proxy-attack-near-us?))
@@ -3158,7 +3277,9 @@
       (set! mobile-poke-count (add1 mobile-poke-count)))
     (when (and (not opponent-turtling?)
                (memq ut '(bunker photon-cannon shield-battery spine-crawler
-                          planetary-fortress siege-tank siege-tank-sieged)))
+                          planetary-fortress siege-tank siege-tank-sieged
+                          widow-mine widow-mine-burrowed liberator liberator-ag
+                          lurker lurker-burrowed lurker-mp lurker-mp-burrowed)))
       (set! opponent-turtling? #t))
     (define near-nat-or-base? (or (fl<= dn2 784.0) (fl<= db2 1024.0)))
     (when near-nat-or-base?
@@ -3180,7 +3301,9 @@
     (define bt (unit-type-sym b))
     (when (and (not opponent-turtling?)
                (memq bt '(bunker photon-cannon shield-battery spine-crawler
-                          planetary-fortress siege-tank siege-tank-sieged)))
+                          planetary-fortress siege-tank siege-tank-sieged
+                          widow-mine widow-mine-burrowed liberator liberator-ag
+                          lurker lurker-burrowed lurker-mp lurker-mp-burrowed)))
       (set! opponent-turtling? #t))
     (cond
       [(memq bt '(refinery assimilator extractor))
@@ -5989,6 +6112,9 @@
          #:enemy-lost-value [kw-en-lost #f]
          #:our-upgrades [kw-our-upg #f]
          #:enemy-upgrades [kw-en-upg #f]
+         #:own-bases [kw-own-b #f]
+         #:enemy-bases [kw-en-b #f]
+         #:hidden-expand-posterior [kw-hexp #f]
          #:mstate [mstate #f])
   (define obs (if (hash? raw-obs) raw-obs (hash)))
   (define ally-units (or (and kw-ally (safe-hash-list kw-ally))
@@ -6138,8 +6264,74 @@
        (min raw-logit -0.05)]
       [else raw-logit]))
   (define clamped-logit (max -8.0 (min 8.0 logit)))
-  (define win-prob (max 0.01 (min 0.99 (/ 1.0 (+ 1.0 (exp (- clamped-logit)))))))
-  (define snowball-adv (max -1.0 (min 1.0 (mirror-tanh (* 0.50 clamped-logit)))))
+  (define raw-win-prob (max 0.01 (min 0.99 (/ 1.0 (+ 1.0 (exp (- clamped-logit)))))))
+  ;; L86 Track 1: Economic base-deficit & high-hidden-expand uncertainty damper (`>= 6:00` = `8064f`).
+  ;; Prevents `win-prob` from reading `0.97-0.99` when trailing by `>= 2` bases or facing an
+  ;; unscouted macro boom (`hexp >= 0.55` with unscouted/stale enemy army).
+  (define frame (safe-frame (hash-ref obs 'frame 0)))
+  (define (count-th-bldgs bldgs)
+    (for/sum ([b (in-list (safe-hash-list bldgs))])
+      (if (memq (unit-type-sym b)
+                '(nexus command-center orbital-command planetary-fortress hatchery lair hive))
+          1 0)))
+  (define own-b
+    (cond
+      [(number? kw-own-b) (max 1 (exact-round kw-own-b))]
+      [(number? (hash-ref obs 'own-bases #f)) (max 1 (exact-round (hash-ref obs 'own-bases)))]
+      [(number? (hash-ref obs 'active-bases #f)) (max 1 (exact-round (hash-ref obs 'active-bases)))]
+      [else
+       (define cnt (count-th-bldgs (hash-ref obs 'ally-buildings '())))
+       (and (> cnt 0) cnt)]))
+  (define en-b
+    (cond
+      [(number? kw-en-b) (max 1 (exact-round kw-en-b))]
+      [(number? (hash-ref obs 'enemy-confirmed-bases #f))
+       (max 1 (exact-round (hash-ref obs 'enemy-confirmed-bases)))]
+      [(number? (hash-ref obs 'confirmed-enemy-bases #f))
+       (max 1 (exact-round (hash-ref obs 'confirmed-enemy-bases)))]
+      [else
+       (max (count-th-bldgs (hash-ref obs 'enemy-buildings '()))
+            (if (and mstate (number? (mirror-mind-state-predicted-enemy-bases mstate)))
+                (safe-int (mirror-mind-state-predicted-enemy-bases mstate) 0)
+                0))]))
+  (define hexp-p
+    (cond
+      [(number? kw-hexp) (exact->inexact kw-hexp)]
+      [(number? (hash-ref obs 'hidden-expand-posterior #f))
+       (exact->inexact (hash-ref obs 'hidden-expand-posterior))]
+      [(let ([ms (hash-ref obs 'mirror-signals #f)])
+         (and (hash? ms) (number? (hash-ref ms 'hidden-expand-posterior #f))))
+       (exact->inexact (hash-ref (hash-ref obs 'mirror-signals) 'hidden-expand-posterior))]
+      [(and mstate
+            (shadow-ledger? (mirror-mind-state-last-shadow-ledger mstate))
+            (eq? (shadow-ledger-dark-matter-hypothesis (mirror-mind-state-last-shadow-ledger mstate))
+                 'hidden-expansion-or-macro-boom))
+       0.65]
+      [else 0.0]))
+  (define win-prob
+    (if (>= frame 8064)
+        (let* ([excess-beyond-1
+                (if (and own-b (> en-b (+ own-b 1)))
+                    (- en-b (+ own-b 1))
+                    0)]
+               [unscouted-hexp?
+                (and (>= hexp-p 0.55)
+                     (<= en-sup (* 0.25 (max 8.0 our-sup))))]
+               [damper
+                (min 0.35 (+ (* 0.10 excess-beyond-1)
+                             (if unscouted-hexp? 0.15 0.0)))]
+               [wp1 (max 0.01 (- raw-win-prob damper))])
+          (if (and own-b
+                   (>= (- en-b own-b) 2)
+                   (<= our-sup (* 1.25 (max 1.0 en-sup))))
+              (min wp1 0.72)
+              wp1))
+        raw-win-prob))
+  (define final-logit
+    (if (< win-prob raw-win-prob)
+        (max -8.0 (min 8.0 (log (/ win-prob (- 1.0 win-prob)))))
+        clamped-logit))
+  (define snowball-adv (max -1.0 (min 1.0 (mirror-tanh (* 0.50 final-logit)))))
   (values win-prob snowball-adv our-sup en-sup trade-ratio))
 
 (define (compute-calibrated-win-prob
@@ -6154,6 +6346,9 @@
          #:enemy-lost-value [kw-en-lost #f]
          #:our-upgrades [kw-our-upg #f]
          #:enemy-upgrades [kw-en-upg #f]
+         #:own-bases [kw-own-b #f]
+         #:enemy-bases [kw-en-b #f]
+         #:hidden-expand-posterior [kw-hexp #f]
          #:mstate [mstate #f])
   (define-values (wp _sb _os _es _tr)
     (compute-calibrated-advantage-breakdown
@@ -6168,6 +6363,9 @@
      #:enemy-lost-value kw-en-lost
      #:our-upgrades kw-our-upg
      #:enemy-upgrades kw-en-upg
+     #:own-bases kw-own-b
+     #:enemy-bases kw-en-b
+     #:hidden-expand-posterior kw-hexp
      #:mstate mstate))
   wp)
 
@@ -6183,6 +6381,9 @@
          #:enemy-lost-value [kw-en-lost #f]
          #:our-upgrades [kw-our-upg #f]
          #:enemy-upgrades [kw-en-upg #f]
+         #:own-bases [kw-own-b #f]
+         #:enemy-bases [kw-en-b #f]
+         #:hidden-expand-posterior [kw-hexp #f]
          #:mstate [mstate #f])
   (define-values (_wp sb _os _es _tr)
     (compute-calibrated-advantage-breakdown
@@ -6197,6 +6398,9 @@
      #:enemy-lost-value kw-en-lost
      #:our-upgrades kw-our-upg
      #:enemy-upgrades kw-en-upg
+     #:own-bases kw-own-b
+     #:enemy-bases kw-en-b
+     #:hidden-expand-posterior kw-hexp
      #:mstate mstate))
   sb)
 
@@ -6546,10 +6750,20 @@
   (resolve-pending-forecasts! mstate frame enemy-units enemy-bldgs)
 
   ;; 2. Compute Opponent Shadow Economy & Dark-Matter Resource Ledger
+  (define rem-eb-obs
+    (let ([v (hash-ref obs 'enemy-estimated-bases
+                       (lambda () (hash-ref obs 'enemy-confirmed-bases #f)))])
+      (and (real? v) v)))
+  (define rem-eg-obs
+    (let ([v (hash-ref obs 'enemy-estimated-gases
+                       (lambda () (hash-ref obs 'enemy-confirmed-gases #f)))])
+      (and (real? v) v)))
   (define ledger
     (compute-opponent-shadow-ledger mstate frame enemy-units enemy-bldgs
                                     #:base-x base-x #:base-y base-y
                                     #:nat-x nat-x #:nat-y nat-y
+                                    #:remembered-enemy-bases rem-eb-obs
+                                    #:remembered-enemy-gases rem-eg-obs
                                     #:observed-effects effects
                                     #:our-upgrade-tier our-upgrade-tier
                                     #:enemy-workers-killed enemy-workers-killed))

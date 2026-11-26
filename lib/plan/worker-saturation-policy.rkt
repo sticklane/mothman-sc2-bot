@@ -1226,20 +1226,52 @@
   (define mined-out-gas-evac?
     (and mined-out-gas-starved?
          (pair? mined-out-safe-map-minerals)))
+  (define severe-gas-rich-min-starved?
+    (and (>= cur-gas 350)
+         (< cur-min 220)
+         (>= eff-active-gas-workers 4)))
+  (define extreme-gas-rich-min-starved?
+    (and (>= cur-gas 550)
+         (< cur-min 180)))
+  ;; Loop 86C/86E: Terran & Protoss midgame mineral-starvation gas-pull tier
+  ;; (`>= 180G & < 120M` for T/P, plus `>= 160G & < 105M` for Terran pushes, when `>= 4 gas workers`),
+  ;; pulling excess Refineries/Assimilators onto minerals while preserving a 2-3 gas worker floor
+  ;; and holding resaturation until `cur-min >= 180`.
+  (define terran-midgame-gas-pull-due?
+    (and (memq race-sym '(Terran Protoss))
+         (>= eff-active-gas-workers 4)
+         (or (and (>= cur-gas 180) (< cur-min 120))
+             (and (eq? race-sym 'Terran) (>= cur-gas 160) (< cur-min 105))
+             (and (>= cur-gas 150)
+                  (< cur-min 180)
+                  (< (- cur-loop (unbox gas-last-pull-box)) 336)))))
+  (define terran-midgame-gas-resat-hold?
+    (and (memq race-sym '(Terran Protoss))
+         (< cur-min 180)
+         (>= cur-gas 150)
+         (>= eff-active-gas-workers 2)
+         (or (< cur-min 120)
+             (< (- cur-loop (unbox gas-last-pull-box)) 336))))
   (define gas-over-banked?
     (or worker-crisis-gas-evac?
         mined-out-gas-starved?
+        severe-gas-rich-min-starved?
+        extreme-gas-rich-min-starved?
+        terran-midgame-gas-pull-due?
         (and (not gas-boost-active?)
              (unbox gas-pull-latch-box))))
   (define gas-pull-to-zero-now?
     (or worker-crisis-gas-evac?
         mined-out-gas-starved?
-        (and gas-over-banked?
+        extreme-gas-rich-min-starved?
+        (and (not gas-boost-active?)
+             gas-over-banked?
              (or (>= cur-gas 300)
                  (and (>= cur-gas 260) (< cur-min 120))))))
   (define gas-resaturate-blocked?
     (or gas-pull-to-zero-now?
         heavy-rush?
+        terran-midgame-gas-resat-hold?
         (and gas-over-banked? (>= eff-active-gas-workers 1))
         (and zerg-post-speed-surge-active? (not gas-boost-active?) (>= eff-active-gas-workers 1))))
 
@@ -1523,19 +1555,33 @@
   ;;            (still honoring `worker-crisis-gas-evac?` & `mined-out-gas-starved?`)
   ;; ===========================================================================
   (define grms-urgent-pull?
-    (and gas-over-banked? (>= cur-gas 200) (< cur-min 110)))
+    (or (and gas-over-banked? (>= cur-gas 200) (< cur-min 110))
+        (and (>= cur-gas 380) (< cur-min 180))
+        (and terran-midgame-gas-pull-due? (< cur-min 110))
+        extreme-gas-rich-min-starved?))
   (define gas-pull-target-floor
     (cond
       [gas-pull-to-zero-now? 0]
-      [(or gas-over-banked? (and zerg-post-speed-surge-active? (not gas-boost-active?))) 1]
+      [severe-gas-rich-min-starved? (min 3 (length ready-gas-bldgs))]
+      [(or (and (not gas-boost-active?) (unbox gas-pull-latch-box))
+           worker-crisis-gas-evac?
+           mined-out-gas-starved?
+           (and zerg-post-speed-surge-active? (not gas-boost-active?)))
+       1]
+      [terran-midgame-gas-pull-due? (min 3 (max 2 (length ready-gas-bldgs)))]
       [else eff-active-gas-workers]))
   (define max-gas-pulls-this-step
     (if (and (not gas-zero-freeze-rescue?)
              (or (not gas-boost-active?)
                  worker-crisis-gas-evac?
-                 mined-out-gas-starved?)
+                 mined-out-gas-starved?
+                 severe-gas-rich-min-starved?
+                 extreme-gas-rich-min-starved?
+                 terran-midgame-gas-pull-due?)
              (or gas-over-banked? zerg-post-speed-surge-active?))
-        (let ([per-step-cap (if (>= eff-active-gas-workers 4) 3 2)])
+        (let ([per-step-cap (cond [extreme-gas-rich-min-starved? 4]
+                                  [(>= eff-active-gas-workers 4) 3]
+                                  [else 2])])
           (min per-step-cap (max 0 (- eff-active-gas-workers gas-pull-target-floor))))
         0))
   (define gas-pull-cand-mins
@@ -1564,6 +1610,9 @@
       (set-member? all-gas-tags (worker-tgt w)))
     (define allow-carrying-gas-pull?
       (or (and (>= cur-gas 200) (< cur-min 120))
+          (and terran-midgame-gas-pull-due? (< cur-min 120))
+          severe-gas-rich-min-starved?
+          extreme-gas-rich-min-starved?
           worker-crisis-gas-evac?
           mined-out-gas-evac?))
     (define non-carrying-gas-workers

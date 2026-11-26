@@ -10,18 +10,29 @@
 
 (module exp-meta-ops racket/base
   (provide record-exp-meta!
-           lookup-exp-meta)
+           lookup-exp-meta
+           record-econ-belief-meta!
+           lookup-econ-belief-meta)
   (define exp-meta-table (make-weak-hasheq))
+  (define econ-belief-meta-table (make-weak-hasheq))
   (define (record-exp-meta! rec meta)
     (when (hash? meta)
       (hash-set! exp-meta-table rec meta))
     rec)
   (define (lookup-exp-meta rec)
-    (hash-ref exp-meta-table rec #f)))
+    (hash-ref exp-meta-table rec #f))
+  (define (record-econ-belief-meta! rec meta)
+    (when (hash? meta)
+      (hash-set! econ-belief-meta-table rec meta))
+    rec)
+  (define (lookup-econ-belief-meta rec)
+    (hash-ref econ-belief-meta-table rec #f)))
 
 (unsafe-require/typed 'exp-meta-ops
                       [record-exp-meta! (-> Any (Option (Immutable-HashTable Symbol Any)) Any)]
-                      [lookup-exp-meta (-> Any (Option (Immutable-HashTable Symbol Any)))])
+                      [lookup-exp-meta (-> Any (Option (Immutable-HashTable Symbol Any)))]
+                      [record-econ-belief-meta! (-> Any (Option (Immutable-HashTable Symbol Any)) Any)]
+                      [lookup-econ-belief-meta (-> Any (Option (Immutable-HashTable Symbol Any)))])
 
 (provide
  (struct-out bot-mind-log-snapshot)
@@ -305,6 +316,30 @@
             #f)])]
     [else #f]))
 
+(: extract-econ-belief-meta (-> Any Any (Option (Immutable-HashTable Symbol Any))))
+(define (extract-econ-belief-meta raw-mind mind-src)
+  (define (pick [k : Symbol]) : Any
+    (define v1 (hget* mind-src (list k) #f))
+    (if (real? v1)
+        v1
+        (let ([v2 (hget* raw-mind (list k) #f)])
+          (if (real? v2) v2 #f))))
+  (define raw-cb (pick 'enemy-confirmed-bases))
+  (define raw-eb (pick 'enemy-estimated-bases))
+  (define raw-cg (pick 'enemy-confirmed-gases))
+  (define raw-eg (pick 'enemy-estimated-gases))
+  (if (or (real? raw-cb) (real? raw-eb) (real? raw-cg) (real? raw-eg))
+      (let* ([cb (safe-nonneg-int raw-cb 0)]
+             [eb (if (real? raw-eb) (safe-nonneg-int raw-eb cb) cb)]
+             [cg (safe-nonneg-int raw-cg 0)]
+             [eg (if (real? raw-eg) (safe-nonneg-int raw-eg cg) cg)])
+        (ann (hasheq 'enemy-confirmed-bases cb
+                     'enemy-estimated-bases eb
+                     'enemy-confirmed-gases cg
+                     'enemy-estimated-gases eg)
+             (Immutable-HashTable Symbol Any)))
+      #f))
+
 (: extract-bot-step-log-record (->* () (Any Any Any) bot-step-log-record))
 (define (extract-bot-step-log-record [raw-mind #f] [raw-goals #f] [raw-tactics #f])
   (if (and (bot-step-log-record? raw-mind)
@@ -326,12 +361,15 @@
                            (extract-experiment-log-tag mind-src)
                            (extract-experiment-log-tag goal-src)
                            (extract-experiment-log-tag tac-src))]
+             [econ-meta (extract-econ-belief-meta raw-mind mind-src)]
              [rec (bot-step-log-record
                    (extract-mind-snapshot mind-src)
                    (extract-goal-snapshot goal-src)
                    (extract-tactics-snapshot tac-src))])
         (when exp-meta
           (record-exp-meta! rec exp-meta))
+        (when econ-meta
+          (record-econ-belief-meta! rec econ-meta))
         rec)))
 
 (: fmt2 (-> Float String))
@@ -363,7 +401,16 @@
                 (hash-ref exp-meta 'experiment-id (lambda () 'unknown))
                 (hash-ref exp-meta 'experiment-spot-idx (lambda () 0)))
         ""))
-  (format "[SCBOT_STATE] f=~a matchup=~a posture=~a pers=~a arch=~a win=~a conf=~a bayesian=(bluff=~a,rush=~a,hexp=~a,tsw=~a,camp=~a) goal=~a/~a~a(escrow=~aM/~aG,w=~a,army=~a) sched=(~a) tactics=(pos=~a,adv=~a,sec=~a,orders=~a)~a"
+  (define econ-meta (lookup-econ-belief-meta rec))
+  (define econ-tag
+    (if econ-meta
+        (format " eB=~a/~a eG=~a/~a"
+                (hash-ref econ-meta 'enemy-confirmed-bases (lambda () 0))
+                (hash-ref econ-meta 'enemy-estimated-bases (lambda () 0))
+                (hash-ref econ-meta 'enemy-confirmed-gases (lambda () 0))
+                (hash-ref econ-meta 'enemy-estimated-gases (lambda () 0)))
+        ""))
+  (format "[SCBOT_STATE] f=~a matchup=~a posture=~a pers=~a arch=~a win=~a conf=~a bayesian=(bluff=~a,rush=~a,hexp=~a,tsw=~a,camp=~a) goal=~a/~a~a(escrow=~aM/~aG,w=~a,army=~a) sched=(~a) tactics=(pos=~a,adv=~a,sec=~a,orders=~a)~a~a"
           (bot-mind-log-snapshot-frame m)
           (bot-mind-log-snapshot-matchup m)
           (bot-mind-log-snapshot-posture m)
@@ -388,29 +435,42 @@
           (fmt2 (bot-tactics-log-snapshot-snowball-adv t))
           (bot-tactics-log-snapshot-retreat-sector t)
           (bot-tactics-log-snapshot-issued-orders t)
-          exp-tag))
+          exp-tag
+          econ-tag))
 
 (: bot-step-log-record->hash (-> bot-step-log-record (HashTable Symbol Any)))
 (define (bot-step-log-record->hash rec)
   (define m (bot-step-log-record-mind rec))
   (define g (bot-step-log-record-goals rec))
   (define t (bot-step-log-record-tactics rec))
+  (define econ-meta (lookup-econ-belief-meta rec))
   (define mind-ht : (HashTable Symbol Any)
-    ((inst hash Symbol Any)
-     'frame (bot-mind-log-snapshot-frame m)
-     'race (bot-mind-log-snapshot-race m)
-     'enemy-race (bot-mind-log-snapshot-enemy-race m)
-     'matchup (bot-mind-log-snapshot-matchup m)
-     'posture (bot-mind-log-snapshot-posture m)
-     'personality (bot-mind-log-snapshot-personality m)
-     'enemy-archetype (bot-mind-log-snapshot-enemy-archetype m)
-     'win-prob (bot-mind-log-snapshot-win-prob m)
-     'confidence (bot-mind-log-snapshot-confidence m)
-     'bluff-posterior (bot-mind-log-snapshot-bluff-posterior m)
-     'rush-posterior (bot-mind-log-snapshot-rush-posterior m)
-     'hidden-expand-posterior (bot-mind-log-snapshot-hidden-expand-posterior m)
-     'tech-switch-posterior (bot-mind-log-snapshot-tech-switch-posterior m)
-     'pad-camped-posterior (bot-mind-log-snapshot-pad-camped-posterior m)))
+    (let ([base-mind
+           ((inst hash Symbol Any)
+            'frame (bot-mind-log-snapshot-frame m)
+            'race (bot-mind-log-snapshot-race m)
+            'enemy-race (bot-mind-log-snapshot-enemy-race m)
+            'matchup (bot-mind-log-snapshot-matchup m)
+            'posture (bot-mind-log-snapshot-posture m)
+            'personality (bot-mind-log-snapshot-personality m)
+            'enemy-archetype (bot-mind-log-snapshot-enemy-archetype m)
+            'win-prob (bot-mind-log-snapshot-win-prob m)
+            'confidence (bot-mind-log-snapshot-confidence m)
+            'bluff-posterior (bot-mind-log-snapshot-bluff-posterior m)
+            'rush-posterior (bot-mind-log-snapshot-rush-posterior m)
+            'hidden-expand-posterior (bot-mind-log-snapshot-hidden-expand-posterior m)
+            'tech-switch-posterior (bot-mind-log-snapshot-tech-switch-posterior m)
+            'pad-camped-posterior (bot-mind-log-snapshot-pad-camped-posterior m))])
+      (if econ-meta
+          (let* ([h1 (hash-set base-mind 'enemy-confirmed-bases
+                               (hash-ref econ-meta 'enemy-confirmed-bases (lambda () 0)))]
+                 [h2 (hash-set h1 'enemy-estimated-bases
+                               (hash-ref econ-meta 'enemy-estimated-bases (lambda () 0)))]
+                 [h3 (hash-set h2 'enemy-confirmed-gases
+                               (hash-ref econ-meta 'enemy-confirmed-gases (lambda () 0)))])
+            (hash-set h3 'enemy-estimated-gases
+                      (hash-ref econ-meta 'enemy-estimated-gases (lambda () 0))))
+          base-mind)))
   (define goals-ht : (HashTable Symbol Any)
     ((inst hash Symbol Any)
      'active-bo-goal-sym (bot-goal-log-snapshot-active-bo-goal-sym g)
@@ -440,12 +500,23 @@
      'goals goals-ht
      'tactics tactics-ht))
   (define exp-meta (lookup-exp-meta rec))
-  (if exp-meta
-      (let* ([ht1 (hash-set base-ht 'experiment-id
-                            (hash-ref exp-meta 'experiment-id (lambda () 'unknown)))]
-             [ht2 (hash-set ht1 'experiment-spot-idx
-                            (hash-ref exp-meta 'experiment-spot-idx (lambda () 0)))])
-        (if (hash-has-key? exp-meta 'spot-label)
-            (hash-set ht2 'experiment-spot-label (hash-ref exp-meta 'spot-label (lambda () 'default)))
-            ht2))
-      base-ht))
+  (define ht-with-exp : (HashTable Symbol Any)
+    (if exp-meta
+        (let* ([ht1 (hash-set base-ht 'experiment-id
+                              (hash-ref exp-meta 'experiment-id (lambda () 'unknown)))]
+               [ht2 (hash-set ht1 'experiment-spot-idx
+                              (hash-ref exp-meta 'experiment-spot-idx (lambda () 0)))])
+          (if (hash-has-key? exp-meta 'spot-label)
+              (hash-set ht2 'experiment-spot-label (hash-ref exp-meta 'spot-label (lambda () 'default)))
+              ht2))
+        base-ht))
+  (if econ-meta
+      (let* ([h1 (hash-set ht-with-exp 'enemy-confirmed-bases
+                           (hash-ref econ-meta 'enemy-confirmed-bases (lambda () 0)))]
+             [h2 (hash-set h1 'enemy-estimated-bases
+                           (hash-ref econ-meta 'enemy-estimated-bases (lambda () 0)))]
+             [h3 (hash-set h2 'enemy-confirmed-gases
+                           (hash-ref econ-meta 'enemy-confirmed-gases (lambda () 0)))])
+        (hash-set h3 'enemy-estimated-gases
+                  (hash-ref econ-meta 'enemy-estimated-gases (lambda () 0))))
+      ht-with-exp))

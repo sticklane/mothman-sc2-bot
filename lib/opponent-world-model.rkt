@@ -43,6 +43,12 @@
          owm-early-pool-latched?
          owm-enemy-1base-double-gas?
          owm-inferred-proxy-rush-floor
+         owm-next-stale-ring-pad
+         owm-stale-ring-pad-count
+         owm-confirmed-enemy-base-pts
+         owm-enemy-turtle-breakdown
+         owm-estimated-enemy-bases
+         owm-estimated-enemy-gases
          make-opponent-world-model
          reset-opponent-world-model!
          free-summon-unit-sym?
@@ -177,6 +183,112 @@
   (define v (owm-proxy-state-vec x))
   (if (vector? v) (vector-ref v 5) 0.0))
 
+;; L86 Track 1: ABI-preserving weak side-tables for full map expansion-ring tracking,
+;; confirmed enemy base positions, and static-defense/siege/mine turtle breakdown.
+;; Zero changes to the 35-field `opponent-world-summary` struct ABI.
+(define DEFAULT-TURTLE-BREAKDOWN
+  (hasheq 'static-ground-count 0
+          'pf-count 0
+          'static-aa-count 0
+          'burrow-mine-count 0
+          'siege-zone-count 0))
+
+(define (make-l86-ring-state)
+  (define ht (make-hasheq))
+  (hash-set! ht 'ring-pads '())
+  (hash-set! ht 'confirmed-enemy-base-pts '())
+  (hash-set! ht 'turtle-breakdown DEFAULT-TURTLE-BREAKDOWN)
+  (hash-set! ht 'raw-unit-types (make-hasheqv))
+  (hash-set! ht 'estimated-enemy-bases 1)
+  (hash-set! ht 'estimated-enemy-gases 0)
+  ht)
+
+(define owm-l86-ring-state-table (make-weak-hasheq))
+(define owm-summary-l86-ring-state-table (make-weak-hasheq))
+
+(define (owm-l86-ring-state x)
+  (cond
+    [(opponent-world-model? x) (hash-ref owm-l86-ring-state-table x #f)]
+    [(opponent-world-summary? x) (hash-ref owm-summary-l86-ring-state-table x #f)]
+    [else #f]))
+
+(define (extract-pad-xy p)
+  (cond
+    [(and (hash? p) (real? (hash-ref p 'x #f)) (real? (hash-ref p 'y #f)))
+     (values (exact->inexact (hash-ref p 'x)) (exact->inexact (hash-ref p 'y)))]
+    [(and (pair? p) (real? (car p)) (real? (cdr p)))
+     (values (exact->inexact (car p)) (exact->inexact (cdr p)))]
+    [(and (pair? p) (real? (car p)) (pair? (cdr p)) (real? (cadr p)))
+     (values (exact->inexact (car p)) (exact->inexact (cadr p)))]
+    [(and (vector? p) (>= (vector-length p) 2) (real? (vector-ref p 0)) (real? (vector-ref p 1)))
+     (values (exact->inexact (vector-ref p 0)) (exact->inexact (vector-ref p 1)))]
+    [else (values #f #f)]))
+
+(define (pad-near-own-base? px py own-base-pts)
+  (for/or ([ob (in-list own-base-pts)])
+    (define-values (ox oy) (extract-pad-xy ob))
+    (and ox oy (< (dist2 px py ox oy) 256.0))))
+
+(define (pad-is-stale? rp frame min-stale)
+  (define lv (vector-ref rp 2))
+  (or (< lv 0) (>= (- frame lv) min-stale)))
+
+(define (owm-next-stale-ring-pad owm frame
+                                 #:own-base-pts [own-base-pts '()]
+                                 #:min-stale-frames [min-stale 1344])
+  (define st (owm-l86-ring-state owm))
+  (define pads (if (hash? st) (hash-ref st 'ring-pads '()) '()))
+  (define f (if (exact-integer? frame) frame (if (real? frame) (exact-round frame) 0)))
+  (define ms (if (real? min-stale) (max 0 (exact-round min-stale)) 1344))
+  (define ob-list (if (list? own-base-pts) own-base-pts '()))
+  (define best-rp
+    (for/fold ([best #f])
+              ([rp (in-list pads)]
+               #:when (and (vector? rp)
+                           (>= (vector-length rp) 6)
+                           (not (pad-near-own-base? (vector-ref rp 0) (vector-ref rp 1) ob-list))
+                           (pad-is-stale? rp f ms)))
+      (cond
+        [(not best) rp]
+        [(< (vector-ref rp 2) (vector-ref best 2)) rp]
+        [(and (= (vector-ref rp 2) (vector-ref best 2))
+              (< (vector-ref rp 5) (vector-ref best 5)))
+         rp]
+        [else best])))
+  (and best-rp (cons (vector-ref best-rp 0) (vector-ref best-rp 1))))
+
+(define (owm-stale-ring-pad-count owm frame
+                                  #:own-base-pts [own-base-pts '()]
+                                  #:min-stale-frames [min-stale 1344])
+  (define st (owm-l86-ring-state owm))
+  (define pads (if (hash? st) (hash-ref st 'ring-pads '()) '()))
+  (define f (if (exact-integer? frame) frame (if (real? frame) (exact-round frame) 0)))
+  (define ms (if (real? min-stale) (max 0 (exact-round min-stale)) 1344))
+  (define ob-list (if (list? own-base-pts) own-base-pts '()))
+  (for/sum ([rp (in-list pads)])
+    (if (and (vector? rp)
+             (>= (vector-length rp) 6)
+             (not (pad-near-own-base? (vector-ref rp 0) (vector-ref rp 1) ob-list))
+             (pad-is-stale? rp f ms))
+        1
+        0)))
+
+(define (owm-confirmed-enemy-base-pts owm)
+  (define st (owm-l86-ring-state owm))
+  (if (hash? st) (hash-ref st 'confirmed-enemy-base-pts '()) '()))
+
+(define (owm-enemy-turtle-breakdown owm)
+  (define st (owm-l86-ring-state owm))
+  (if (hash? st) (hash-ref st 'turtle-breakdown DEFAULT-TURTLE-BREAKDOWN) DEFAULT-TURTLE-BREAKDOWN))
+
+(define (owm-estimated-enemy-bases owm)
+  (define st (owm-l86-ring-state owm))
+  (if (hash? st) (hash-ref st 'estimated-enemy-bases 1) 1))
+
+(define (owm-estimated-enemy-gases owm)
+  (define st (owm-l86-ring-state owm))
+  (if (hash? st) (hash-ref st 'estimated-enemy-gases 0) 0))
+
 (define (opponent-world-summary-enemy-workers-near-us s)
   (define rec (and (opponent-world-summary? s) (hash-ref owm-summary-worker-rush-table s #f)))
   (if (vector? rec) (vector-ref rec 0) 0))
@@ -234,6 +346,7 @@
      #f))
   (hash-set! owm-last-worker-rush-frame-table owm -9999)
   (hash-set! owm-proxy-state-table owm (vector 0 0 #f #f #f 0.0 'none 0.0 -9999))
+  (hash-set! owm-l86-ring-state-table owm (make-l86-ring-state))
   owm)
 
 (define (reset-opponent-world-model! owm [enemy-race 'Unknown])
@@ -259,6 +372,7 @@
   (set-opponent-world-model-last-summary! owm #f)
   (hash-set! owm-last-worker-rush-frame-table owm -9999)
   (hash-set! owm-proxy-state-table owm (vector 0 0 #f #f #f 0.0 'none 0.0 -9999))
+  (hash-set! owm-l86-ring-state-table owm (make-l86-ring-state))
   owm)
 
 ;; Prevents premature rush-posterior decay (e.g. 0.91 -> 0.45 at 137.5s) while >= 4
@@ -358,8 +472,15 @@
 
 (define (unit-type-sym u)
   (if (hash? u)
-      (let ([t (hash-ref u 'type 'unknown)])
-        (if (symbol? t) t 'unknown))
+      (let ([t (hash-ref u 'type
+                         (lambda ()
+                           (hash-ref u 'unit-type
+                                     (lambda ()
+                                       (hash-ref u 'unit-type-id 'unknown)))))])
+        (cond
+          [(symbol? t) t]
+          [(or (exact-integer? t) (string? t)) (canonical-unit-type-sym t)]
+          [else 'unknown]))
       'unknown))
 
 (define (unit-speed-tps sym)
@@ -399,6 +520,7 @@
     [(viper) '(spawning-pool lair infestation-pit hive extractor)]
     [(ultralisk ultralisk-cavern) '(spawning-pool lair infestation-pit hive ultralisk-cavern extractor)]
     [(marine) '(barracks)]
+    [(planetary-fortress) '(engineering-bay)]
     [(reaper) '(barracks refinery)]
     [(marauder ghost) '(barracks barracks-techlab refinery)]
     [(hellion hellbat widow-mine widow-mine-burrowed cyclone) '(barracks factory refinery)]
@@ -418,23 +540,29 @@
     [else '()]))
 
 ;; Empirically calibrated pro happy-path base schedule (22.4 loops/sec):
-;; Past these deadlines, a rational macro player has STARTED their 2nd / 3rd / 4th base.
+;; Past these deadlines, a rational macro player has STARTED their 2nd..6th base.
 ;; If they have NOT, they are deviating from the happy path to invest in Army / Tech!
 (define (happy-path-expected-bases enemy-race frame)
   (define sec (/ (exact->inexact (max 0 frame)) 22.4))
   (case enemy-race
     [(Zerg)
-     (cond [(>= sec 420.0) 4]
+     (cond [(>= sec 720.0) 6]
+           [(>= sec 570.0) 5]
+           [(>= sec 420.0) 4]
            [(>= sec 215.0) 3]
            [(>= sec 78.0)  2]
            [else           1])]
     [(Protoss)
-     (cond [(>= sec 540.0) 4]
+     (cond [(>= sec 840.0) 6]
+           [(>= sec 690.0) 5]
+           [(>= sec 540.0) 4]
            [(>= sec 355.0) 3]
            [(>= sec 120.0) 2]
            [else           1])]
     [else ; Terran / Unknown
-     (cond [(>= sec 570.0) 4]
+     (cond [(>= sec 870.0) 6]
+           [(>= sec 720.0) 5]
+           [(>= sec 570.0) 4]
            [(>= sec 375.0) 3]
            [(>= sec 135.0) 2]
            [else           1])]))
@@ -580,12 +708,14 @@
 
   ;; Initialize (or re-anchor if enemy spawn moved on multi-spawn map) 4 primary opponent expansion pads
   (define cur-pads (opponent-world-model-pads owm))
-  (when (or (not (opponent-world-model-pads-initialized? owm))
-            (null? cur-pads)
-            (> (dist2 enemy-x enemy-y
-                      (pad-belief-entry-x (car cur-pads))
-                      (pad-belief-entry-y (car cur-pads)))
-               144.0))
+  (define pads-reanchored?
+    (or (not (opponent-world-model-pads-initialized? owm))
+        (null? cur-pads)
+        (> (dist2 enemy-x enemy-y
+                  (pad-belief-entry-x (car cur-pads))
+                  (pad-belief-entry-y (car cur-pads)))
+           144.0)))
+  (when pads-reanchored?
     (set-opponent-world-model-pads!
      owm
      (list (pad-belief-entry 'enemy-main enemy-x enemy-y 'confirmed-base -1 -9999 0)
@@ -593,6 +723,39 @@
            (pad-belief-entry 'enemy-third enemy-third-x enemy-third-y 'unscouted #f -9999 -9999)
            (pad-belief-entry 'enemy-fourth enemy-fourth-x enemy-fourth-y 'unscouted #f -9999 -9999)))
     (set-opponent-world-model-pads-initialized?! owm #t))
+
+  ;; L86 Track 1: Lazy ingestion & deduplication (`>= 8.0t`) of full map expansion ring pads
+  (define ring-st
+    (or (hash-ref owm-l86-ring-state-table owm #f)
+        (let ([s (make-l86-ring-state)])
+          (hash-set! owm-l86-ring-state-table owm s)
+          s)))
+  (define raw-exp-pads
+    (let ([p1 (hash-ref obs 'expansion-pads #f)])
+      (if (and (list? p1) (pair? p1))
+          p1
+          (let ([p2 (hash-ref obs 'expansion-candidates #f)])
+            (if (and (list? p2) (pair? p2)) p2 '())))))
+  (define cur-ring-pads (hash-ref ring-st 'ring-pads '()))
+  (when (and pads-reanchored? (pair? cur-ring-pads))
+    (for ([rp (in-list cur-ring-pads)])
+      (vector-set! rp 5 (sqrt (dist2 (vector-ref rp 0) (vector-ref rp 1) enemy-x enemy-y))))
+    (set! cur-ring-pads (sort cur-ring-pads < #:key (lambda (rp) (vector-ref rp 5))))
+    (hash-set! ring-st 'ring-pads cur-ring-pads))
+  (when (pair? raw-exp-pads)
+    (define added? #f)
+    (define acc (reverse cur-ring-pads))
+    (for ([raw-p (in-list raw-exp-pads)])
+      (define-values (px py) (extract-pad-xy raw-p))
+      (when (and px py
+                 (not (for/or ([existing (in-list acc)])
+                        (< (dist2 px py (vector-ref existing 0) (vector-ref existing 1)) 64.0))))
+        (define d-em (sqrt (dist2 px py enemy-x enemy-y)))
+        (set! acc (cons (vector px py -9999 #f -9999 d-em) acc))
+        (set! added? #t)))
+    (when added?
+      (set! cur-ring-pads (sort acc < #:key (lambda (rp) (vector-ref rp 5))))
+      (hash-set! ring-st 'ring-pads cur-ring-pads)))
 
   ;; Detect / refine enemy race from obs or any observed enemy entity
   (define obs-erace (hash-ref obs 'enemy-race #f))
@@ -613,75 +776,169 @@
   (define destroyed-tech (opponent-world-model-destroyed-tech-set owm))
 
   ;; Step A: Process explicit `dead-unit-tags` from wire
+  (define raw-unit-types
+    (or (hash-ref ring-st 'raw-unit-types #f)
+        (let ([ht (make-hasheqv)])
+          (hash-set! ring-st 'raw-unit-types ht)
+          ht)))
+  (define dead-tags-this-step (mutable-seteqv))
   (for ([dtag (in-list dead-tags-now)]
-        #:when (and (exact-integer? dtag) (> dtag 0) (not (set-member? dead-tags dtag))))
-    (set-add! dead-tags dtag)
-    (cond
-      [(hash-has-key? known-units dtag)
-       (define rec (hash-ref known-units dtag))
-       (hash-remove! known-units dtag)
-       (set-opponent-world-model-confirmed-destroyed-min!
-        owm (+ (opponent-world-model-confirmed-destroyed-min owm) (tracked-enemy-unit-min-cost rec)))
-       (set-opponent-world-model-confirmed-destroyed-gas!
-        owm (+ (opponent-world-model-confirmed-destroyed-gas owm) (tracked-enemy-unit-gas-cost rec)))
-       (when (hash-has-key? WORKER-SYM-SET (tracked-enemy-unit-type rec))
-         (set-opponent-world-model-workers-killed!
-          owm (add1 (opponent-world-model-workers-killed owm))))]
-      [(hash-has-key? known-bldgs dtag)
-       (define rec (hash-ref known-bldgs dtag))
-       (hash-remove! known-bldgs dtag)
-       (set-add! destroyed-tech (tracked-enemy-bldg-canon-type rec))
-       (set-opponent-world-model-confirmed-destroyed-min!
-        owm (+ (opponent-world-model-confirmed-destroyed-min owm) (tracked-enemy-bldg-min-cost rec)))
-       (set-opponent-world-model-confirmed-destroyed-gas!
-        owm (+ (opponent-world-model-confirmed-destroyed-gas owm) (tracked-enemy-bldg-gas-cost rec)))]))
+        #:when (and (exact-integer? dtag) (> dtag 0)))
+    (set-add! dead-tags-this-step dtag)
+    (unless (set-member? dead-tags dtag)
+      (set-add! dead-tags dtag)
+      (cond
+        [(hash-has-key? known-units dtag)
+         (define rec (hash-ref known-units dtag))
+         (hash-remove! known-units dtag)
+         (hash-remove! raw-unit-types dtag)
+         (set-opponent-world-model-confirmed-destroyed-min!
+          owm (+ (opponent-world-model-confirmed-destroyed-min owm) (tracked-enemy-unit-min-cost rec)))
+         (set-opponent-world-model-confirmed-destroyed-gas!
+          owm (+ (opponent-world-model-confirmed-destroyed-gas owm) (tracked-enemy-unit-gas-cost rec)))
+         (when (hash-has-key? WORKER-SYM-SET (tracked-enemy-unit-type rec))
+           (set-opponent-world-model-workers-killed!
+            owm (add1 (opponent-world-model-workers-killed owm))))]
+        [(hash-has-key? known-bldgs dtag)
+         (define rec (hash-ref known-bldgs dtag))
+         (hash-remove! known-bldgs dtag)
+         (set-add! destroyed-tech (tracked-enemy-bldg-canon-type rec))
+         (set-opponent-world-model-confirmed-destroyed-min!
+          owm (+ (opponent-world-model-confirmed-destroyed-min owm) (tracked-enemy-bldg-min-cost rec)))
+         (set-opponent-world-model-confirmed-destroyed-gas!
+          owm (+ (opponent-world-model-confirmed-destroyed-gas owm) (tracked-enemy-bldg-gas-cost rec)))])))
 
   ;; Step B: Ingest currently observed enemy structures
+  ;; L86D: Spatial dedup across SC2 Protobuf `Snapshot` tag-churn! Every time an enemy structure
+  ;; enters fog of war, SC2 assigns a brand-new `Snapshot` tag ID (and morphs change type).
+  ;; Before inserting `tag`, evict any existing `old-tag != tag` of the same structure family
+  ;; within footprint-safe radius (`4.0t` for TownHalls/Geysers, `1.5t` for 2x2 structures so
+  ;; adjacent 2.0t side-by-side Turrets/Cannons/Pylons never merge, `2.5t` for 3x3+ structures),
+  ;; carrying forward earliest `start-f`, `ready-f`, max `build-progress` (same type), and lowest
+  ;; positive `vespene-contents` WITHOUT poisoning `dead-tags`!
+  (define (same-bldg-family? ct1 ct2)
+    (or (eq? ct1 ct2)
+        (and (hash-has-key? TOWNHALL-SYM-SET ct1)
+             (hash-has-key? TOWNHALL-SYM-SET ct2))
+        (and (hash-has-key? GEYSER-BLDG-SYM-SET ct1)
+             (hash-has-key? GEYSER-BLDG-SYM-SET ct2))
+        (and (memq ct1 '(gateway warp-gate))
+             (memq ct2 '(gateway warp-gate)))
+        (and (memq ct1 '(spire greater-spire))
+             (memq ct2 '(spire greater-spire)))))
+  (define (bldg-dedup-r2 ct)
+    (cond
+      [(or (hash-has-key? TOWNHALL-SYM-SET ct)
+           (hash-has-key? GEYSER-BLDG-SYM-SET ct))
+       16.0] ; 4.0t (distinct TownHalls >= 5.0t, distinct Geysers >= 5.0t)
+      [(memq ct '(pylon supply-depot photon-cannon shield-battery missile-turret
+                  spine-crawler spore-crawler sensor-tower dark-shrine creep-tumor))
+       2.25] ; 1.5t (distinct adjacent 2x2 buildings are >= 2.0t apart -> dist2 >= 4.0)
+      [else
+       6.25])) ; 2.5t (distinct adjacent 3x3+ buildings are >= 3.0t apart -> dist2 >= 9.0)
   (define seen-bldg-tags-now (mutable-seteqv))
   (for ([b (in-list enemy-bldgs)] #:when (hash? b))
     (define tag (hash-ref b 'id 0))
-    (define btype (unit-type-sym b))
-    (define ctype (sc2-canonical-structure-sym btype))
-    (define bx (exact->inexact (hash-ref b 'x enemy-x)))
-    (define by (exact->inexact (hash-ref b 'y enemy-y)))
-    (define bhp (max 1 (exact-round (hash-ref b 'hp 500))))
-    (define bprog (max 0.0 (min 1.0 (exact->inexact (hash-ref b 'build-progress 1.0)))))
-    (define vcont (hash-ref b 'vespene-contents 0))
-    (define act? (not (not (or (hash-ref b 'active? #f) (hash-ref b 'active #f)))))
-    (define prox? (not (not (hash-ref b 'is-proxy? #f))))
-    (when (and (exact-integer? tag) (> tag 0) (not (set-member? dead-tags tag)))
+    (when (and (exact-integer? tag) (> tag 0) (not (set-member? dead-tags-this-step tag)))
       (set-add! seen-bldg-tags-now tag)
-      (set-remove! destroyed-tech ctype)
-      (for ([p (in-list (implied-tech-prereqs ctype))])
-        (set-add! implied-set p))
-      (define prev (hash-ref known-bldgs tag #f))
-      (define b-frames (structure-build-frames ctype))
-      (define start-f
-        (cond
-          [prev (tracked-enemy-bldg-start-frame prev)]
-          [(< bprog 0.995)
-           (max 0 (- frame (exact-round (* bprog b-frames))))]
-          [else
-           ;; Seen already completed: bound earliest start by pad `last-cleared-frame` if near a pad
-           (define near-pad
-             (for/first ([pd (in-list (opponent-world-model-pads owm))]
-                         #:when (<= (dist2 bx by (pad-belief-entry-x pd) (pad-belief-entry-y pd)) 144.0))
-               pd))
-           (if (and near-pad (> (pad-belief-entry-last-cleared-frame near-pad) 0))
-               (pad-belief-entry-last-cleared-frame near-pad)
-               (max 0 (- frame b-frames)))]))
-      (define ready-f (+ start-f b-frames))
-      ;; Preserve lowest observed positive vespene-contents (`snapshot` buildings often report 0)
-      (define best-vcont
-        (cond
-          [(and (exact-integer? vcont) (> vcont 0)) vcont]
-          [prev (tracked-enemy-bldg-vespene-contents prev)]
-          [else 0]))
-      (hash-set! known-bldgs tag
-                 (tracked-enemy-bldg tag btype ctype bx by bhp bprog start-f ready-f
-                                     best-vcont act? prox? frame
-                                     (max 0 (sc2-min-cost ctype))
-                                     (max 0 (sc2-gas-cost ctype))))))
+      (define prev-direct (hash-ref known-bldgs tag #f))
+      (define btype (unit-type-sym b))
+      (define bx (exact->inexact (hash-ref b 'x enemy-x)))
+      (define by (exact->inexact (hash-ref b 'y enemy-y)))
+      (define bhp (max 1 (exact-round (hash-ref b 'hp 500))))
+      (define bprog (max 0.0 (min 1.0 (exact->inexact (hash-ref b 'build-progress 1.0)))))
+      (define vcont (hash-ref b 'vespene-contents 0))
+      (define act? (not (not (or (hash-ref b 'active? #f) (hash-ref b 'active #f)))))
+      (define prox? (not (not (hash-ref b 'is-proxy? #f))))
+      (cond
+        ;; L86E O(1) Fast Path (~99% of calls): already-tracked tag with unchanged type skips
+        ;; full-hash spatial dedup scan, `implied-tech-prereqs`, and `near-pad` scan completely!
+        [(and prev-direct (eq? (tracked-enemy-bldg-type prev-direct) btype))
+         (define old-vcont (tracked-enemy-bldg-vespene-contents prev-direct))
+         (define best-vcont
+           (cond
+             [(and (exact-integer? vcont) (> vcont 0))
+              (if (> old-vcont 0) (min vcont old-vcont) vcont)]
+             [(> old-vcont 0) old-vcont]
+             [else 0]))
+         (hash-set! known-bldgs tag
+                    (tracked-enemy-bldg tag
+                                        btype
+                                        (tracked-enemy-bldg-canon-type prev-direct)
+                                        bx by bhp
+                                        (max bprog (tracked-enemy-bldg-build-progress prev-direct))
+                                        (tracked-enemy-bldg-start-frame prev-direct)
+                                        (tracked-enemy-bldg-ready-frame prev-direct)
+                                        best-vcont
+                                        act? prox? frame
+                                        (tracked-enemy-bldg-min-cost prev-direct)
+                                        (tracked-enemy-bldg-gas-cost prev-direct)))]
+        [else
+         (define ctype (sc2-canonical-structure-sym btype))
+         (when (set-member? dead-tags tag)
+           (set-remove! dead-tags tag))
+         (set-remove! destroyed-tech ctype)
+         (for ([p (in-list (implied-tech-prereqs ctype))])
+           (set-add! implied-set p))
+         ;; Spatial dedup ONLY runs on genuinely new/Snapshot tags (`not prev-direct`)!
+         (define replaced-recs
+           (if prev-direct
+               '()
+               (let ([dedup-r2 (bldg-dedup-r2 ctype)])
+                 (for/list ([(old-tag old-rec) (in-hash known-bldgs)]
+                            #:when (and (not (= old-tag tag))
+                                        (same-bldg-family? (tracked-enemy-bldg-canon-type old-rec) ctype)
+                                        (let ([d2 (dist2 bx by (tracked-enemy-bldg-x old-rec) (tracked-enemy-bldg-y old-rec))])
+                                          (if (set-member? seen-bldg-tags-now old-tag)
+                                              (<= d2 1.0)
+                                              (<= d2 dedup-r2)))))
+                   (cons old-tag old-rec)))))
+         (for ([pair (in-list replaced-recs)])
+           (hash-remove! known-bldgs (car pair)))
+         (define prior-recs
+           (if prev-direct
+               (cons prev-direct (map cdr replaced-recs))
+               (map cdr replaced-recs)))
+         (define b-frames (structure-build-frames ctype))
+         (define start-f
+           (if (pair? prior-recs)
+               (apply min (map tracked-enemy-bldg-start-frame prior-recs))
+               (cond
+                 [(< bprog 0.995)
+                  (max 0 (- frame (exact-round (* bprog b-frames))))]
+                 [else
+                  ;; Seen already completed: bound earliest start by pad `last-cleared-frame` if near a pad
+                  (define near-pad
+                    (for/first ([pd (in-list (opponent-world-model-pads owm))]
+                                #:when (<= (dist2 bx by (pad-belief-entry-x pd) (pad-belief-entry-y pd)) 144.0))
+                      pd))
+                  (if (and near-pad (> (pad-belief-entry-last-cleared-frame near-pad) 0))
+                      (pad-belief-entry-last-cleared-frame near-pad)
+                      (max 0 (- frame b-frames)))])))
+         (define ready-f
+           (let ([rf (+ start-f b-frames)])
+             (for/fold ([best rf]) ([pr (in-list prior-recs)])
+               (if (eq? (tracked-enemy-bldg-canon-type pr) ctype)
+                   (min best (tracked-enemy-bldg-ready-frame pr))
+                   best))))
+         (define best-bprog
+           (for/fold ([bp bprog]) ([pr (in-list prior-recs)])
+             (if (eq? (tracked-enemy-bldg-canon-type pr) ctype)
+                 (max bp (tracked-enemy-bldg-build-progress pr))
+                 bp)))
+         ;; Preserve lowest observed positive vespene-contents (`snapshot` buildings often report 0)
+         (define best-vcont
+           (let ([pos-vals
+                  (append (if (and (exact-integer? vcont) (> vcont 0)) (list vcont) '())
+                          (for/list ([pr (in-list prior-recs)]
+                                     #:when (> (tracked-enemy-bldg-vespene-contents pr) 0))
+                            (tracked-enemy-bldg-vespene-contents pr)))])
+             (if (pair? pos-vals) (apply min pos-vals) 0)))
+         (hash-set! known-bldgs tag
+                    (tracked-enemy-bldg tag btype ctype bx by bhp best-bprog start-f ready-f
+                                        best-vcont act? prox? frame
+                                        (max 0 (sc2-min-cost ctype))
+                                        (max 0 (sc2-gas-cost ctype))))])))
 
   ;; Step C: Sight-clear static structures that disappeared while in our direct footprint vision.
   ;; L85B: Ground scouts walking down an enemy ramp (low ground, `6-8.5t` away in 2D) CANNOT see
@@ -706,18 +963,41 @@
       (define uy (hash-ref u 'y -999.0))
       (define r2 (if (ally-flying-scout? u) fly-r2 gnd-r2))
       (<= (dist2 ux uy bx by) r2)))
-  (for ([kv (in-list (hash->list known-bldgs))])
+  ;; L86E: Only check `replaced-by-live-alias?` lazily when a building is unseen AND about to be
+  ;; sight-cleared (eliminates eager O(N*M) nested scan over `seen-bldg-tags-now` every step!).
+  (define tags-to-sight-clear
+    (for/list ([(tag rec) (in-hash known-bldgs)]
+               #:when (and (not (set-member? seen-bldg-tags-now tag))
+                           (not (memq (tracked-enemy-bldg-type rec)
+                                      '(barracks-flying factory-flying starport-flying
+                                        command-center-flying orbital-command-flying
+                                        spine-crawler-uprooted spore-crawler-uprooted)))
+                           (ally-can-sight-clear-bldg? rec)
+                           (let* ([ct (tracked-enemy-bldg-canon-type rec)]
+                                  [r2 (bldg-dedup-r2 ct)]
+                                  [rx (tracked-enemy-bldg-x rec)]
+                                  [ry (tracked-enemy-bldg-y rec)])
+                             (not (for/or ([stag (in-set seen-bldg-tags-now)])
+                                    (define srec (hash-ref known-bldgs stag #f))
+                                    (and srec
+                                         (same-bldg-family? (tracked-enemy-bldg-canon-type srec) ct)
+                                         (<= (dist2 rx ry
+                                                    (tracked-enemy-bldg-x srec)
+                                                    (tracked-enemy-bldg-y srec))
+                                             r2)))))))
+      (cons tag rec)))
+  (for ([kv (in-list tags-to-sight-clear)])
     (define tag (car kv))
     (define rec (cdr kv))
-    (when (and (not (set-member? seen-bldg-tags-now tag))
-               (not (memq (tracked-enemy-bldg-type rec)
-                          '(barracks-flying factory-flying starport-flying
-                            command-center-flying orbital-command-flying
-                            spine-crawler-uprooted spore-crawler-uprooted)))
-               (ally-can-sight-clear-bldg? rec))
-      (hash-remove! known-bldgs tag)
+    (define ct (tracked-enemy-bldg-canon-type rec))
+    (define liftable-bldg?
+      (not (not (memq ct '(command-center orbital-command barracks factory starport)))))
+    (hash-remove! known-bldgs tag)
+    ;; L86B: Do NOT permanently poison `dead-tags` when sight-clearing liftable Terran structures
+    ;; (e.g. a Command Center floated to an expansion pad and morphed into a Planetary Fortress!).
+    (unless liftable-bldg?
       (set-add! dead-tags tag)
-      (set-add! destroyed-tech (tracked-enemy-bldg-canon-type rec))
+      (set-add! destroyed-tech ct)
       (set-opponent-world-model-confirmed-destroyed-min!
        owm (+ (opponent-world-model-confirmed-destroyed-min owm) (tracked-enemy-bldg-min-cost rec)))
       (set-opponent-world-model-confirmed-destroyed-gas!
@@ -760,6 +1040,7 @@
          (define ux (exact->inexact (hash-ref u 'x enemy-x)))
          (define uy (exact->inexact (hash-ref u 'y enemy-y)))
          (define uhp (max 1 (exact-round (hash-ref u 'hp 45))))
+         (hash-set! raw-unit-types tag utype)
          (hash-set! known-units tag
                     (tracked-enemy-unit tag ctype ux uy uhp frame
                                         (unit-speed-tps ctype)
@@ -778,6 +1059,7 @@
     (when (and (not (set-member? seen-unit-tags-now tag))
                (> (- frame (tracked-enemy-unit-last-seen-frame rec)) 2464))
       (hash-remove! known-units tag)
+      (hash-remove! raw-unit-types tag)
       (set-opponent-world-model-expired-sunk-min!
        owm (+ (opponent-world-model-expired-sunk-min owm) (tracked-enemy-unit-min-cost rec)))
       (set-opponent-world-model-expired-sunk-gas!
@@ -897,14 +1179,114 @@
        (set-pad-belief-entry-last-cleared-frame! pd frame)]
       [else (void)]))
 
+  ;; L86 Track 1: Update full expansion-ring pad vision & enemy TownHall presence
+  (define visible-enemy-th-pts
+    (for/list ([b (in-list enemy-bldgs)]
+               #:when (and (hash? b)
+                           (hash-has-key? TOWNHALL-SYM-SET (sc2-canonical-structure-sym (unit-type-sym b)))
+                           (not (hash-ref b 'is-proxy? #f))
+                           (real? (hash-ref b 'x #f))
+                           (real? (hash-ref b 'y #f))))
+      (cons (exact->inexact (hash-ref b 'x)) (exact->inexact (hash-ref b 'y)))))
+  (define scanner-sweep-pts
+    (let ([effs (hash-ref obs 'effects '())])
+      (if (list? effs)
+          (for/list ([ef (in-list effs)]
+                     #:when (and (hash? ef)
+                                 (or (eq? (hash-ref ef 'type #f) 'scanner-sweep)
+                                     (equal? (hash-ref ef 'effect-id #f) 6)
+                                     (equal? (hash-ref ef 'id #f) 6))
+                                 (real? (hash-ref ef 'x #f))
+                                 (real? (hash-ref ef 'y #f))))
+            (cons (exact->inexact (hash-ref ef 'x)) (exact->inexact (hash-ref ef 'y))))
+          '())))
+  (define (ally-or-scan-sees-point? px py r2)
+    (or (ally-sees-point? ally-units px py r2)
+        (for/or ([sp (in-list scanner-sweep-pts)])
+          (<= (dist2 (car sp) (cdr sp) px py) 169.0))))
+  (define (visible-enemy-th-near? px py r2)
+    (for/or ([pt (in-list visible-enemy-th-pts)])
+      (<= (dist2 (car pt) (cdr pt) px py) r2)))
+  (for ([rp (in-list cur-ring-pads)])
+    (define px (vector-ref rp 0))
+    (define py (vector-ref rp 1))
+    (define vis-th? (visible-enemy-th-near? px py 100.0))
+    (define tracked-th
+      (and (not vis-th?)
+           (for/first ([th (in-list th-bldgs)]
+                       #:when (<= (dist2 (tracked-enemy-bldg-x th) (tracked-enemy-bldg-y th) px py) 100.0))
+             th)))
+    (define visited-now? (ally-or-scan-sees-point? px py 144.0))
+    (define cleared-now? (and (not vis-th?) (ally-or-scan-sees-point? px py 100.0)))
+    (when (or visited-now? vis-th?)
+      (vector-set! rp 2 frame))
+    (cond
+      [vis-th?
+       (vector-set! rp 3 #t)
+       (vector-set! rp 4 frame)]
+      [cleared-now?
+       (vector-set! rp 3 #f)]
+      [tracked-th
+       (vector-set! rp 3 #t)
+       (vector-set! rp 4 (max (vector-ref rp 4) (tracked-enemy-bldg-last-seen-frame tracked-th)))]
+      [else (void)]))
+
+  (define main-pad-empty?
+    (let ([mp (and (pair? (opponent-world-model-pads owm)) (car (opponent-world-model-pads owm)))])
+      (and mp (eq? (pad-belief-entry-state mp) 'confirmed-empty))))
+  (define confirmed-enemy-base-pts
+    (let* ([raw-pts
+            (append
+             (if main-pad-empty? '() (list (cons enemy-x enemy-y)))
+             (for/list ([th (in-list th-bldgs)])
+               (cons (tracked-enemy-bldg-x th) (tracked-enemy-bldg-y th)))
+             visible-enemy-th-pts
+             (for/list ([rp (in-list cur-ring-pads)]
+                        #:when (vector-ref rp 3))
+               (cons (vector-ref rp 0) (vector-ref rp 1))))]
+           [pruned
+            (for/list ([pt (in-list raw-pts)]
+                       #:when (or (visible-enemy-th-near? (car pt) (cdr pt) 100.0)
+                                  (not (ally-or-scan-sees-point? (car pt) (cdr pt) 100.0))))
+              pt)])
+      (reverse
+       (for/fold ([dedup '()]) ([pt (in-list pruned)])
+         (if (for/or ([ex (in-list dedup)])
+               (< (dist2 (car pt) (cdr pt) (car ex) (cdr ex)) 64.0))
+             dedup
+             (cons pt dedup))))))
+  (hash-set! ring-st 'confirmed-enemy-base-pts confirmed-enemy-base-pts)
+
   ;; Step F: Reconstruct Base & Geyser Timelines + Happy-Path Deviation
+  ;; L86D: Spatially deduplicate `confirmed-base-ready-frames` (`<= 4.0t` -> `dist2 <= 16.0`)
+  ;; and compute `confirmed-bases` STRICTLY from spatially deduped `confirmed-enemy-base-pts`
+  ;; (NEVER un-deduped `(length th-bldgs)`!).
+  (define dedup-exp-th-ready-frames
+    (let ([clusters
+           (for/fold ([acc '()])
+                     ([th (in-list th-bldgs)]
+                      #:when (> (dist2 (tracked-enemy-bldg-x th) (tracked-enemy-bldg-y th) enemy-x enemy-y) 100.0))
+             (define tx (tracked-enemy-bldg-x th))
+             (define ty (tracked-enemy-bldg-y th))
+             (define trf (tracked-enemy-bldg-ready-frame th))
+             (define matched? #f)
+             (define next-acc
+               (for/list ([cl (in-list acc)])
+                 (if (and (not matched?)
+                          (<= (dist2 tx ty (vector-ref cl 0) (vector-ref cl 1)) 16.0))
+                     (begin
+                       (set! matched? #t)
+                       (vector (vector-ref cl 0) (vector-ref cl 1) (min trf (vector-ref cl 2))))
+                     cl)))
+             (if matched?
+                 next-acc
+                 (cons (vector tx ty trf) next-acc)))])
+      (sort (map (lambda (cl) (vector-ref cl 2)) clusters) <)))
   (define confirmed-base-ready-frames
     (cons 0 ; initial main TownHall ready at frame 0
-          (sort (for/list ([th (in-list th-bldgs)]
-                           #:when (> (dist2 (tracked-enemy-bldg-x th) (tracked-enemy-bldg-y th) enemy-x enemy-y) 100.0))
-                  (tracked-enemy-bldg-ready-frame th))
-                <)))
-  (define confirmed-bases (max 1 (max (length th-bldgs) (length confirmed-base-ready-frames))))
+          dedup-exp-th-ready-frames))
+  (define confirmed-bases
+    (max 1 (length confirmed-enemy-base-pts)))
   (define happy-bases (happy-path-expected-bases erace frame))
 
   ;; Check whether next expected pad (`natural` or `third`) was recently confirmed empty vs unscouted!
@@ -1069,29 +1451,89 @@
                     (or (< d2-us d2-en)
                         (> d2-en 2304.0)))))))
 
+  ;; L86D: Spatially dedup geysers (`<= 2.5t` -> `dist2 <= 6.25`, merging tagged + untagged)
+  ;; AND cap at `<= 2` geysers within `12.0t` (`144.0`) of the same expansion pad so Snapshot
+  ;; tag-churn can never inflate `confirmed-geyser-cnt` above physical SC2 geyser limits!
+  (define all-raw-geyser-entries
+    (append
+     (for/list ([rec (in-hash-values known-bldgs)]
+                #:when (hash-has-key? GEYSER-BLDG-SYM-SET (tracked-enemy-bldg-canon-type rec)))
+       (vector (tracked-enemy-bldg-x rec)
+               (tracked-enemy-bldg-y rec)
+               (tracked-enemy-bldg-ready-frame rec)
+               (tracked-enemy-bldg-last-seen-frame rec)
+               (tracked-enemy-bldg-vespene-contents rec)))
+     (for/list ([b (in-list enemy-bldgs)]
+                #:when (and (hash? b)
+                            (let ([tag (hash-ref b 'id 0)])
+                              (or (not (exact-integer? tag)) (<= tag 0)))
+                            (hash-has-key? GEYSER-BLDG-SYM-SET (sc2-canonical-structure-sym (unit-type-sym b)))))
+       (vector (exact->inexact (hash-ref b 'x enemy-x))
+               (exact->inexact (hash-ref b 'y enemy-y))
+               (max 0 (- frame 470))
+               frame
+               (let ([vc (hash-ref b 'vespene-contents 0)]) (if (exact-integer? vc) vc 0))))))
+  (define dedup-geyser-vecs
+    (let* ([spatially-deduped
+            (reverse
+             (for/fold ([acc '()]) ([g (in-list all-raw-geyser-entries)])
+               (define gx (vector-ref g 0))
+               (define gy (vector-ref g 1))
+               (define matched? #f)
+               (define next-acc
+                 (for/list ([ex (in-list acc)])
+                   (if (and (not matched?)
+                            (<= (dist2 gx gy (vector-ref ex 0) (vector-ref ex 1)) 6.25))
+                       (let* ([vc1 (vector-ref ex 4)]
+                              [vc2 (vector-ref g 4)]
+                              [best-vc
+                               (cond [(and (> vc1 0) (> vc2 0)) (min vc1 vc2)]
+                                     [(> vc1 0) vc1]
+                                     [(> vc2 0) vc2]
+                                     [else 0])])
+                         (set! matched? #t)
+                         (vector (vector-ref ex 0)
+                                 (vector-ref ex 1)
+                                 (min (vector-ref ex 2) (vector-ref g 2))
+                                 (max (vector-ref ex 3) (vector-ref g 3))
+                                 best-vc))
+                       ex)))
+               (if matched? next-acc (cons g next-acc))))]
+           [pad-anchors
+            (append confirmed-enemy-base-pts
+                    (for/list ([rp (in-list cur-ring-pads)])
+                      (cons (vector-ref rp 0) (vector-ref rp 1))))]
+           [pad-counts (make-hasheqv)])
+      (reverse
+       (for/fold ([kept '()]) ([g (in-list spatially-deduped)])
+         (define gx (vector-ref g 0))
+         (define gy (vector-ref g 1))
+         (define pad-idx
+           (for/first ([pa (in-list pad-anchors)]
+                       [idx (in-naturals 0)]
+                       #:when (<= (dist2 gx gy (car pa) (cdr pa)) 144.0))
+             idx))
+         (if pad-idx
+             (let ([cnt (hash-ref pad-counts pad-idx 0)])
+               (if (< cnt 2)
+                   (begin
+                     (hash-set! pad-counts pad-idx (add1 cnt))
+                     (cons g kept))
+                   kept))
+             (cons g kept))))))
   (define known-geysers
-    (for/list ([rec (in-hash-values known-bldgs)]
-               #:when (hash-has-key? GEYSER-BLDG-SYM-SET (tracked-enemy-bldg-canon-type rec)))
-      (list (tracked-enemy-bldg-ready-frame rec)
-            (tracked-enemy-bldg-last-seen-frame rec)
-            (tracked-enemy-bldg-vespene-contents rec))))
-  (define untagged-geyser-cnt
-    (for/sum ([b (in-list enemy-bldgs)] #:when (hash? b))
-      (define tag (hash-ref b 'id 0))
-      (if (and (or (not (exact-integer? tag)) (<= tag 0))
-               (hash-has-key? GEYSER-BLDG-SYM-SET (sc2-canonical-structure-sym (unit-type-sym b))))
-          1 0)))
+    (for/list ([g (in-list dedup-geyser-vecs)])
+      (list (vector-ref g 2) (vector-ref g 3) (vector-ref g 4))))
   ;; If gas tech/units were implied (`extractor`/`refinery`/`assimilator` in `implied-set`) and 0 geysers directly seen,
   ;; infer at least 1 geyser ready by `min(frame - 448, 1200)`!
   (define eff-geysers
     (if (and (null? known-geysers)
-             (= untagged-geyser-cnt 0)
              (or (set-member? implied-set 'extractor)
                  (set-member? implied-set 'refinery)
                  (set-member? implied-set 'assimilator)))
         (list (list (min (max 400 (- frame 448)) 1200) frame 0))
         known-geysers))
-  (define confirmed-geyser-cnt (+ (length eff-geysers) untagged-geyser-cnt))
+  (define confirmed-geyser-cnt (length eff-geysers))
 
   ;; L85C Gap B/C: 1-base double-gas (`<= 1` confirmed base, `>= 2` remembered geysers):
   ;; - Terran: `>= 145s` (`3248f`) so normal 1-Rax FE never false-fires `< 145s`.
@@ -1125,11 +1567,26 @@
          (eq? (pad-belief-entry-state next-overdue-pad) 'confirmed-empty)
          (<= (- frame (pad-belief-entry-last-cleared-frame next-overdue-pad)) 1680))) ; cleared within 75s
 
+  ;; L86C Track A: Past 6:00 (`8064f`), do NOT let main/nat production density (`>= 3 * confirmed-bases`)
+  ;; freeze `eff-bases` when `>= 3` outer ring pads are stale/unscouted! Keep `stopped-expanding?`
+  ;; active `< 6:00` OR when `overdue-pad-confirmed-empty?` is genuinely true.
+  (define stale-ring-pads-now
+    (let ([own-ref-pts (list (cons base-x base-y) (cons nat-x nat-y))])
+      (for/sum ([rp (in-list cur-ring-pads)])
+        (if (and (vector? rp)
+                 (>= (vector-length rp) 6)
+                 (not (pad-near-own-base? (vector-ref rp 0) (vector-ref rp 1) own-ref-pts))
+                 (pad-is-stale? rp frame 1344))
+            1 0))))
+  (define prod-surge-blocks-expand?
+    (and (>= prod-bldg-cnt (* 3 confirmed-bases))
+         (or (< frame 8064)
+             (< stale-ring-pads-now 3))))
   (define stopped-expanding?
     (or early-worker-rush-active?
         (and (< confirmed-bases happy-bases)
              (or overdue-pad-confirmed-empty?
-                 (>= prod-bldg-cnt (* 3 confirmed-bases))
+                 prod-surge-blocks-expand?
                  (and (= confirmed-bases 1) (>= confirmed-geyser-cnt 2) (>= frame 3584))))))
 
   (define unscouted-expansion-ambiguity?
@@ -1144,8 +1601,8 @@
 
   ;; Effective base timeline for cumulative income integration:
   ;; When `unscouted-expansion-ambiguity?` is true, include plausible hidden expansions up to
-  ;; `happy-bases` for unscouted (not confirmed-empty) pads so deep-fog macro opponents keep
-  ;; realistic worker/base counts rather than freezing at 2 bases through 15:00!
+  ;; `happy-bases` (up to 6th base) for unscouted (not confirmed-empty) pads so deep-fog macro
+  ;; opponents keep realistic worker/base counts rather than freezing at 2 bases through 15:00!
   (define eff-base-ready-frames
     (if (and unscouted-expansion-ambiguity? (< (length confirmed-base-ready-frames) happy-bases))
         (let* ([cur-cnt (length confirmed-base-ready-frames)]
@@ -1154,7 +1611,9 @@
                   (case b-idx
                     [(2) (case erace [(Zerg) 3340] [(Protoss) 4280] [else 4610])]
                     [(3) (case erace [(Zerg) 6400] [(Protoss) 9540] [else 9990])]
-                    [else (case erace [(Zerg) 11000] [(Protoss) 13680] [else 14350])]))])
+                    [(4) (case erace [(Zerg) 11000] [(Protoss) 13680] [else 14350])]
+                    [(5) (case erace [(Zerg) 14350] [(Protoss) 17040] [else 17710])]
+                    [else (case erace [(Zerg) 17710] [(Protoss) 20400] [else 21070])]))])
           (sort (append confirmed-base-ready-frames happy-rfs) <))
         confirmed-base-ready-frames))
 
@@ -1177,18 +1636,49 @@
   (define extra-bases-built (max 0 (- eff-bases 1)))
 
   ;; Tech / production / static-defense structures + upgrades sunk cost
-  (define-values (sunk-tech-bldg-min sunk-tech-bldg-gas siege-turtle-cnt)
-    (for/fold ([tm 0] [tg 0] [st-cnt 0])
+  ;; L86 Track 1: Expand turtle structure accounting to include shield-battery, planetary-fortress,
+  ;; and AA static defense (`missile-turret` / `spore-crawler`, half-weighted in `siege-turtle-cnt`),
+  ;; plus exact `turtle-breakdown` side-table counts.
+  (define-values (sunk-tech-bldg-min sunk-tech-bldg-gas static-ground-cnt pf-cnt static-aa-cnt)
+    (for/fold ([tm 0] [tg 0] [sg-cnt 0] [pfc 0] [aa-cnt 0])
               ([rec (in-hash-values known-bldgs)])
       (define ct (tracked-enemy-bldg-canon-type rec))
-      (define st-inc
-        (if (memq ct '(bunker planetary-fortress photon-cannon spine-crawler)) 1 0))
+      (define sg-inc (if (memq ct '(bunker shield-battery photon-cannon spine-crawler)) 1 0))
+      (define pf-inc (if (eq? ct 'planetary-fortress) 1 0))
+      (define aa-inc (if (memq ct '(missile-turret spore-crawler)) 1 0))
       (if (or (hash-has-key? TOWNHALL-SYM-SET ct)
               (hash-has-key? GEYSER-BLDG-SYM-SET ct))
-          (values tm tg (+ st-cnt st-inc))
+          (values tm tg (+ sg-cnt sg-inc) (+ pfc pf-inc) (+ aa-cnt aa-inc))
           (values (+ tm (tracked-enemy-bldg-min-cost rec))
                   (+ tg (tracked-enemy-bldg-gas-cost rec))
-                  (+ st-cnt st-inc)))))
+                  (+ sg-cnt sg-inc)
+                  (+ pfc pf-inc)
+                  (+ aa-cnt aa-inc)))))
+  (define-values (untagged-sg-cnt untagged-pf-cnt untagged-aa-cnt)
+    (for/fold ([sg 0] [pfc 0] [aa 0])
+              ([b (in-list enemy-bldgs)] #:when (hash? b))
+      (define tag (hash-ref b 'id 0))
+      (if (or (not (exact-integer? tag)) (<= tag 0))
+          (let ([ct (sc2-canonical-structure-sym (unit-type-sym b))])
+            (values (+ sg (if (memq ct '(bunker shield-battery photon-cannon spine-crawler)) 1 0))
+                    (+ pfc (if (eq? ct 'planetary-fortress) 1 0))
+                    (+ aa (if (memq ct '(missile-turret spore-crawler)) 1 0))))
+          (values sg pfc aa))))
+  ;; Also catch weaponized static-defense structures (e.g. planetary-fortress) if passed in `enemy-units`
+  ;; without duplicating any tag already tracked in `known-bldgs`!
+  (define-values (unit-list-sg-cnt unit-list-pf-cnt unit-list-aa-cnt)
+    (for/fold ([sg 0] [pfc 0] [aa 0])
+              ([(utag rec) (in-hash known-units)]
+               #:unless (hash-has-key? known-bldgs utag))
+      (define ct (sc2-canonical-structure-sym (tracked-enemy-unit-type rec)))
+      (values (+ sg (if (memq ct '(bunker shield-battery photon-cannon spine-crawler)) 1 0))
+              (+ pfc (if (eq? ct 'planetary-fortress) 1 0))
+              (+ aa (if (memq ct '(missile-turret spore-crawler)) 1 0)))))
+  (define total-static-ground-cnt (+ static-ground-cnt untagged-sg-cnt unit-list-sg-cnt))
+  (define total-pf-cnt (+ pf-cnt untagged-pf-cnt unit-list-pf-cnt))
+  (define total-static-aa-cnt (+ static-aa-cnt untagged-aa-cnt unit-list-aa-cnt))
+  (define siege-turtle-cnt
+    (+ total-static-ground-cnt total-pf-cnt (quotient total-static-aa-cnt 2)))
 
   ;; Add implied tech structures not yet seen directly in `known-bldgs`
   (define seen-canon-bldgs
@@ -1219,22 +1709,22 @@
   ;; Separate non-combat support flyers (`overlord`, `overseer`, `observer`, `dropperlord`,
   ;; `overlord-transport`) from `known-army-val` so scouting Overlords don't add phantom army value.
   (define known-unit-counts-mut (make-hasheq))
-  (define-values (known-army-sup known-army-min known-army-gas known-support-min known-support-gas imm-known-sup unit-siege-cnt)
-    (for/fold ([asup 0] [amin 0] [agas 0] [smin 0] [sgas 0] [isup 0] [usiege 0])
+  (define-values (known-army-sup known-army-min known-army-gas known-support-min known-support-gas imm-known-sup unit-siege-cnt burrow-mine-cnt siege-zone-unit-cnt)
+    (for/fold ([asup 0] [amin 0] [agas 0] [smin 0] [sgas 0] [isup 0] [usiege 0] [bm-cnt 0] [sz-cnt 0])
               ([rec (in-hash-values known-units)])
       (define ut (tracked-enemy-unit-type rec))
       (hash-update! known-unit-counts-mut ut add1 0)
       (cond
         [(hash-has-key? WORKER-SYM-SET ut)
-         (values asup amin agas smin sgas isup usiege)]
+         (values asup amin agas smin sgas isup usiege bm-cnt sz-cnt)]
         [(memq ut '(overlord overlord-transport dropperlord))
          ;; Overlords are already accounted for in `sunk-supply-min` below
-         (values asup amin agas smin sgas isup usiege)]
+         (values asup amin agas smin sgas isup usiege bm-cnt sz-cnt)]
         [(memq ut '(overseer observer))
          (values asup amin agas
                  (+ smin (tracked-enemy-unit-min-cost rec))
                  (+ sgas (tracked-enemy-unit-gas-cost rec))
-                 isup usiege)]
+                 isup usiege bm-cnt sz-cnt)]
         [else
          (define dt-sec (/ (exact->inexact (max 0 (- frame (tracked-enemy-unit-last-seen-frame rec)))) 22.4))
          ;; Discount stale unobserved unit contribution gently after 65s
@@ -1246,14 +1736,94 @@
          ;; Can this unit reach our front within the next 18s given `(dt-sec + 18s) * speed`?
          (define max-reach (* (tracked-enemy-unit-speed-tps rec) (+ dt-sec 18.0)))
          (define reach-inc (if (<= d-home max-reach) usup 0))
-         (define siege-inc (if (memq ut '(siege-tank siege-tank-sieged lurker lurker-mp lurker-burrowed tempest brood-lord)) 1 0))
+         ;; L86C: Count ONLY deployed/burrowed/true-turtle siege units in `siege-zone-count`
+         ;; using pre-canonicalized `raw-ut` so mobile unsieged `siege-tank` / un-deployed
+         ;; `liberator` / unburrowed `lurker` NEVER inflate turtle siege-zone counts!
+         (define raw-ut (hash-ref raw-unit-types (tracked-enemy-unit-tag rec) ut))
+         (define bm-inc
+           (if (memq raw-ut '(widow-mine widow-mine-burrowed lurker-burrowed lurker-mp-burrowed))
+               1 0))
+         (define sz-inc
+           (if (or (= bm-inc 1)
+                   (memq raw-ut '(siege-tank-sieged liberator-ag tempest
+                                  swarm-host swarm-host-burrowed swarm-host-mp)))
+               1 0))
+         (define siege-inc
+           (if (or (= sz-inc 1) (eq? ut 'brood-lord))
+               1 0))
          (values (+ asup usup)
                  (+ amin (tracked-enemy-unit-min-cost rec))
                  (+ agas (tracked-enemy-unit-gas-cost rec))
                  smin
                  sgas
                  (+ isup reach-inc)
-                 (+ usiege siege-inc))])))
+                 (+ usiege siege-inc)
+                 (+ bm-cnt bm-inc)
+                 (+ sz-cnt sz-inc))])))
+  (define-values (untagged-bm-cnt untagged-sz-cnt)
+    (for/fold ([bm 0] [sz 0])
+              ([u (in-list enemy-units)] #:when (hash? u))
+      (define tag (hash-ref u 'id 0))
+      (if (or (not (exact-integer? tag)) (<= tag 0))
+          (let* ([raw-ut (unit-type-sym u)]
+                 [bm-i (if (memq raw-ut '(widow-mine widow-mine-burrowed lurker-burrowed lurker-mp-burrowed)) 1 0)]
+                 [sz-i (if (or (= bm-i 1)
+                               (memq raw-ut '(siege-tank-sieged liberator-ag tempest
+                                              swarm-host swarm-host-burrowed swarm-host-mp)))
+                           1 0)])
+            (values (+ bm bm-i) (+ sz sz-i)))
+          (values bm sz))))
+  (define total-burrow-mine-cnt (+ burrow-mine-cnt untagged-bm-cnt))
+  (define total-siege-zone-cnt (+ siege-zone-unit-cnt untagged-sz-cnt))
+  (define turtle-breakdown-ht
+    (hasheq 'static-ground-count total-static-ground-cnt
+            'pf-count total-pf-cnt
+            'static-aa-count total-static-aa-cnt
+            'burrow-mine-count total-burrow-mine-cnt
+            'siege-zone-count total-siege-zone-cnt))
+  (hash-set! ring-st 'turtle-breakdown turtle-breakdown-ht)
+
+  ;; L86C Track A: Calibrated estimated enemy bases & gases (stored strictly in weak side-tables
+  ;; so `confirmed-bases` / `confirmed-geysers` remain 100% pure for early rush detection and
+  ;; the 35-field `opponent-world-summary` ABI stays untouched!).
+  (define estimated-enemy-bases (max 1 (min 12 (max confirmed-bases eff-bases))))
+  (define max-plausible-gases (* 2 estimated-enemy-bases))
+  (define obs-total-gas-spend
+    (+ known-army-gas known-support-gas obs-sunk-tech-gas
+       (opponent-world-model-confirmed-destroyed-gas owm)
+       (opponent-world-model-expired-sunk-gas owm)))
+  (define spend-implied-gases
+    (if (> obs-total-gas-spend 0)
+        (exact-ceiling (/ (exact->inexact obs-total-gas-spend)
+                          (* 1.85 (max 30.0 (- f-sec 85.0)))))
+        0))
+  (define gas-tech-min-gases
+    (cond
+      [(and (>= obs-total-gas-spend 250) (>= frame 3360)) 2]
+      [(or (> obs-total-gas-spend 0)
+           (set-member? implied-set 'extractor)
+           (set-member? implied-set 'refinery)
+           (set-member? implied-set 'assimilator))
+       1]
+      [else 0]))
+  (define econ-baseline-g
+    (if (and (>= frame 5376)
+             (not early-worker-rush-active?)
+             (not enemy-1base-double-gas?)
+             (>= estimated-enemy-bases 2))
+        (let ([g-per-base (min 1.45 (+ 0.85 (* 0.0012 (max 0.0 (- f-sec 240.0)))))])
+          (max 2 (exact-round (* g-per-base (exact->inexact estimated-enemy-bases)))))
+        0))
+  (define estimated-enemy-gases
+    (if (and (< frame 1344) (= confirmed-geyser-cnt 0) (= gas-tech-min-gases 0))
+        0
+        (min max-plausible-gases
+             (max confirmed-geyser-cnt
+                  gas-tech-min-gases
+                  spend-implied-gases
+                  econ-baseline-g))))
+  (hash-set! ring-st 'estimated-enemy-bases estimated-enemy-bases)
+  (hash-set! ring-st 'estimated-enemy-gases estimated-enemy-gases)
 
   ;; Unavoidable macro economic overhead:
   ;;   - Workers built (`50M` each) + extra TownHalls + geysers (observed or baseline)
@@ -1619,5 +2189,16 @@
             latched-frame))
   (hash-set! owm-proxy-state-table owm proxy-state-vec)
   (hash-set! owm-summary-proxy-state-table summary proxy-state-vec)
+  (define ring-snapshot-ht
+    (hasheq 'ring-pads
+            (for/list ([rp (in-list cur-ring-pads)])
+              (vector-immutable (vector-ref rp 0) (vector-ref rp 1)
+                                (vector-ref rp 2) (vector-ref rp 3)
+                                (vector-ref rp 4) (vector-ref rp 5)))
+            'confirmed-enemy-base-pts confirmed-enemy-base-pts
+            'turtle-breakdown turtle-breakdown-ht
+            'estimated-enemy-bases estimated-enemy-bases
+            'estimated-enemy-gases estimated-enemy-gases))
+  (hash-set! owm-summary-l86-ring-state-table summary ring-snapshot-ht)
   (set-opponent-world-model-last-summary! owm summary)
   summary)

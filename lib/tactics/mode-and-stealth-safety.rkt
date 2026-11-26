@@ -28,6 +28,9 @@
                   SC2-BUILD-COMPLETE-PROGRESS
                   sc2-canonical-order-ability
                   sc2-order-protection-class
+                  sc2-canonical-unit-sym
+                  sc2-canonical-structure-sym
+                  sc2-supply-cost
                   unit-role-lease?
                   unit-role-lease-expires-frame)
          (only-in "../engine/arbiter.rkt"
@@ -54,7 +57,8 @@
  (struct-out mode-stealth-plan)
  friendly-unit-on-depot-footprint-info?
  friendly-unit-requesting-depot-transit-info?
- plan-mode-and-stealth-safety!)
+ plan-mode-and-stealth-safety!
+ plan-mobile-detector-army-escort)
 
 ;; =============================================================================
 ;; Frozen Cross-Lane Struct Contracts (Loop 66 Section 2.2)
@@ -161,7 +165,7 @@
   (not (not (memv ut '(82 1911 129 1912 56 23 66 99)))))
 
 (define (mobile-or-sieged-detector-type? ut)
-  (not (not (memv ut '(129 82 1912 1911)))))
+  (not (not (memv ut '(129 82 56 1912 1911)))))
 
 (define (active-raider-cloak-type? ut)
   (not (not (memv ut '(55 76 50)))))
@@ -772,3 +776,374 @@
          (for/seteqv ([t (in-set mode-tags-acc)]) t)
          uncovered-stealth-present?
          arbiter-overrides))))
+
+;; =============================================================================
+;; Loop 86 Track 3C: Mobile Detector Army Escort (`plan-mobile-detector-army-escort`)
+;;
+;; Race-agnostic mobile detector escort for Observer (82 / 1911), Overseer (129 / 1912),
+;; and Raven (56):
+;;   - Keeps 1 home detector + 1 army detector when active home stealth exists and >= 2 detectors
+;;   - Sends even a sole mobile detector with a deployed army when home has zero stealth threats
+;;   - Unmorphs distant sieged Observer/Overseer (> 12t from army centroid)
+;;   - Defaults to -2.0t behind army centroid (nudging +1.5t forward ONLY on burrowed
+;;     Mines/Lurkers with zero visible AA within 13t), enforcing >= 9.5t AA & >= 6.8t Mine standoff
+;;   - Applies 2.2t deadband when already positioned safely (zero move-command spam)
+;; =============================================================================
+
+(define ESCORT-AIR-UNIT-SYMS
+  (seteq 'mutalisk 'corruptor 'brood-lord 'broodlord 'viper
+         'phoenix 'oracle 'void-ray 'voidray 'carrier 'tempest 'mothership
+         'warp-prism 'warp-prism-phasing
+         'viking-fighter 'viking 'banshee 'medivac 'liberator 'liberator-ag 'raven 'battlecruiser
+         'overlord 'overlord-transport 'overseer 'overseer-siege-mode 'observer 'observer-siege-mode))
+
+(define ESCORT-NON-MINE-AA-SYMS
+  (seteq 'missile-turret 'thor 'thor-ap 'viking-fighter 'viking 'cyclone 'ghost 'battlecruiser 'liberator
+         'phoenix 'stalker 'void-ray 'voidray 'archon 'carrier 'tempest 'sentry 'high-templar 'photon-cannon
+         'marine 'bunker
+         'hydralisk 'queen 'mutalisk 'corruptor 'spore-crawler))
+
+(define ESCORT-MINE-SYMS
+  (seteq 'widow-mine 'widow-mine-burrowed))
+
+(define ESCORT-BURROW-SIEGE-SYMS
+  (seteq 'widow-mine 'widow-mine-burrowed
+         'lurker 'lurker-burrowed 'lurker-mp 'lurker-mp-burrowed))
+
+(define (escort-rec-id u)
+  (cond
+    [(hash? u)
+     (define v (hash-ref u 'id (lambda () (hash-ref u 'tag #f))))
+     (and (exact-integer? v) (> v 0) v)]
+    [(ms-unit-info? u) (ms-unit-info-tag u)]
+    [else #f]))
+
+(define (escort-rec-x u [def 0.0])
+  (cond
+    [(hash? u)
+     (define v (hash-ref u 'x #f))
+     (if (real? v) (exact->inexact v) (exact->inexact def))]
+    [(ms-unit-info? u) (to-fl (ms-unit-info-x u))]
+    [else (exact->inexact def)]))
+
+(define (escort-rec-y u [def 0.0])
+  (cond
+    [(hash? u)
+     (define v (hash-ref u 'y #f))
+     (if (real? v) (exact->inexact v) (exact->inexact def))]
+    [(ms-unit-info? u) (to-fl (ms-unit-info-y u))]
+    [else (exact->inexact def)]))
+
+(define (escort-rec-xy? u)
+  (cond
+    [(hash? u) (and (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f)))]
+    [(ms-unit-info? u) #t]
+    [else #f]))
+
+(define (escort-rec-raw-type u)
+  (cond
+    [(hash? u) (hash-ref u 'type (lambda () (hash-ref u 'unit-type 'unknown)))]
+    [(ms-unit-info? u) (ms-unit-info-unit-type u)]
+    [else 'unknown]))
+
+(define (escort-rec-sym u)
+  (define raw (escort-rec-raw-type u))
+  (cond
+    [(symbol? raw) (sc2-canonical-unit-sym raw)]
+    [(exact-integer? raw)
+     (case raw
+       [(82 1911) 'observer]
+       [(129 1912) 'overseer]
+       [(56) 'raven]
+       [(498 500) 'widow-mine]
+       [(23) 'missile-turret]
+       [(66) 'photon-cannon]
+       [(99) 'spore-crawler]
+       [(24) 'bunker]
+       [(48) 'marine]
+       [(52 691) 'thor]
+       [(35) 'viking-fighter]
+       [(78) 'phoenix]
+       [(74) 'stalker]
+       [(107) 'hydralisk]
+       [(126) 'queen]
+       [else 'unknown])]
+    [else 'unknown]))
+
+(define (escort-rec-struct-sym u)
+  (define raw (escort-rec-raw-type u))
+  (cond
+    [(symbol? raw) (sc2-canonical-structure-sym raw)]
+    [else (escort-rec-sym u)]))
+
+(define (escort-det-kind u)
+  (define raw (escort-rec-raw-type u))
+  (cond
+    [(or (eq? raw 'observer-siege-mode) (eqv? raw 1911)) 'observer-siege-mode]
+    [(or (eq? raw 'overseer-siege-mode) (eqv? raw 1912)) 'overseer-siege-mode]
+    [(or (eq? raw 'observer) (eqv? raw 82)) 'observer]
+    [(or (eq? raw 'overseer) (eqv? raw 129)) 'overseer]
+    [(or (eq? raw 'raven) (eqv? raw 56)) 'raven]
+    [else #f]))
+
+(define (escort-rec-completed? u)
+  (cond
+    [(hash? u)
+     (define bp (hash-ref u 'build-progress 1.0))
+     (or (not (real? bp)) (>= bp 0.99))]
+    [(ms-unit-info? u) (>= (ms-unit-info-build-progress u) 0.99)]
+    [else #t]))
+
+(define (escort-rec-flying? u)
+  (cond
+    [(hash? u)
+     (or (eq? (hash-ref u 'flying? #f) #t)
+         (set-member? ESCORT-AIR-UNIT-SYMS (escort-rec-sym u)))]
+    [(ms-unit-info? u) (ms-unit-info-flying? u)]
+    [else #f]))
+
+(define (escort-pt->xy p)
+  (cond
+    [(and (pair? p) (real? (car p)) (real? (cdr p)))
+     (values (exact->inexact (car p)) (exact->inexact (cdr p)))]
+    [(and (list? p) (>= (length p) 2) (real? (first p)) (real? (second p)))
+     (values (exact->inexact (first p)) (exact->inexact (second p)))]
+    [(and (hash? p) (real? (hash-ref p 'x #f)) (real? (hash-ref p 'y #f)))
+     (values (exact->inexact (hash-ref p 'x)) (exact->inexact (hash-ref p 'y)))]
+    [else (values #f #f)]))
+
+(define (escort-centroid units)
+  (let-values ([(sx sy n)
+                (for/fold ([sx 0.0] [sy 0.0] [n 0]) ([u (in-list units)])
+                  (values (fl+ sx (escort-rec-x u 0.0))
+                          (fl+ sy (escort-rec-y u 0.0))
+                          (add1 n)))])
+    (if (= n 0)
+        (values 0.0 0.0)
+        (values (fl/ sx (exact->inexact n))
+                (fl/ sy (exact->inexact n))))))
+
+(define (plan-mobile-detector-army-escort
+         #:detectors detectors
+         #:combat-units combat-units
+         #:enemy-units enemy-units
+         #:enemy-buildings enemy-buildings
+         #:own-townhall-pts own-th-pts
+         #:attack-target-xy [atk-xy #f]
+         #:active-home-stealth? [home-stealth? #f]
+         #:escort-required? [escort-req? #t]
+         #:claimed-ids [claimed-ids (seteqv)]
+         #:map-width [map-w 200.0]
+         #:map-height [map-h 200.0])
+  (define safe-combat
+    (if (list? combat-units) (filter escort-rec-xy? combat-units) '()))
+  (define safe-claimed (if (set? claimed-ids) claimed-ids (seteqv)))
+  (define avail-dets
+    (if (and escort-req? (>= (length safe-combat) 3) (list? detectors))
+        (filter (lambda (d)
+                  (define tid (escort-rec-id d))
+                  (and tid
+                       (not (set-member? safe-claimed tid))
+                       (escort-rec-xy? d)
+                       (escort-rec-completed? d)
+                       (escort-det-kind d)))
+                detectors)
+        '()))
+  (cond
+    [(null? avail-dets)
+     (values '() (seteqv))]
+    [else
+     (define mw (flmax 40.0 (to-fl map-w)))
+     (define mh (flmax 40.0 (to-fl map-h)))
+     (define margin 4.0)
+     (define-values (atx aty) (escort-pt->xy atk-xy))
+
+     ;; Main army centroid (prefer forward ground combat cluster when >= 3 ground units)
+     (define ground-combat (filter (lambda (u) (not (escort-rec-flying? u))) safe-combat))
+     (define base-cluster (if (>= (length ground-combat) 3) ground-combat safe-combat))
+     (define focus-cluster
+       (if (and atx aty (> (length base-cluster) 3))
+           (let* ([sorted-by-atk
+                   (sort base-cluster fl<
+                         #:key (lambda (u) (dist2d-fl (escort-rec-x u 0.0) (escort-rec-y u 0.0) atx aty)))]
+                  [lead (first sorted-by-atk)]
+                  [lx (escort-rec-x lead 0.0)]
+                  [ly (escort-rec-y lead 0.0)]
+                  [near-lead
+                   (filter (lambda (u) (fl<= (dist2d-fl (escort-rec-x u 0.0) (escort-rec-y u 0.0) lx ly) 18.0))
+                           sorted-by-atk)])
+             (if (>= (length near-lead) 3)
+                 near-lead
+                 (take sorted-by-atk (max 3 (inexact->exact (ceiling (* 0.6 (length sorted-by-atk))))))))
+           base-cluster))
+     (define-values (acx acy) (escort-centroid focus-cluster))
+     (define army-supply
+       (for/fold ([s 0.0]) ([u (in-list safe-combat)])
+         (define sym (escort-rec-sym u))
+         (define u-sup
+           (cond
+             [(or (eq? sym 'zergling) (eq? sym 'baneling)) 0.5]
+             [else (max 0.5 (exact->inexact (sc2-supply-cost sym 1)))]))
+         (fl+ s u-sup)))
+
+     ;; Normalized home townhall points
+     (define th-pts
+       (for/list ([p (in-list (if (list? own-th-pts) own-th-pts '()))]
+                  #:do [(define-values (px py) (escort-pt->xy p))]
+                  #:when (and px py))
+         (cons px py)))
+     (define (min-dist-to-home x y)
+       (if (null? th-pts)
+           999.0
+           (for/fold ([md +inf.0]) ([tp (in-list th-pts)])
+             (flmin md (dist2d-fl x y (car tp) (cdr tp))))))
+     (define d-army-home (min-dist-to-home acx acy))
+     (define army-deployed?
+       (or (null? th-pts) (fl> d-army-home 26.0) (fl>= army-supply 12.0)))
+
+     ;; Home vs Army detector allocation
+     (define chosen-det
+       (cond
+         [home-stealth?
+          (if (< (length avail-dets) 2)
+              #f
+              (let* ([home-det
+                      (car (sort avail-dets fl<
+                                 #:key (lambda (d) (min-dist-to-home (escort-rec-x d 0.0) (escort-rec-y d 0.0)))))]
+                     [home-id (escort-rec-id home-det)]
+                     [rem (filter (lambda (d) (not (eqv? (escort-rec-id d) home-id))) avail-dets)])
+                (and (pair? rem)
+                     (car (sort rem fl<
+                                #:key (lambda (d) (dist2d-fl (escort-rec-x d 0.0) (escort-rec-y d 0.0) acx acy)))))))]
+         [army-deployed?
+          (car (sort avail-dets fl<
+                     #:key (lambda (d) (dist2d-fl (escort-rec-x d 0.0) (escort-rec-y d 0.0) acx acy))))]
+         [else #f]))
+
+     (cond
+       [(not chosen-det)
+        (values '() (seteqv))]
+       [else
+        (define det-id (escort-rec-id chosen-det))
+        (define det-kind (escort-det-kind chosen-det))
+        (define dx0 (escort-rec-x chosen-det acx))
+        (define dy0 (escort-rec-y chosen-det acy))
+        (define d-det-army (dist2d-fl dx0 dy0 acx acy))
+        (cond
+          ;; Unmorph distant sieged Observer/Overseer (> 12.0t behind main army)
+          [(and (or (eq? det-kind 'observer-siege-mode)
+                    (eq? det-kind 'overseer-siege-mode))
+                (fl> d-det-army 12.0))
+           (define spell (if (eq? det-kind 'observer-siege-mode) 'morph-observer-mode 'morph-overseer-mode))
+           (values (list (list 'cast-spell det-id spell)) (seteqv det-id))]
+          [else
+           ;; Forward unit vector toward atk-xy (else away from nearest home TH)
+           (define-values (ux uy)
+             (cond
+               [(and atx aty (fl> (dist2d-fl acx acy atx aty) 1.0))
+                (define d (dist2d-fl acx acy atx aty))
+                (values (fl/ (fl- atx acx) d) (fl/ (fl- aty acy) d))]
+               [(pair? th-pts)
+                (define near-th (car (sort th-pts fl< #:key (lambda (tp) (dist2d-fl acx acy (car tp) (cdr tp))))))
+                (define d (dist2d-fl (car near-th) (cdr near-th) acx acy))
+                (if (fl> d 1.0)
+                    (values (fl/ (fl- acx (car near-th)) d) (fl/ (fl- acy (cdr near-th)) d))
+                    (values 1.0 0.0))]
+               [else (values 1.0 0.0)]))
+
+           ;; Collect visible enemy non-mine AA, Widow Mines, and burrowed siege threats (Mines/Lurkers)
+           (define aa-pts '())
+           (define mine-pts '())
+           (define burrow-siege-pts '())
+           (for ([lst (in-list (list (if (list? enemy-units) enemy-units '())
+                                     (if (list? enemy-buildings) enemy-buildings '())))])
+             (for ([e (in-list lst)]
+                   #:when (escort-rec-xy? e))
+               (define s1 (escort-rec-sym e))
+               (define s2 (escort-rec-struct-sym e))
+               (define ex (escort-rec-x e 0.0))
+               (define ey (escort-rec-y e 0.0))
+               (define is-burrowed?
+                 (and (hash? e) (eq? (hash-ref e 'burrowed? #f) #t)))
+               (when (or is-burrowed?
+                         (set-member? ESCORT-BURROW-SIEGE-SYMS s1)
+                         (set-member? ESCORT-BURROW-SIEGE-SYMS s2))
+                 (set! burrow-siege-pts (cons (cons ex ey) burrow-siege-pts)))
+               (cond
+                 [(or (set-member? ESCORT-MINE-SYMS s1) (set-member? ESCORT-MINE-SYMS s2))
+                  (set! mine-pts (cons (cons ex ey) mine-pts))]
+                 [(or (set-member? ESCORT-NON-MINE-AA-SYMS s1) (set-member? ESCORT-NON-MINE-AA-SYMS s2))
+                  (set! aa-pts (cons (cons ex ey) aa-pts))])))
+
+           ;; Loop 86E: Default to -2.0t BEHIND army centroid (toward home/retreat vector) so
+           ;; Observers/Overseers/Ravens never fly ahead into fog/Spores/Queens/Turrets!
+           ;; Nudge slightly forward (+1.5t) ONLY when burrowed Mines/Lurkers are present AND
+           ;; zero visible enemy AA exists within 13.0t of army centroid.
+           (define aa-within-13?
+             (ormap (lambda (p) (fl<= (dist2d-fl acx acy (car p) (cdr p)) 13.0)) aa-pts))
+           (define forward-probe-safe?
+             (and (pair? burrow-siege-pts) (not aa-within-13?)))
+           (define base-x
+             (clamp-fl (if forward-probe-safe?
+                           (fl+ acx (fl* 1.5 ux))
+                           (fl- acx (fl* 2.0 ux)))
+                       margin (fl- mw margin)))
+           (define base-y
+             (clamp-fl (if forward-probe-safe?
+                           (fl+ acy (fl* 1.5 uy))
+                           (fl- acy (fl* 2.0 uy)))
+                       margin (fl- mh margin)))
+
+           ;; Always enforce safe >= 9.5t AA standoff & >= 6.8t Widow Mine standoff (well inside 11.0t sight)
+           (define need-relax?
+             (or (ormap (lambda (p) (fl< (dist2d-fl base-x base-y (car p) (cdr p)) 9.6)) aa-pts)
+                 (ormap (lambda (p) (fl< (dist2d-fl base-x base-y (car p) (cdr p)) 6.9)) mine-pts)))
+           (define-values (tx ty)
+             (cond
+               [(not need-relax?)
+                (values base-x base-y)]
+               [else
+                (define bx0 (clamp-fl (fl- acx (fl* 2.0 ux)) margin (fl- mw margin)))
+                (define by0 (clamp-fl (fl- acy (fl* 2.0 uy)) margin (fl- mh margin)))
+                (let loop ([rx bx0] [ry by0] [iter 0])
+                  (if (>= iter 5)
+                      (values rx ry)
+                      (let ()
+                        (define push-x 0.0)
+                        (define push-y 0.0)
+                        (define moved? #f)
+                        (for ([ap (in-list aa-pts)])
+                          (define d (dist2d-fl rx ry (car ap) (cdr ap)))
+                          (when (fl< d 9.6)
+                            (set! moved? #t)
+                            (define need (fl- 9.65 d))
+                            (define-values (vx vy)
+                              (if (fl> d 0.05)
+                                  (values (fl/ (fl- rx (car ap)) d) (fl/ (fl- ry (cdr ap)) d))
+                                  (values (fl- 0.0 ux) (fl- 0.0 uy))))
+                            (set! push-x (fl+ push-x (fl* need vx)))
+                            (set! push-y (fl+ push-y (fl* need vy)))))
+                        (for ([mp (in-list mine-pts)])
+                          (define d (dist2d-fl rx ry (car mp) (cdr mp)))
+                          (when (fl< d 6.9)
+                            (set! moved? #t)
+                            (define need (fl- 6.95 d))
+                            (define-values (vx vy)
+                              (if (fl> d 0.05)
+                                  (values (fl/ (fl- rx (car mp)) d) (fl/ (fl- ry (cdr mp)) d))
+                                  (values (fl- 0.0 ux) (fl- 0.0 uy))))
+                            (set! push-x (fl+ push-x (fl* need vx)))
+                            (set! push-y (fl+ push-y (fl* need vy)))))
+                        (if (not moved?)
+                            (values rx ry)
+                            (loop (clamp-fl (fl+ rx push-x) margin (fl- mw margin))
+                                  (clamp-fl (fl+ ry push-y) margin (fl- mh margin))
+                                  (add1 iter))))))]))
+
+           ;; Deadband: skip move if already <= 2.2t from target AND safe from AA/Mines
+           (define cur-safe?
+             (and (not (ormap (lambda (p) (fl< (dist2d-fl dx0 dy0 (car p) (cdr p)) 9.5)) aa-pts))
+                  (not (ormap (lambda (p) (fl< (dist2d-fl dx0 dy0 (car p) (cdr p)) 6.8)) mine-pts))))
+           (if (and (fl<= (dist2d-fl dx0 dy0 tx ty) 2.2) cur-safe?)
+               (values '() (seteqv det-id))
+               (values (list (list 'move det-id tx ty)) (seteqv det-id)))])])]))

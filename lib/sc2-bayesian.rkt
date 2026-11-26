@@ -30,6 +30,7 @@
  hellinger-distance
  fow-ghost-step-diffusion!
  compute-bayesian-pad-camped-posterior
+ compute-bayesian-enemy-turtle-posterior
  compute-bayesian-unwalled-opponent-posterior
  compute-bayesian-proxy-all-in-posterior
  compute-bayesian-multi-prong-window-posterior
@@ -265,6 +266,79 @@
     (cons (and (not camp-bldg?) (= enemy-cnt 0) (>= ally-near-cnt 1))
           0.20))))
 
+;; L86 Track 1: Computes calibrated Bayesian posterior P(enemy-turtle-fortress | E) in [0.01, 0.99]
+;; from static ground defense, Planetary Fortresses, AA turret/spore walls, burrowed mines/lurkers,
+;; and siege-zone units. Strictly separate from `compute-bayesian-pad-camped-posterior`.
+(: compute-bayesian-enemy-turtle-posterior
+   (->* ()
+        (#:static-ground-count Any
+         #:pf-count Any
+         #:static-aa-count Any
+         #:burrow-mine-count Any
+         #:siege-zone-count Any
+         #:enemy-bases Any
+         #:frame Any
+         #:rush-posterior Any
+         #:prior Any)
+        Float))
+(define (compute-bayesian-enemy-turtle-posterior
+         #:static-ground-count [raw-static-ground 0]
+         #:pf-count [raw-pf-cnt 0]
+         #:static-aa-count [raw-static-aa 0]
+         #:burrow-mine-count [raw-burrow-mine 0]
+         #:siege-zone-count [raw-siege-zone 0]
+         #:enemy-bases [raw-enemy-bases 1]
+         #:frame [raw-frame 0]
+         #:rush-posterior [raw-rush-post 0.12]
+         #:prior [raw-prior 0.06])
+  (define static-ground (max 0 (safe-exact-int raw-static-ground 0)))
+  (define pf-cnt (max 0 (safe-exact-int raw-pf-cnt 0)))
+  (define static-aa (max 0 (safe-exact-int raw-static-aa 0)))
+  (define burrow-mine (max 0 (safe-exact-int raw-burrow-mine 0)))
+  (define siege-zone (max 0 (safe-exact-int raw-siege-zone 0)))
+  (define enemy-bases (max 1 (safe-exact-int raw-enemy-bases 1)))
+  (define frame (max 0 (safe-exact-int raw-frame 0)))
+  (define rush-post (clamp-real (safe-real raw-rush-post 0.12) 0.01 0.99))
+  ;; L86B: Gate turtle posterior on `frame >= 6720` (`5:00`) so early defensive Spines/Bunkers
+  ;; before 5:00 never prematurely trigger midgame turtle/siege macro.
+  (if (< frame 6720)
+      (clamp-real (* 0.45 (clamp-real (safe-real raw-prior 0.06) 0.01 0.45)) 0.01 0.06)
+      ;; L86C: De-sensitized static-ground & siege-zone LRs so normal 2-3 Spines/Bunkers/Batteries
+      ;; or 3-4 Bio-Tank Tanks stay < 0.25, while genuine fortresses (>= 4 static-ground, >= 1 PF,
+      ;; >= 6 AA static, >= 6 siege-zone, >= 4 burrow-mine, or >= 2 static + >= 4 siege-zone) hit >= 0.45!
+      (bayesian-posterior-from-likelihoods
+       raw-prior
+       (list
+        (cons (and (>= static-ground 2) (< static-ground 4) (= pf-cnt 0)) 2.0)
+        (cons (or (>= static-ground 4) (>= pf-cnt 1)) 13.0)
+        (cons (or (>= static-ground 6) (>= pf-cnt 2)) 4.2)
+        (cons (and (>= static-aa 4) (< static-aa 6)) 9.0)
+        (cons (>= static-aa 6) 15.0)
+        (cons (or (>= siege-zone 6)
+                  (and (>= siege-zone 4)
+                       (or (>= static-ground 2)
+                           (>= pf-cnt 1)
+                           (>= burrow-mine 4))))
+              14.0)
+        (cons (>= siege-zone 8) 4.5)
+        (cons (>= burrow-mine 4) 2.8)
+        (cons (and (>= enemy-bases 4)
+                   (>= frame 8064)
+                   (or (>= static-ground 2) (>= siege-zone 4) (>= pf-cnt 1)))
+              2.4)
+        ;; Negative evidence: zero false turtle during active early rushes with no static defense
+        (cons (and (>= rush-post 0.65)
+                   (= static-ground 0)
+                   (= pf-cnt 0)
+                   (< siege-zone 2))
+              0.25)
+        ;; Zero evidence: stays cleanly ~0.03 in non-turtle games
+        (cons (and (= static-ground 0)
+                   (= pf-cnt 0)
+                   (< static-aa 3)
+                   (< siege-zone 2))
+              0.45)))))
+
 ;; Signal-level Bayesian bluff posterior P(bluff | E), decoupled from perception struct types.
 (: evaluate-bluff-posterior-from-signals
    (->* ()
@@ -363,7 +437,11 @@
          #:feint-or-poke-detected? Boolean
          #:proxy-or-rush-detected? Boolean
          #:branch-posteriors (HashTable Symbol Float))
-        (#:proxy-all-in-posterior (Option Real))
+        (#:proxy-all-in-posterior (Option Real)
+         #:confirmed-enemy-bases Any
+         #:own-bases Any
+         #:stale-ring-pads Any
+         #:unscouted-exp-ambiguity? Any)
         bayesian-strategic-priors))
 (define (evaluate-strategic-posteriors-from-signals
          #:bluff-prior raw-bluff-prior
@@ -377,11 +455,19 @@
          #:feint-or-poke-detected? feint-detected?
          #:proxy-or-rush-detected? proxy-rush?
          #:branch-posteriors branch-posteriors
-         #:proxy-all-in-posterior [raw-proxy-post #f])
+         #:proxy-all-in-posterior [raw-proxy-post #f]
+         #:confirmed-enemy-bases [raw-conf-eb 0]
+         #:own-bases [raw-own-b 1]
+         #:stale-ring-pads [raw-stale-pads 0]
+         #:unscouted-exp-ambiguity? [raw-unscouted-amb? #f])
   (define bluff-prior (clamp-real raw-bluff-prior 0.01 0.45))
   (define bluff-post (clamp-real raw-bluff-post 0.01 0.99))
   (define proxy-post-val : (Option Float)
     (and (real? raw-proxy-post) (clamp-real raw-proxy-post 0.0 0.99)))
+  (define conf-eb (max 0 (safe-exact-int raw-conf-eb 0)))
+  (define own-b (max 1 (safe-exact-int raw-own-b 1)))
+  (define stale-pads (max 0 (safe-exact-int raw-stale-pads 0)))
+  (define unscouted-amb? (and raw-unscouted-amb? #t))
   (define feint-post
     (bayesian-posterior-from-likelihoods
      0.10
@@ -412,6 +498,19 @@
      (list
       (cons (eq? dm-hyp 'hidden-expansion-or-macro-boom) 7.5)
       (cons (and (>= rem-min 400.0) (<= combat-cnt 3)) 3.5)
+      ;; L86B Track 1: Keep strong `5.5x`/`2.8x` strictly on confirmed enemy base leads,
+      ;; and apply only a single mild `1.8x` stale-pad ambiguity LR at `8:30+` (`11424f`)
+      ;; when <= 2 bases confirmed, >= 6 pads stale, >= 400 unaccounted minerals, <= 4 combat,
+      ;; and rush < 0.45 (eliminating 6:00 early false-positive hexp over-triggers).
+      (cons (and (>= frame 7392) (>= conf-eb 3) (>= conf-eb (+ own-b 1)) (< rush-post 0.50)) 5.5)
+      (cons (and (>= frame 7392) (>= conf-eb (+ own-b 2)) (< rush-post 0.50)) 2.8)
+      (cons (and (>= frame 11424)
+                 (<= conf-eb 2)
+                 (>= stale-pads 6)
+                 (>= rem-min 400.0)
+                 (<= combat-cnt 4)
+                 (< rush-post 0.45))
+            1.8)
       (cons (>= rush-post 0.60) 0.20))))
   (define tech-switch-post
     (bayesian-posterior-from-likelihoods

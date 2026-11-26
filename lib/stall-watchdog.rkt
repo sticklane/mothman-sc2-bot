@@ -148,9 +148,11 @@
 
 (define (wd-gas-valve-mode minerals gas vesp-rate workers ready-gas-bldgs food-used sec)
   (cond
-    [(and (>= gas 450)
-          (< minerals 200)
-          (< food-used 175))
+    [(or (and (>= gas 380)
+              (< minerals 200)
+              (< food-used 175))
+         (and (>= gas 600)
+              (< minerals 150)))
      'pull-to-minerals]
     [(and (>= sec 300)
           (>= workers 16)

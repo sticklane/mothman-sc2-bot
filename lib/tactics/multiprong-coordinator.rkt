@@ -91,6 +91,8 @@
  (struct-out multiprong-result)
  multiprong-live-eligible?
  compute-flank-waypoint
+ score-enemy-base-fortification
+ select-softest-enemy-base-target
  compute-prism-warp-pocket
  compute-liberator-deadspace-spot
  plan-liberator-multiprong-harass
@@ -472,6 +474,199 @@
        (car (sort pool (lambda (a b) (fl> (vector-ref a 2) (vector-ref b 2)))))]))
   (values (vector-ref best 0) (vector-ref best 1)))
 
+;; =============================================================================
+;; Loop 86 Track 3A: Exposure-Scored Softest-Outer-Base Target Selection
+;; =============================================================================
+
+(define (base-pt->xy bpt)
+  (cond
+    [(and (pair? bpt) (real? (car bpt)) (real? (cdr bpt)))
+     (values (exact->inexact (car bpt)) (exact->inexact (cdr bpt)))]
+    [(and (list? bpt) (>= (length bpt) 2) (real? (first bpt)) (real? (second bpt)))
+     (values (exact->inexact (first bpt)) (exact->inexact (second bpt)))]
+    [(and (hash? bpt) (real? (hash-ref bpt 'x #f)) (real? (hash-ref bpt 'y #f)))
+     (values (exact->inexact (hash-ref bpt 'x)) (exact->inexact (hash-ref bpt 'y)))]
+    [else (values #f #f)]))
+
+(define (static-fort-weight sym)
+  (case sym
+    [(planetary-fortress) 650.0]
+    [(bunker) 350.0]
+    [(shield-battery) 260.0]
+    [(photon-cannon spine-crawler) 220.0]
+    [(missile-turret spore-crawler) 90.0]
+    [else 0.0]))
+
+(define (siege-mine-weight sym)
+  (case sym
+    [(siege-tank-sieged siege-tank) 320.0]
+    [(lurker-burrowed lurker lurker-mp-burrowed lurker-mp) 300.0]
+    [(liberator-ag liberator) 260.0]
+    [(widow-mine-burrowed widow-mine) 180.0]
+    [else 0.0]))
+
+;; Pure exposure-scored fortification evaluator for a candidate enemy base point.
+;; Lower `total-score` = softer / higher-priority target.
+;; Returns (values total-score static-fort-score siege-mine-score army-val).
+(define (score-enemy-base-fortification bpt enemy-units enemy-buildings
+                                        #:enemy-main-xy [em-xy #f]
+                                        #:army-xy [army-xy #f]
+                                        #:choke-blacklist-fn [blacklisted? #f])
+  (define-values (bx by) (base-pt->xy bpt))
+  (cond
+    [(not (and bx by))
+     (values +inf.0 0.0 0.0 0.0)]
+    [else
+     (define safe-en-u (if (list? enemy-units) enemy-units '()))
+     (define safe-en-b (if (list? enemy-buildings) enemy-buildings '()))
+     (define seen-fort-ids (make-hasheqv))
+     (define seen-siege-ids (make-hasheqv))
+     (define static-fort 0.0)
+     (define siege-mine 0.0)
+     (define (accum-fort-and-siege! recs)
+       (for ([r (in-list recs)]
+             #:when (and (hash? r)
+                         (real? (hash-ref r 'x #f))
+                         (real? (hash-ref r 'y #f))))
+         (define dx (fl- (rec-x r 0.0) bx))
+         (define dy (fl- (rec-y r 0.0) by))
+         (when (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 324.0) ;; <= 18.0t
+           (define tid (rec-id r))
+           (define s-struct (rec-struct-sym r))
+           (define s-unit (rec-sym r))
+           (define fw (flmax (static-fort-weight s-struct) (static-fort-weight s-unit)))
+           (when (and (fl> fw 0.0)
+                      (or (not tid) (not (hash-has-key? seen-fort-ids tid))))
+             (when tid (hash-set! seen-fort-ids tid #t))
+             (set! static-fort (fl+ static-fort fw)))
+           (define sw (flmax (siege-mine-weight s-struct) (siege-mine-weight s-unit)))
+           (when (and (fl> sw 0.0)
+                      (or (not tid) (not (hash-has-key? seen-siege-ids tid))))
+             (when tid (hash-set! seen-siege-ids tid #t))
+             (set! siege-mine (fl+ siege-mine sw))))))
+     (accum-fort-and-siege! safe-en-b)
+     (accum-fort-and-siege! safe-en-u)
+     (define army-val
+       (for/fold ([v 0.0]) ([e (in-list safe-en-u)]
+                            #:when (enemy-combat-entity? e))
+         (define dx (fl- (rec-x e 0.0) bx))
+         (define dy (fl- (rec-y e 0.0) by))
+         (if (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 256.0) ;; <= 16.0t
+             (fl+ v (unit-resource-value e))
+             v)))
+     (define outer-bonus
+       (let-values ([(ex ey) (base-pt->xy em-xy)])
+         (if (and ex ey)
+             (fl* -180.0 (flmin 1.0 (fl/ (dist2d-fl bx by ex ey) 60.0)))
+             0.0)))
+     (define bl-pen
+       (if (and (procedure? blacklisted?) (blacklisted? (cons bx by)))
+           1400.0
+           0.0))
+     (define travel-pen
+       (let-values ([(ax ay) (base-pt->xy army-xy)])
+         (if (and ax ay)
+             (fl* 2.5 (dist2d-fl ax ay bx by))
+             0.0)))
+     (define total-score
+       (fl+ static-fort
+            (fl+ siege-mine
+                 (fl+ (fl* 0.65 army-val)
+                      (fl+ outer-bonus (fl+ bl-pen travel-pen))))))
+     (values total-score static-fort siege-mine army-val)]))
+
+;; Distance and projection parameter t in [0, 1] from point (px, py) to segment (ax, ay)->(bx, by).
+(define (point-to-segment-info px py ax ay bx by)
+  (define dx (fl- bx ax))
+  (define dy (fl- by ay))
+  (define len2 (fl+ (fl* dx dx) (fl* dy dy)))
+  (if (fl<= len2 1e-6)
+      (values (dist2d-fl px py ax ay) 0.0)
+      (let* ([t-raw (fl/ (fl+ (fl* (fl- px ax) dx) (fl* (fl- py ay) dy)) len2)]
+             [t (clamp-fl t-raw 0.0 1.0)]
+             [cx (fl+ ax (fl* t dx))]
+             [cy (fl+ ay (fl* t dy))])
+        (values (dist2d-fl px py cx cy) t))))
+
+;; Select the softest, most exposed enemy base across merged live + OWM remembered bases,
+;; returning (values best-pt best-score avoid-fortified-pt-or-#f flank-xy-or-#f).
+(define (select-softest-enemy-base-target
+         #:enemy-base-pts enemy-base-pts
+         #:enemy-units enemy-units
+         #:enemy-buildings enemy-buildings
+         #:enemy-main-xy enemy-main-xy
+         #:army-xy army-xy
+         #:map-width [map-w 200.0]
+         #:map-height [map-h 200.0]
+         #:bfs-dist-fn [bfs-dist-fn #f]
+         #:choke-blacklist-fn [blacklisted? #f])
+  ;; Deduplicate merged live + OWM remembered base points (10.0t merge radius)
+  (define dedup-pts
+    (let ([acc '()])
+      (for ([p (in-list (if (list? enemy-base-pts) enemy-base-pts '()))])
+        (define-values (px py) (base-pt->xy p))
+        (when (and px py
+                   (not (ormap (lambda (q) (fl< (dist2d-fl px py (car q) (cdr q)) 10.0)) acc)))
+          (set! acc (cons (cons px py) acc))))
+      (reverse acc)))
+  (cond
+    [(null? dedup-pts)
+     (values #f +inf.0 #f #f)]
+    [else
+     (define-values (ax ay) (base-pt->xy army-xy))
+     (define scored
+       (for/list ([bpt (in-list dedup-pts)])
+         (define-values (tot sf sm av)
+           (score-enemy-base-fortification bpt enemy-units enemy-buildings
+                                           #:enemy-main-xy enemy-main-xy
+                                           #:army-xy army-xy
+                                           #:choke-blacklist-fn blacklisted?))
+         (define bl? (and (procedure? blacklisted?) (blacklisted? bpt) #t))
+         (define d-army (if (and ax ay) (dist2d-fl ax ay (car bpt) (cdr bpt)) 0.0))
+         (vector bpt tot sf sm av bl? d-army)))
+     (define best-vec
+       (car (sort scored
+                  (lambda (a b)
+                    (if (fl= (vector-ref a 1) (vector-ref b 1))
+                        (fl< (vector-ref a 6) (vector-ref b 6))
+                        (fl< (vector-ref a 1) (vector-ref b 1)))))))
+     (define best-pt (vector-ref best-vec 0))
+     (define best-score (vector-ref best-vec 1))
+     (define bx (car best-pt))
+     (define by (cdr best-pt))
+     ;; Detect any fortified/blacklisted choke base sitting along the straight path army-xy -> best-pt
+     (define avoid-vec
+       (and ax ay
+            (fl> (dist2d-fl ax ay bx by) 20.0)
+            (let ([obstacles
+                   (for/list ([v (in-list scored)]
+                              #:do [(define fpt (vector-ref v 0))
+                                    (define fx (car fpt))
+                                    (define fy (cdr fpt))
+                                    (define threat (fl+ (vector-ref v 2) (vector-ref v 3)))
+                                    (define fbl? (vector-ref v 5))]
+                              #:when (and (or (fl>= threat 450.0) fbl?)
+                                          (fl>= (dist2d-fl fx fy bx by) 12.0)
+                                          (fl>= (dist2d-fl fx fy ax ay) 8.0)))
+                     (define-values (d-seg t-seg) (point-to-segment-info fx fy ax ay bx by))
+                     (and (fl> t-seg 0.02)
+                          (fl< t-seg 0.98)
+                          (fl<= d-seg 18.0)
+                          (cons v (fl+ threat (if fbl? 1400.0 0.0)))))])
+              (define clean-obs (filter pair? obstacles))
+              (and (pair? clean-obs)
+                   (car (car (sort clean-obs (lambda (a b) (fl> (cdr a) (cdr b))))))))))
+     (cond
+       [avoid-vec
+        (define avoid-pt (vector-ref avoid-vec 0))
+        (define-values (wx wy)
+          (compute-flank-waypoint ax ay bx by (car avoid-pt) (cdr avoid-pt) map-w map-h
+                                  #:clearance 20.0
+                                  #:bfs-dist-fn bfs-dist-fn))
+        (values best-pt best-score avoid-pt (cons wx wy))]
+       [else
+        (values best-pt best-score #f #f)])]))
+
 (define (base-key pt)
   (cons (exact-round (/ (car pt) 6.0))
         (exact-round (/ (cdr pt) 6.0))))
@@ -695,7 +890,9 @@
          #:ready-warp-gates [ready-warp-gates 0]
          #:minerals [minerals 0]
          #:supply-left [supply-left 0]
-         #:charge-researched? [charge-researched? #f])
+         #:charge-researched? [charge-researched? #f]
+         #:extra-enemy-base-pts [extra-eb-pts '()]
+         #:choke-blacklist-fn [choke-bl-fn #f])
   (define cur-frame (if (exact-integer? frame) frame 0))
   ;; Automatic rewind / cross-test state reset
   (define prev-f (multiprong-state-last-frame st))
@@ -852,7 +1049,10 @@
          b))
 
      (define ally-th-pts (extract-base-points ally-townhalls '() base-x base-y))
-     (define enemy-base-pts (extract-base-points enemy-townhalls enemy-buildings enemy-x enemy-y))
+     (define enemy-base-pts
+       (extract-base-points (append (if (list? enemy-townhalls) enemy-townhalls '())
+                                    (if (list? extra-eb-pts) extra-eb-pts '()))
+                            enemy-buildings enemy-x enemy-y))
      (define-values (main-ax main-ay)
        (centroid-of (if (pair? all-mobile-combat) all-mobile-combat combat-units) base-x base-y))
 
@@ -938,27 +1138,29 @@
                            (values (fl+ sx (vector-ref ev 0)) (fl+ sy (vector-ref ev 1)) (add1 n)))])
              (values (fl/ sx (exact->inexact n)) (fl/ sy (exact->inexact n))))))
 
-     (define enemy-static-xy-vecs
-       (for/list ([b (in-list enemy-static-recs)])
-         (vector (rec-x b 0.0) (rec-y b 0.0) (unit-resource-value b))))
+     (define em-xy-pair (cons (exact->inexact enemy-x) (exact->inexact enemy-y)))
      (define (enemy-base-defense-info bpt)
        (define bx (car bpt))
        (define by (cdr bpt))
-       (define-values (en-cnt en-val)
+       (define-values (en-cnt _ev0)
          (for/fold ([c 0] [v 0.0]) ([ev (in-list enemy-xy-vecs)])
            (define dx (fl- (vector-ref ev 0) bx))
            (define dy (fl- (vector-ref ev 1) by))
            (if (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 256.0)
                (values (add1 c) (fl+ v (vector-ref ev 3)))
                (values c v))))
-       (define st-val
-         (for/fold ([v 0.0]) ([sv (in-list enemy-static-xy-vecs)])
-           (define dx (fl- (vector-ref sv 0) bx))
-           (define dy (fl- (vector-ref sv 1) by))
-           (if (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 324.0)
-               (fl+ v (vector-ref sv 2))
-               v)))
-       (values en-cnt en-val st-val (fl+ en-val st-val)))
+       (define-values (_tot sf sm en-val)
+         (score-enemy-base-fortification bpt enemy-units enemy-buildings
+                                         #:enemy-main-xy em-xy-pair
+                                         #:choke-blacklist-fn choke-bl-fn))
+       (define st-val (fl+ sf sm))
+       (define bl-pen
+         (if (and (procedure? choke-bl-fn) (choke-bl-fn bpt)) 1400.0 0.0))
+       (values en-cnt en-val st-val (fl+ en-val (fl+ st-val bl-pen))))
+     (define (enemy-base-target-rank bpt tot-v)
+       (define outer-bonus
+         (fl* -180.0 (flmin 1.0 (fl/ (dist2d-fl (car bpt) (cdr bpt) (car em-xy-pair) (cdr em-xy-pair)) 60.0))))
+       (fl+ tot-v outer-bonus))
 
      ;; =========================================================================
      ;; Proposal Builders for All 4 Modes
@@ -1190,7 +1392,9 @@
                            #:when (fl>= (dist2d-fl en-cx en-cy (car bpt) (cdr bpt))
                                         MULTIPRONG-BACKSTAB-ENEMY-DIST))
                   (define-values (ec _ev _sv tot-v) (enemy-base-defense-info bpt))
-                  (and (<= ec 4) (cons bpt tot-v)))))
+                  (and (<= ec 4)
+                       (not (and (procedure? choke-bl-fn) (choke-bl-fn bpt)))
+                       (cons bpt (enemy-base-target-rank bpt tot-v))))))
           (define clean-exposed (filter pair? exposed-bases))
           (and (pair? clean-exposed)
                (let* ([best-b
@@ -1313,9 +1517,10 @@
                                                            MULTIPRONG-BASE-MIN-SEP)
                                                      (not (pair-on-cooldown? st base-a bpt cur-frame))))
                                 (define-values (ec-b _ev-b _sv-b tot-b) (enemy-base-defense-info bpt))
-                                (and (or (<= ec-b 4)
+                                (and (not (and (procedure? choke-bl-fn) (choke-bl-fn bpt)))
+                                     (or (<= ec-b 4)
                                          (fl<= tot-b (fl* 0.55 (flmax 1.0 tot-val-a))))
-                                     (cons bpt tot-b)))]
+                                     (cons bpt (enemy-base-target-rank bpt tot-b))))]
                              [clean-alts (sort (filter pair? alt-bases)
                                                (lambda (a b) (fl< (cdr a) (cdr b))))])
                         (and (pair? clean-alts)
@@ -1406,7 +1611,7 @@
                                       #:when (fl>= (dist2d-fl (car base-a) (cdr base-a) (car bpt) (cdr bpt))
                                                    MULTIPRONG-BASE-MIN-SEP))
                              (define-values (_ec _ev _sv tot-v) (enemy-base-defense-info bpt))
-                             (cons bpt tot-v))
+                             (cons bpt (enemy-base-target-rank bpt tot-v)))
                            '())]
                       [sorted-bs (sort cand-bs (lambda (a b) (fl< (cdr a) (cdr b))))])
                  (and (pair? sorted-bs)

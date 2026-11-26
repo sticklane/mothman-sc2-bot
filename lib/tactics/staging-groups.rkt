@@ -41,7 +41,10 @@
                   acquire-unit-lease!
                   unit-leased-above?
                   sc2-canonical-unit-sym
-                  sc2-supply-cost))
+                  sc2-canonical-structure-sym
+                  sc2-supply-cost
+                  sc2-min-cost
+                  sc2-gas-cost))
 
 (provide
  (struct-out staging-group)
@@ -55,7 +58,12 @@
  pick-safe-staging-point
  pick-safe-fallback-point
  step-staging-groups!
- staging-group-handled-tags)
+ staging-group-handled-tags
+ make-choke-attrition-state
+ reset-choke-attrition-state!
+ update-choke-attrition-breaker!
+ choke-attrition-zone-blacklisted?
+ (struct-out choke-attrition-verdict))
 
 ;; =============================================================================
 ;; Constants
@@ -1570,3 +1578,437 @@
                           dispatched-gids
                           staging-gids
                           (for/hasheq ([(k v) (in-hash anchors-ht)]) (values k v)))]))
+
+;; =============================================================================
+;; Loop 86 Track 3B: Choke-Attrition / Small-Wave Drip-Feed Breaker
+;;
+;; Tracks rolling 60s (`1344f`) friendly combat resource losses near fortified
+;; enemy zones (`static-fort + siege-mine >= 350.0` or `enemy-turtle-posterior >= 0.45`).
+;; When rolling loss reaches `>= 1200.0` without killing an enemy TownHall:
+;;   - Blacklists the fortified zone for `90s` (`2016f`)
+;;   - Pivots immediately (`hold-active? = #f`, `'outer-pivot`) if any soft outer
+;;     base exists (`>= 18t` away, score `< 450` or `< 0.50 * zone-fort-score`)
+;;   - Otherwise enters a bounded hold guarded by ALL 5 anti-stalemate release valves:
+;;       1. Bypass guard (`cheese-committed?` / `skip-build-order?` / non-live / no home)
+;;       2. Immediate reset on enemy TH kill, home attack, enemy main cleared, or endgame
+;;       3. Max-supply override (`supply >= 165` or `our-combat-supply >= 80.0`)
+;;       4. Siege + detection ready release (`>= 2` siege breakers + detector + `>= 1.15x` val)
+;;       5. Hard `60s` (`1344f`) max hold + `60s` (`1344f`) post-hold refractory cooldown
+;; =============================================================================
+
+(define CHOKE-ATTRITION-WINDOW-FRAMES 1344)       ;; 60s rolling loss window
+(define CHOKE-ATTRITION-BLACKLIST-FRAMES 2016)    ;; 90s fortified zone blacklist
+(define CHOKE-ATTRITION-MAX-HOLD-FRAMES 1344)     ;; 60s hard max hold duration
+(define CHOKE-ATTRITION-COOLDOWN-FRAMES 1344)     ;; 60s post-hold refractory immunity
+(define CHOKE-ATTRITION-LOSS-THRESHOLD 1200.0)    ;; resource value lost -> trigger
+(define CHOKE-ATTRITION-ZONE-TILE-SIZE 12.0)      ;; 12t quantized zone cell
+(define CHOKE-ATTRITION-ZONE-MERGE-RADIUS 16.0)   ;; cluster boundary losses into same zone
+(define CHOKE-ATTRITION-FORT-RADIUS 24.0)         ;; enemy fort/siege attribution radius
+(define CHOKE-ATTRITION-BLACKLIST-RADIUS 18.0)    ;; base-to-blacklisted-zone match radius
+
+(define CHOKE-NON-ATTRITION-SYMS
+  (seteq 'scv 'probe 'drone 'mule 'larva 'egg
+         'overlord 'overlord-cocoon 'overlord-transport 'overlord-transport-cocoon
+         'overseer 'overseer-siege-mode 'observer 'observer-siege-mode
+         'changeling 'changeling-zealot 'changeling-zergling 'changeling-zergling-wings
+         'changeling-marine 'changeling-marine-shield
+         'creep-tumor 'creep-tumor-burrowed 'creep-tumor-queen
+         'interceptor 'locust 'locust-mp 'locust-mp-flying 'broodling 'broodling-escort
+         'nydus-worm 'nydus-canal))
+
+(struct choke-attrition-verdict
+  (hold-active?           ;; boolean: #t ONLY when blacklisted choke AND no soft outer base exists
+   redirect-target-xy     ;; (or/c #f (cons Flonum Flonum)): soft outer base pivot if available
+   blacklisted-zone-key   ;; (or/c #f (cons Integer Integer))
+   rolling-loss-val       ;; Flonum
+   release-reason)        ;; symbol: 'none | 'outer-pivot | 'winning-army | 'max-duration | 'max-supply | 'siege-ready | 'th-killed | 'home-defense | 'bypass
+  #:transparent)
+
+(struct choke-attrition-state
+  ([last-frame #:mutable]
+   prev-alive-units        ;; mutable hasheqv: tag -> #(x y res-val)
+   zone-loss-events        ;; mutable hash: zone-key -> list of #(frame val x y)
+   blacklisted-zones       ;; mutable hash: zone-key -> #(expires-frame cx cy)
+   [last-th-kill-frame #:mutable]
+   [hold-active? #:mutable]
+   [hold-start-frame #:mutable]
+   [hold-zone-key #:mutable]
+   [hold-cooldown-until #:mutable])
+  #:transparent)
+
+(define (make-choke-attrition-state)
+  (choke-attrition-state
+   -1
+   (make-hasheqv)
+   (make-hash)
+   (make-hash)
+   -99999
+   #f
+   -1
+   #f
+   -1))
+
+(define (reset-choke-attrition-state! st)
+  (when (choke-attrition-state? st)
+    (set-choke-attrition-state-last-frame! st -1)
+    (hash-clear! (choke-attrition-state-prev-alive-units st))
+    (hash-clear! (choke-attrition-state-zone-loss-events st))
+    (hash-clear! (choke-attrition-state-blacklisted-zones st))
+    (set-choke-attrition-state-last-th-kill-frame! st -99999)
+    (set-choke-attrition-state-hold-active?! st #f)
+    (set-choke-attrition-state-hold-start-frame! st -1)
+    (set-choke-attrition-state-hold-zone-key! st #f)
+    (set-choke-attrition-state-hold-cooldown-until! st -1))
+  (void))
+
+(define (choke-zone-key-of x y)
+  (cons (inexact->exact (floor (fl/ (exact->inexact x) CHOKE-ATTRITION-ZONE-TILE-SIZE)))
+        (inexact->exact (floor (fl/ (exact->inexact y) CHOKE-ATTRITION-ZONE-TILE-SIZE)))))
+
+(define (choke-zone-default-center zkey)
+  (values (fl* (fl+ (exact->inexact (car zkey)) 0.5) CHOKE-ATTRITION-ZONE-TILE-SIZE)
+          (fl* (fl+ (exact->inexact (cdr zkey)) 0.5) CHOKE-ATTRITION-ZONE-TILE-SIZE)))
+
+(define (choke-unit-res-val u)
+  (define sym (rec-type-sym u))
+  (cond
+    [(set-member? CHOKE-NON-ATTRITION-SYMS sym) 0.0]
+    [(eq? sym 'zergling) 25.0]
+    [(eq? sym 'baneling) 50.0]
+    [else
+     (exact->inexact (+ (sc2-min-cost sym 50) (sc2-gas-cost sym 0)))]))
+
+;; Loop 86C: Weight ONLY genuine static fortifications and deployed/burrowed siege units
+;; (excluding mobile unsieged Siege Tanks / un-deployed Liberators / unburrowed Lurkers)
+;; so normal mobile Bio-Tank / Stalker / Roach battles NEVER trigger false 60s choke holds.
+(define (choke-enemy-fort-or-siege-weight r)
+  (define raw (if (hash? r)
+                  (hash-ref r 'type (lambda () (hash-ref r 'unit-type 'unknown)))
+                  'unknown))
+  (cond
+    [(exact-integer? raw)
+     (case raw
+       [(130) 650.0]                 ;; planetary-fortress
+       [(24) 350.0]                  ;; bunker
+       [(32) 320.0]                  ;; siege-tank-sieged ONLY (exclude mobile 33)
+       [(503 912) 300.0]             ;; lurker-burrowed ONLY (exclude mobile 502/911)
+       [(1910 734) 260.0]            ;; shield-battery / liberator-ag ONLY (exclude mobile 689)
+       [(66 98) 220.0]               ;; photon-cannon / spine-crawler
+       [(498 500) 180.0]             ;; widow-mine / widow-mine-burrowed
+       [(23 99) 90.0]                ;; missile-turret / spore-crawler
+       [else 0.0])]
+    [(symbol? raw)
+     (define bsym (sc2-canonical-structure-sym raw))
+     (define (w s)
+       (case s
+         [(planetary-fortress) 650.0]
+         [(bunker) 350.0]
+         [(siege-tank-sieged) 320.0]
+         [(lurker-burrowed lurker-mp-burrowed) 300.0]
+         [(shield-battery liberator-ag) 260.0]
+         [(photon-cannon spine-crawler) 220.0]
+         [(widow-mine-burrowed widow-mine) 180.0]
+         [(missile-turret spore-crawler) 90.0]
+         [else 0.0]))
+     (flmax (w raw) (w bsym))]
+    [else 0.0]))
+
+;; Accepts EITHER (st (cons x y) frame) OR (st x y frame) -> boolean?
+(define (choke-attrition-zone-blacklisted? st bpt-or-x frame-or-y [maybe-frame #f])
+  (cond
+    [(not (choke-attrition-state? st)) #f]
+    [else
+     (define-values (qx qy qframe)
+       (cond
+         [(and (pair? bpt-or-x) (real? (car bpt-or-x)) (real? (cdr bpt-or-x)) (real? frame-or-y))
+          (values (exact->inexact (car bpt-or-x))
+                  (exact->inexact (cdr bpt-or-x))
+                  (inexact->exact (round frame-or-y)))]
+         [(and (real? bpt-or-x) (real? frame-or-y) (real? maybe-frame))
+          (values (exact->inexact bpt-or-x)
+                  (exact->inexact frame-or-y)
+                  (inexact->exact (round maybe-frame)))]
+         [else (values #f #f 0)]))
+     (and qx qy
+          (let ([zkey (choke-zone-key-of qx qy)]
+                [bl-tbl (choke-attrition-state-blacklisted-zones st)])
+            (for/or ([(k info) (in-hash bl-tbl)])
+              (define exp-f (vector-ref info 0))
+              (define cx (vector-ref info 1))
+              (define cy (vector-ref info 2))
+              (and (< qframe exp-f)
+                   (or (equal? k zkey)
+                       (fl<= (dist2d-fl qx qy cx cy) CHOKE-ATTRITION-BLACKLIST-RADIUS))))))]))
+
+(define (update-choke-attrition-breaker!
+         st
+         #:frame frame
+         #:combat-units combat-units
+         #:enemy-units [enemy-units '()]
+         #:enemy-buildings [enemy-buildings '()]
+         #:enemy-turtle-posterior [enemy-turtle-post 0.0]
+         #:live-obs? [live-obs? #t]
+         #:has-home-base? [has-home-base? #t]
+         #:cheese-committed? [cheese-committed? #f]
+         #:skip-build-order? [skip-build-order? #f]
+         #:enemy-th-killed? [enemy-th-killed? #f]
+         #:under-home-attack? [under-home-attack? #f]
+         #:enemy-main-cleared? [enemy-main-cleared? #f]
+         #:endgame-hunt-active? [endgame-hunt-active? #f]
+         #:decisive-victory-posture? [decisive-victory-posture? #f]
+         #:supply-used [supply-used 0]
+         #:our-combat-supply [our-combat-supply 0.0]
+         #:our-combat-val [our-combat-val 0.0]
+         #:known-enemy-val [known-enemy-val 0.0]
+         #:our-siege-breaker-count [our-siege-breaker-count 0]
+         #:enemy-needs-detection? [enemy-needs-detection? #f]
+         #:has-army-detector? [has-army-detector? #f]
+         #:soft-alt-xy [soft-alt-xy #f]
+         #:soft-alt-score [soft-alt-score +inf.0]
+         #:zone-fort-score [zone-fort-score #f])
+  (define cur-frame (if (exact-integer? frame) frame (inexact->exact (round (fl->safe frame 0.0)))))
+  (cond
+    [(not (choke-attrition-state? st))
+     (choke-attrition-verdict #f #f #f 0.0 'bypass)]
+    [else
+     ;; Automatic rewind / cross-game reset
+     (define prev-f (choke-attrition-state-last-frame st))
+     (when (and (>= prev-f 0)
+                (or (< cur-frame prev-f)
+                    (> (- cur-frame prev-f) 6000)))
+       (reset-choke-attrition-state! st))
+     (set-choke-attrition-state-last-frame! st cur-frame)
+
+     (define (clear-hold!)
+       (set-choke-attrition-state-hold-active?! st #f)
+       (set-choke-attrition-state-hold-zone-key! st #f))
+
+     (define safe-combat (if (list? combat-units) combat-units '()))
+     (define (snapshot-cur-alive!)
+       (define prev-ht (choke-attrition-state-prev-alive-units st))
+       (hash-clear! prev-ht)
+       (for ([u (in-list safe-combat)])
+         (define tid (rec-id u))
+         (when (and (> tid 0) (rec-xy? u))
+           (define val (choke-unit-res-val u))
+           (when (fl> val 0.0)
+             (hash-set! prev-ht tid (vector (rec-x u 0.0) (rec-y u 0.0) val))))))
+
+     (cond
+       ;; Valve 1: Bypass Guard (cheese / --no-macro / non-live / no home base)
+       [(or cheese-committed? skip-build-order? (not live-obs?) (not has-home-base?))
+        (clear-hold!)
+        (snapshot-cur-alive!)
+        (choke-attrition-verdict #f #f #f 0.0 'bypass)]
+       ;; Valve 2a: Enemy TH killed -> full reset of attrition & blacklist
+       [enemy-th-killed?
+        (set-choke-attrition-state-last-th-kill-frame! st cur-frame)
+        (hash-clear! (choke-attrition-state-zone-loss-events st))
+        (hash-clear! (choke-attrition-state-blacklisted-zones st))
+        (clear-hold!)
+        (snapshot-cur-alive!)
+        (choke-attrition-verdict #f #f #f 0.0 'th-killed)]
+       ;; Valve 2b: Home defense / endgame / enemy main cleared -> release hold immediately
+       [(or under-home-attack? enemy-main-cleared? endgame-hunt-active? decisive-victory-posture?)
+        (clear-hold!)
+        (snapshot-cur-alive!)
+        (choke-attrition-verdict #f #f #f 0.0 'home-defense)]
+       [else
+        (define prev-ht (choke-attrition-state-prev-alive-units st))
+        (define loss-ht (choke-attrition-state-zone-loss-events st))
+        (define bl-ht (choke-attrition-state-blacklisted-zones st))
+        (define cur-ht (make-hasheqv))
+        (for ([u (in-list safe-combat)])
+          (define tid (rec-id u))
+          (when (and (> tid 0) (rec-xy? u))
+            (define val (choke-unit-res-val u))
+            (when (fl> val 0.0)
+              (hash-set! cur-ht tid (vector (rec-x u 0.0) (rec-y u 0.0) val)))))
+
+        ;; Pre-extract genuine static fortifications / PFs / deployed siege positions once per step
+        (define turtle-fl (fl->safe enemy-turtle-post 0.0))
+        (define safe-en-bldgs (if (list? enemy-buildings) enemy-buildings '()))
+        (define safe-en-units (if (list? enemy-units) enemy-units '()))
+        (define fort-r2 (fl* CHOKE-ATTRITION-FORT-RADIUS CHOKE-ATTRITION-FORT-RADIUS))
+        (define fort-vecs
+          (let ([seen (make-hasheqv)]
+                [acc '()])
+            (for ([lst (in-list (list safe-en-bldgs safe-en-units))])
+              (for ([r (in-list lst)]
+                    #:when (rec-xy? r))
+                (define w (choke-enemy-fort-or-siege-weight r))
+                (when (fl> w 0.0)
+                  (define tid (rec-id r))
+                  (unless (and (> tid 0) (hash-has-key? seen tid))
+                    (when (> tid 0) (hash-set! seen tid #t))
+                    (set! acc (cons (vector (rec-x r 0.0) (rec-y r 0.0) w) acc))))))
+            acc))
+        (define (fortified-near? px py)
+          (or (fl>= turtle-fl 0.45)
+              (and (real? zone-fort-score) (fl>= (fl->safe zone-fort-score 0.0) 350.0))
+              (let ([tot (for/fold ([s 0.0]) ([fv (in-list fort-vecs)])
+                           (define dx (fl- (vector-ref fv 0) px))
+                           (define dy (fl- (vector-ref fv 1) py))
+                           (if (fl<= (fl+ (fl* dx dx) (fl* dy dy)) fort-r2)
+                               (fl+ s (vector-ref fv 2))
+                               s))])
+                (fl>= tot 350.0))))
+
+        ;; Prune expired loss events (> 60s) & expired blacklisted zones first
+        (for ([k (in-list (hash-keys loss-ht))])
+          (define kept
+            (filter (lambda (ev) (<= (- cur-frame (vector-ref ev 0)) CHOKE-ATTRITION-WINDOW-FRAMES))
+                    (hash-ref loss-ht k '())))
+          (if (null? kept)
+              (hash-remove! loss-ht k)
+              (hash-set! loss-ht k kept)))
+        (for ([k (in-list (hash-keys bl-ht))])
+          (when (<= (vector-ref (hash-ref bl-ht k) 0) cur-frame)
+            (hash-remove! bl-ht k)))
+
+        ;; Attribute vanished friendly combat units near fortified zones into 12t zone buffers
+        (define (zone-centroid k evs)
+          (if (null? evs)
+              (choke-zone-default-center k)
+              (let-values ([(sx sy n)
+                            (for/fold ([sx 0.0] [sy 0.0] [n 0]) ([ev (in-list evs)])
+                              (values (fl+ sx (vector-ref ev 2)) (fl+ sy (vector-ref ev 3)) (add1 n)))])
+                (values (fl/ sx (exact->inexact n)) (fl/ sy (exact->inexact n))))))
+        (for ([(tid info) (in-hash prev-ht)])
+          (unless (hash-has-key? cur-ht tid)
+            (define px (vector-ref info 0))
+            (define py (vector-ref info 1))
+            (define pval (vector-ref info 2))
+            (when (fortified-near? px py)
+              ;; Cluster into nearest existing active loss zone within 16t to avoid 12t grid splits
+              (define near-k
+                (for/fold ([bk #f] [bd CHOKE-ATTRITION-ZONE-MERGE-RADIUS] #:result bk)
+                          ([(k evs) (in-hash loss-ht)])
+                  (define-values (cx cy) (zone-centroid k evs))
+                  (define d (dist2d-fl px py cx cy))
+                  (if (fl<= d bd) (values k d) (values bk bd))))
+              (define zkey (or near-k (choke-zone-key-of px py)))
+              (hash-set! loss-ht zkey
+                         (cons (vector cur-frame pval px py)
+                               (hash-ref loss-ht zkey '()))))))
+
+        ;; Replace prev-alive snapshot with cur-ht
+        (hash-clear! prev-ht)
+        (for ([(tid info) (in-hash cur-ht)])
+          (hash-set! prev-ht tid info))
+
+        ;; Find zone with highest rolling loss
+        (define-values (max-zkey max-zloss max-zcx max-zcy)
+          (for/fold ([bk #f] [bl 0.0] [bcx 0.0] [bcy 0.0]) ([(k evs) (in-hash loss-ht)])
+            (define lsum (for/fold ([s 0.0]) ([ev (in-list evs)]) (fl+ s (vector-ref ev 1))))
+            (if (fl> lsum bl)
+                (let-values ([(cx cy) (zone-centroid k evs)])
+                  (values k lsum cx cy))
+                (values bk bl bcx bcy))))
+
+        (define th-killed-recently?
+          (let ([lt (choke-attrition-state-last-th-kill-frame st)])
+            (and (>= lt 0) (< (- cur-frame lt) CHOKE-ATTRITION-WINDOW-FRAMES))))
+
+        (define triggered-now?
+          (and max-zkey
+               (fl>= max-zloss CHOKE-ATTRITION-LOSS-THRESHOLD)
+               (not th-killed-recently?)))
+        (when triggered-now?
+          (hash-set! bl-ht max-zkey
+                     (vector (+ cur-frame CHOKE-ATTRITION-BLACKLIST-FRAMES) max-zcx max-zcy)))
+
+        ;; Determine active blacklisted zone (newly triggered > held zone > highest-loss active)
+        (define hold-zk (choke-attrition-state-hold-zone-key st))
+        (define active-bl-key
+          (cond
+            [triggered-now? max-zkey]
+            [(and hold-zk (hash-has-key? bl-ht hold-zk)) hold-zk]
+            [(> (hash-count bl-ht) 0)
+             (for/fold ([bk #f] [bl -1.0] #:result bk) ([(k _info) (in-hash bl-ht)])
+               (define lsum (for/fold ([s 0.0]) ([ev (in-list (hash-ref loss-ht k '()))])
+                              (fl+ s (vector-ref ev 1))))
+               (if (fl> lsum bl) (values k lsum) (values bk bl)))]
+            [else #f]))
+        (define active-bl-info (and active-bl-key (hash-ref bl-ht active-bl-key #f)))
+        (define active-loss
+          (if active-bl-key
+              (let ([zsum (for/fold ([s 0.0]) ([ev (in-list (hash-ref loss-ht active-bl-key '()))])
+                            (fl+ s (vector-ref ev 1)))])
+                (flmax zsum max-zloss))
+              max-zloss))
+
+        ;; Soft outer-base pivot eligibility (strictly >= 18t from blacklisted zone)
+        (define valid-soft-pivot
+          (and active-bl-info
+               (pair? soft-alt-xy)
+               (real? (car soft-alt-xy))
+               (real? (cdr soft-alt-xy))
+               (let* ([sx (exact->inexact (car soft-alt-xy))]
+                      [sy (exact->inexact (cdr soft-alt-xy))]
+                      [d-bl (dist2d-fl sx sy (vector-ref active-bl-info 1) (vector-ref active-bl-info 2))]
+                      [sa-sc (fl->safe soft-alt-score +inf.0)]
+                      [soft-ok?
+                       (or (fl< sa-sc 450.0)
+                           (and (real? zone-fort-score)
+                                (fl< sa-sc (fl* 0.50 (fl->safe zone-fort-score 0.0)))))])
+                 (and (fl>= d-bl 18.0) soft-ok? (cons sx sy)))))
+
+        (define cur-holding? (choke-attrition-state-hold-active? st))
+        (define sup-used-fl (fl->safe supply-used 0.0))
+        (define combat-sup-fl (fl->safe our-combat-supply 0.0))
+        (define combat-val-fl (fl->safe our-combat-val 0.0))
+        (define known-en-fl (fl->safe known-enemy-val 0.0))
+        (define siege-cnt (if (exact-integer? our-siege-breaker-count) our-siege-breaker-count 0))
+
+        (cond
+          ;; Immediate soft outer-base pivot -> ZERO hold!
+          [valid-soft-pivot
+           (clear-hold!)
+           (choke-attrition-verdict #f valid-soft-pivot active-bl-key active-loss 'outer-pivot)]
+          ;; Loop 86C Winning-Army Hold Override: NEVER enter (and immediately release!) hold
+          ;; when our combat value exceeds enemy value by >= 1.25x (`max 200.0 known-enemy-val`)!
+          [(and (or cur-holding? active-bl-key)
+                (fl> combat-val-fl 0.0)
+                (fl>= combat-val-fl (fl* 1.25 (flmax 200.0 known-en-fl))))
+           (clear-hold!)
+           (choke-attrition-verdict #f #f active-bl-key active-loss 'winning-army)]
+          ;; Valve 3: Max-supply override (never stall at >= 165 supply or >= 80 combat supply)
+          [(and (or cur-holding? active-bl-key)
+                (or (fl>= sup-used-fl 165.0)
+                    (fl>= combat-sup-fl 80.0)))
+           (clear-hold!)
+           (choke-attrition-verdict #f #f active-bl-key active-loss 'max-supply)]
+          ;; Valve 4: Siege + detection ready release
+          [(and (or cur-holding? active-bl-key)
+                (>= siege-cnt 2)
+                (or (not enemy-needs-detection?) has-army-detector?)
+                (or (fl<= known-en-fl 0.0)
+                    (fl>= combat-val-fl (fl* 1.15 known-en-fl))))
+           (clear-hold!)
+           (choke-attrition-verdict #f #f active-bl-key active-loss 'siege-ready)]
+          ;; Valve 5: Active bounded hold timer (`60s` max hold + `60s` refractory cooldown)
+          [cur-holding?
+           (cond
+             [(>= (- cur-frame (choke-attrition-state-hold-start-frame st)) CHOKE-ATTRITION-MAX-HOLD-FRAMES)
+              (clear-hold!)
+              (set-choke-attrition-state-hold-cooldown-until!
+               st (+ cur-frame CHOKE-ATTRITION-COOLDOWN-FRAMES))
+              (choke-attrition-verdict #f #f active-bl-key active-loss 'max-duration)]
+             [active-bl-key
+              (choke-attrition-verdict #t #f active-bl-key active-loss 'none)]
+             [else
+              (clear-hold!)
+              (choke-attrition-verdict #f #f #f active-loss 'none)])]
+          ;; Trigger bounded hold only when blacklisted & outside refractory cooldown
+          [(and active-bl-key (or triggered-now? (fl>= active-loss CHOKE-ATTRITION-LOSS-THRESHOLD)))
+           (cond
+             [(< cur-frame (choke-attrition-state-hold-cooldown-until st))
+              (choke-attrition-verdict #f #f active-bl-key active-loss 'max-duration)]
+             [else
+              (set-choke-attrition-state-hold-active?! st #t)
+              (set-choke-attrition-state-hold-start-frame! st cur-frame)
+              (set-choke-attrition-state-hold-zone-key! st active-bl-key)
+              (choke-attrition-verdict #t #f active-bl-key active-loss 'none)])]
+          [else
+           (choke-attrition-verdict #f #f active-bl-key active-loss 'none)])])]))
