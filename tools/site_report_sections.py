@@ -402,6 +402,7 @@ def load_rich_report_telemetry(
             or (it_n == 73 and not suf and sh_n == 21)
             or (it_n == 79 and suf.lower() == "b" and sh_n == 22)
             or (it_n == 81 and suf.lower() == "c" and sh_n == 23)
+            or (it_n == 82 and suf.lower() == "b" and sh_n == 24)
         )
 
     # A2. Load Combat Positioning (Section 5) & Army-Group Positioning (Section 6) vs. Pro
@@ -1339,7 +1340,8 @@ def load_rich_report_telemetry(
                  OR m.run_id LIKE '%iter63b_ship15_full%' OR m.run_id LIKE '%iter64b_ship16_full%'
                  OR m.run_id LIKE '%iter65h_ship17_full%' OR m.run_id LIKE '%iter66_ship18_full%'
                  OR m.run_id LIKE '%iter67b_ship19_full%' OR m.run_id LIKE '%iter68c_ship20_full%'
-                 OR m.run_id LIKE '%iter73_ship21_full%' OR m.run_id LIKE '%iter81c_ship23_full%')
+                 OR m.run_id LIKE '%iter73_ship21_full%' OR m.run_id LIKE '%iter81c_ship23_full%'
+                 OR m.run_id LIKE '%iter82b_ship24_full%')
         """
 
         # Per-matchup Local stats (All 26 external opponents)
@@ -3046,7 +3048,8 @@ def render_matchup_evaluation_section(
             )
         elif (co.get("selfplay") or {}).get("n"):
             sp = co["selfplay"]
-            if "iter81c_" in str(cb.get("run_id") or "").lower():
+            rid_low = str(cb.get("run_id") or "").lower()
+            if "iter81c_" in rid_low or "iter82b_" in rid_low:
                 chips.append(
                     (f"Head-to-Head ({sp['n']}g)", f"{_fmt_wlt(sp)}", f"{sp['wr']:.1f}% vs. prev live · {sp['tr']:.2f}×")
                 )
@@ -3252,12 +3255,12 @@ def render_matchup_evaluation_section(
     <div class="base-control-grid">
       <div class="base-control-stack">
         <div class="base-control-card">
-          <div class="bc-kicker">Protoss · 0.0% Pylon Clumping</div>
-          <p>15.1-tile average Pylon spacing, 92% natural-base power coverage, and zero fragile tech buildings exposed in choke walls.</p>
+          <div class="bc-kicker">Protoss · 55.2% Live Ramp &amp; Choke Walls (0 Self-Traps)</div>
+          <p>16× jump from 3.4% with zero self-traps (PvP 77.8%, PvT 60.0%, PvZ 30.0%), 0.0% Pylon clumping, and emergency doorway Battery or Pylon cancels.</p>
         </div>
         <div class="base-control-card">
-          <div class="bc-kicker">Terran · 98–100% Main-Ramp Wall</div>
-          <p>Full Depot-Barracks-Depot main ramp seal that auto-lowers for friendly squads and raises immediately on enemy approach.</p>
+          <div class="bc-kicker">Terran · 100.0% Main-Ramp Wall at 3:00</div>
+          <p>28 of 28 live games sealed at 3:00 across every spawn (including all 5 formerly broken spawns), and Barracks add-on auto-lifts fell from 29.0% to 3.6%.</p>
         </div>
       </div>
       <div class="base-control-card base-control-card-media">
@@ -3736,7 +3739,26 @@ def render_matchup_evaluation_section(
         run_id_low = str(pro_curves.get("run_id") or "").lower()
         live_ship_n = int(cb.get("live_ship_num") or cb.get("ship_num") or 0)
         live_loop_n = int(cb.get("live_loop_num") or cb.get("loop_num") or 0)
-        if live_ship_n >= 23 or "iter81c_" in run_id_low:
+        if live_ship_n >= 24 or "iter82b_" in run_id_low:
+            r_mech_para = f"""
+    <div class="release-highlights">
+      <div class="rh-kicker">What Changed in Release #{live_ship_n} ({html.escape(build_lbl)})</div>
+      <ul class="rh-list">
+        <li><strong>Main-ramp and choke walling:</strong> Terran sealed all 28 live games at 3:00 (up from 72.8%) and cut Barracks add-on auto-lifts from 29.0% to 3.6%. Protoss jumped 16× in live ramp and choke walling (3.4% to 55.2%) with zero self-traps.</li>
+        <li><strong>Emergency doorway cancels, blocked expansions &amp; Adept Shade micro:</strong> Protoss now places and auto-cancels emergency Shield Battery or Pylon blocks against Shades and Speedlings (25-mineral net cost). Lone natural-pad blocks pull workers or pivot cleanly instead of triggering Cannon Rush panic (blocked Terran naturals sped up by 71.5 s), while Adept Shades add fake-cancels, retreat shades, and one-volley worker focus.</li>
+        <li><strong>Scout-verified open-wall punishes:</strong> Requiring real high-ground vision on Terran ramps eliminated fogged false-fires and stray tech detours, so confirmed open walls now trigger capped 2- to 3-Adept harass (35 Drones killed under 4:30 across 6 PvZ games) and 14- to 16-Speedling floods before cleanly resuming macro.</li>
+      </ul>
+      <details style="margin-top:0.65rem;">
+        <summary>Release #{live_ship_n} walling audit &amp; verification summary</summary>
+        <ul class="compact-list" style="margin-top:0.5rem;">
+          <li><strong>Live binary-grid walling audit (84 replays):</strong> Terran reached 100.0% (28/28) walled at 3:00 (TvZ 10/10, TvP 9/9, TvT 9/9; all 5 formerly broken spawns fixed) with in-base second Barracks acceleration for on-time Tech Lab; Protoss reached 55.2% (16/29, 0 self-traps: PvP 77.8%, PvT 60.0%, PvZ 30.0%).</li>
+          <li><strong>Expansion-block, Shade &amp; punish discipline:</strong> Lone natural Pylon or Engineering Bay blocks now pull 2 to 4 workers or pivot immediately to a third-as-natural or high-ground Command Center (6 clean offensive blocks with zero supply-block blowups). Adept Shades added 5.5 s delayed fake-cancels, retreat-out safety shades, and 2- to 3-Adept one-volley worker focus; Zerg Speedling punishes killed 18 Probes against Creepy_strategies with zero false-fires against fogged macro Terrans.</li>
+          <li><strong>Full 84-match local benchmark &amp; head-to-head:</strong> Finished 32–49–3 overall (0.73× trade, 2.6% supply-blocked, 14.44 ms average step time, zero crashes, zero wire rejects, zero self-cancels), 29–46–3 external (0.68× trade), 22–19–1 (52.4% wins, 1.12× trade) against the 14 Core bots, 9–7–2 (1.17×) on the 18-match canary, and 3–3 (1.19× trade) head-to-head against the Release #23 package. Across the 78 external games, Terran cut median Starport timing by 14 s (to 3:42) and Zerg cut median third Hatchery timing by 32 s (to 5:00, with 100.0% Natural Hatchery at 0:53).</li>
+          <li><strong>Standalone 4-race package smoke:</strong> Swept 4–0 across Protoss, Terran, Zerg, and Random at 6.59× average trade, 2.1% supply-blocked time, and 10.08 ms average step time.</li>
+        </ul>
+      </details>
+    </div>"""
+        elif live_ship_n >= 23 or "iter81c_" in run_id_low:
             r_mech_para = f"""
     <div class="release-highlights">
       <div class="rh-kicker">What Changed in Release #{live_ship_n} ({html.escape(build_lbl)})</div>

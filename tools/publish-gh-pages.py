@@ -4279,8 +4279,8 @@ def _render_standings_tables(
         note_html = (
             '<p class="table-note">'
             "AI Arena ratings start at 1600. All eight ladder accounts run "
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45737016755" target="_blank" rel="noopener noreferrer"><strong>Release #23 (Build 81C)</strong></a>, '
-            "which ships Division 8 production fixes from a 120-match live replay audit, late-game upgrade chaining, and a deterministic local benchmark harness. "
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45762014159" target="_blank" rel="noopener noreferrer"><strong>Release #24 (Build 82B)</strong></a>, '
+            "which ships 100% Terran main-ramp walling at 3:00, a 16× jump in Protoss live walling, emergency doorway cancels, upgraded Adept Shade micro, and scout-triggered open-wall punishes. "
             f"Both Mothman-P and Mothman-T promoted into Division 8 ({n_div8_all} of 8 accounts now compete in Division 8, with {html.escape(crash_phrase)}). "
             "Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
@@ -4711,8 +4711,8 @@ def build_history_page(
         f"The first deployed build went 0–10 on AI Arena. Recent v1 builds win roughly 55–61% of their games: "
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
         f"and Release #9 (Build 51) climbed to 19–9–3 (61.3% wins). Release #21 (Build 73) went 40–19–1 (66.7%, 31–7–1 in Division 9) "
-        f"and promoted both Mothman-P and Mothman-T into Division 8, followed by Release #22 (Build 79) and "
-        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45737016755" target="_blank" rel="noopener noreferrer">Release #23 (Build 81C)</a> '
+        f"and promoted both Mothman-P and Mothman-T into Division 8, followed by Releases #22, #23, and "
+        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45762014159" target="_blank" rel="noopener noreferrer">Release #24 (Build 82B)</a> '
         f"across all 8 ladder bots."
     )
 
@@ -4786,6 +4786,7 @@ def build_history_page(
         "iter73_ship21_full": 21,
         "iter79b_ship22_full": 22,
         "iter81c_ship23_full": 23,
+        "iter82b_ship24_full": 24,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:
@@ -4859,7 +4860,7 @@ def build_history_page(
                     f'<td style="text-align:right">{sb_s}</td>'
                     f"</tr>"
                 )
-            recent = list(reversed(iters[-31:]))
+            recent = list(reversed(iters[-33:]))
             already_has_cur = bool(
                 cur_tag
                 and any(
@@ -5024,8 +5025,9 @@ def build_history_page(
     </p>
   </div>
   <div class="release-highlights" style="margin-bottom:1.15rem;">
-    <div class="rh-kicker">Recent Campaign &amp; Release Arc (Loops 69–81)</div>
+    <div class="rh-kicker">Recent Campaign &amp; Release Arc (Loops 69–82)</div>
     <ul class="rh-list">
+      <li><strong>Loops 82–82B (Shipped as Release #24):</strong> Shipped live binary-grid walling upgrades (Terran 100.0% walled at 3:00 across all 28 games with Barracks lifts down from 29.0% to 3.6%; Protoss up 16× from 3.4% to 55.2% with zero self-traps), emergency doorway cancels, expansion-block recovery (-71.5 s blocked Terran natural), upgraded Adept Shade micro, and scout-verified open-wall punishes (35 Drones killed in PvZ, zero fogged Terran false-fires). Improved overall local play to 32–49–3 (0.73× trade), lifted 14 Core Bots to 22–19–1 (52.4% wins, 1.12× trade), split 3–3 (1.19× trade) head-to-head against Release #23, and swept 4–0 in standalone smoke (6.59× trade, 10.08 ms step time).</li>
       <li><strong>Loops 80–81C (Shipped as Release #23):</strong> Merged late-game +2/+3 upgrade chaining, Protoss Phoenix caps, Terran MULE and Scan policy, Viper Consume, Hydralisk Transfuse, and Stalker forward-blink arcs while dropping mid-fight attack-position scatter, then shipped Division 8 replay-audit fixes across all three races plus a deterministic map-and-seed local harness. Beat the Release #22 package 4–1–1 head-to-head (1.38× trade, Protoss 3–0, Terran 1–0–1), went 9–6–3 on the 18-match canary, pulled Terran's 3rd Command Center 54 s earlier (+0.27× same-race trade), and swept 4–0 in standalone package smoke (4.56× trade, 11.68 ms step time).</li>
       <li><strong>Loop 79 (Shipped as Release #22):</strong> Added three pro-validated tactical micro systems (224 LotV human replays studied) on top of Release #21's unchanged macro base: Swarm Host Locust splash-or-retreat, Terran behind-mineral multi-prong Liberators with all-race worker evacuation and minimal anti-air peel, and squad-wide Anti-Carrier snipe-or-burn commitment. Cleared 12–1 across 13 live drills (6–0 on the new pro scenarios), 186 crash-free local games with zero wire rejects, and a 4–0 standalone package smoke (13.86× trade, 10.65 ms step time).</li>
       <li><strong>Loops 77–78 (Held by release gate):</strong> Mining Planetary Fortresses on third and fourth bases (Loop 77: 31–45–8) and hard blocking upgrade savings (Loop 78: 6–0 head-to-head sweep, 33–47–4 across 84 matches, 27–47–4 external) showed that trading away Orbital income or starving defense hurts against aggressive external bots. Strict full-84 ship gates kept live production on Release #21 through the 10-loop campaign.</li>
@@ -5036,7 +5038,7 @@ def build_history_page(
   </div>
   {shipped_table_html}
   <p class="table-note" style="margin:-0.65rem 0 1.05rem;">
-    Release #23 (Build 81C) beat the Release #22 package 4–1–1 head-to-head (1.38× trade, Protoss 3–0, Terran 1–0–1) and cleared 31–46–7 across all 84 deterministic local matches (27–45–6 external, 0 crashes or wire rejects) alongside a 4–0 standalone smoke (4.56× trade). Release #22 (Build 79B) kept Release #21's macro code untouched and cleared deployment via 12–1 live drill verification against Carriers, Swarm Hosts, and Liberators rarely fielded by the local bot pool.
+    Release #24 (Build 82B) cleared 32–49–3 across all 84 deterministic local matches (29–46–3 external, 22–19–1 or 52.4% at 1.12× trade against the 14 Core bots, 3–3 at 1.19× trade head-to-head vs. Release #23, zero crashes or wire rejects) alongside a 4–0 standalone smoke (6.59× trade). Release #22 (Build 79B) kept Release #21's macro code untouched and cleared deployment via 12–1 live drill verification against Carriers, Swarm Hosts, and Liberators rarely fielded by the local bot pool.
   </p>
   {ledger_section}
   {hist_faults}
@@ -5239,6 +5241,7 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
                 "L80": ("1–5", "YES", "Micro command scatter", "Mid-fight per-unit attack-position scatter halved batched unit-attack commands and dropped 26% of Tank sieges"),
                 "L80B": ("3–3", "no", "Held for ladder fixes", "Reverted scatter (31–44–3 external, Protoss 12–14); held to bundle Division 8 replay-audit fixes before shipping"),
                 "L81B": ("2–4", "YES", "Timing & hold guards", "Passive 4:00–6:30 PvP hold, 5:30 Robotics Bay rush, and unguarded 5:18 Terran 3rd Command Center hurt mirror defense (fixed in L81C)"),
+                "L82": ("1–5", "YES", "Wall wire & fog guards", "Doorway wire check rejected Protoss walls and fogged Terran ramps triggered false open-wall punishes (fixed in L82B)"),
             }
 
             def _disambig_3a_row(m: re.Match[str]) -> str:
