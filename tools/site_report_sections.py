@@ -401,6 +401,7 @@ def load_rich_report_telemetry(
             or (it_n == 68 and suf.lower() == "c" and sh_n == 20)
             or (it_n == 73 and not suf and sh_n == 21)
             or (it_n == 79 and suf.lower() == "b" and sh_n == 22)
+            or (it_n == 81 and suf.lower() == "c" and sh_n == 23)
         )
 
     # A2. Load Combat Positioning (Section 5) & Army-Group Positioning (Section 6) vs. Pro
@@ -1338,7 +1339,7 @@ def load_rich_report_telemetry(
                  OR m.run_id LIKE '%iter63b_ship15_full%' OR m.run_id LIKE '%iter64b_ship16_full%'
                  OR m.run_id LIKE '%iter65h_ship17_full%' OR m.run_id LIKE '%iter66_ship18_full%'
                  OR m.run_id LIKE '%iter67b_ship19_full%' OR m.run_id LIKE '%iter68c_ship20_full%'
-                 OR m.run_id LIKE '%iter73_ship21_full%')
+                 OR m.run_id LIKE '%iter73_ship21_full%' OR m.run_id LIKE '%iter81c_ship23_full%')
         """
 
         # Per-matchup Local stats (All 26 external opponents)
@@ -3045,9 +3046,14 @@ def render_matchup_evaluation_section(
             )
         elif (co.get("selfplay") or {}).get("n"):
             sp = co["selfplay"]
-            chips.append(
-                (f"Self-Play ({sp['n']}g)", f"{_fmt_wlt(sp)}", f"{sp['wr']:.1f}% vs. self · {sp['tr']:.2f}×")
-            )
+            if "iter81c_" in str(cb.get("run_id") or "").lower():
+                chips.append(
+                    (f"Head-to-Head ({sp['n']}g)", f"{_fmt_wlt(sp)}", f"{sp['wr']:.1f}% vs. prev live · {sp['tr']:.2f}×")
+                )
+            else:
+                chips.append(
+                    (f"Self-Play ({sp['n']}g)", f"{_fmt_wlt(sp)}", f"{sp['wr']:.1f}% vs. self · {sp['tr']:.2f}×")
+                )
         cohort_strip_html = (
             '<div class="cohort-strip">'
             + "".join(
@@ -3730,7 +3736,26 @@ def render_matchup_evaluation_section(
         run_id_low = str(pro_curves.get("run_id") or "").lower()
         live_ship_n = int(cb.get("live_ship_num") or cb.get("ship_num") or 0)
         live_loop_n = int(cb.get("live_loop_num") or cb.get("loop_num") or 0)
-        if live_ship_n >= 22:
+        if live_ship_n >= 23 or "iter81c_" in run_id_low:
+            r_mech_para = f"""
+    <div class="release-highlights">
+      <div class="rh-kicker">What Changed in Release #{live_ship_n} ({html.escape(build_lbl)})</div>
+      <ul class="rh-list">
+        <li><strong>Division 8 live-replay fixes (120-match audit):</strong> Mixed Zerg ground armies and base defenses now hold ground against Swarm Host Locusts instead of retreating as a group. Terran cleared its 2-base to 3rd Command Center savings deadlock (54 seconds faster across 6 more games), and Protoss accelerated PvP natural expansions, Blink (53 seconds faster), and splash tech (5 more games).</li>
+        <li><strong>Clean late-game upgrade and micro merge:</strong> Merged +2/+3 upgrade chaining, the Protoss Phoenix cap against Terran ground, Terran MULE and Scanner Sweep policy, safe Viper Consume, Hydralisk Transfuse, and Stalker forward-blink arcs onto Release #22, and stripped out mid-fight per-unit attack-position scatter that had cut batched unit-attack commands in half.</li>
+        <li><strong>Deterministic local benchmark harness:</strong> Fixed longest-first map-assignment drift in the local match runner, wired explicit StarCraft II random seeds, and added frame-0 start-coordinate and per-race North/South spawn-balance tracking.</li>
+      </ul>
+      <details style="margin-top:0.65rem;">
+        <summary>Release #{live_ship_n} engineering details &amp; verification summary</summary>
+        <ul class="compact-list" style="margin-top:0.5rem;">
+          <li><strong>Division 8 production &amp; defense fixes:</strong> Ordered Terran Starport and first Siege Tank ahead of Stimpack and unblocked overdue Factories; accelerated Protoss +1 Ground Weapons, 6 to 8 Gateways, 2nd Robotics Facility, and mandatory splash while removing unprovoked early natural defense false alarms.</li>
+          <li><strong>Head-to-head vs. Release #22 package (6 games):</strong> Won 4–1–1 (1.38× trade, 1.6% supply-blocked), with a 3–0 Protoss sweep (2.33× to 4.19×) and 1–0–1 for Terran (5.65× vs. Zerg).</li>
+          <li><strong>Full 84-match local benchmark &amp; canary:</strong> Finished 31–46–7 overall (0.69× trade, 2.4% supply-blocked, 14.94 ms average step time) with zero crashes, zero rejected wire commands, and zero self-cancels, plus 9–6–3 on the 18-match canary. Across same-race matchups, Terran gained +0.27× trade despite rolling 78.6% North spawns.</li>
+          <li><strong>Standalone 4-race package smoke:</strong> Swept 4–0 across Protoss, Terran, Zerg, and Random at 4.56× average trade, 2.2% supply-blocked time, and 11.68 ms average step time.</li>
+        </ul>
+      </details>
+    </div>"""
+        elif live_ship_n >= 22:
             r_mech_para = f"""
     <div class="release-highlights">
       <div class="rh-kicker">What Changed in Release #{live_ship_n} (Build {live_loop_n})</div>
@@ -4103,8 +4128,20 @@ def render_matchup_evaluation_section(
     n_df = int(an_cur.get("drip_feed_collapse", 0) or 0)
     n_gm = int(an_cur.get("gas_rich_min_starved", 0) or 0)
 
+    if n_clk == 0:
+        early_gap_li = (
+            f"<strong>Early rushes and piecemeal defense:</strong> One-base Marauder rushes, mass Reapers under 4:30, "
+            f"and proxy aggression remain our sharpest early losses ({_pl(n_zk, 'zero-kill collapse', 'zero-kill collapses')} "
+            f"and {_pl(n_df, 'drip-feed collapse', 'drip-feed collapses')} across the 78 external games, while cloaked-unit losses dropped to zero)."
+        )
+    else:
+        early_gap_li = (
+            f"<strong>Early rushes and cloaked harass:</strong> One-base Marauder rushes, mass Reapers under 4:30, "
+            f"early Banshees, and Dark Templars remain our sharpest early losses ({_pl(n_zk, 'zero-kill collapse', 'zero-kill collapses')} "
+            f"and {_pl(n_clk, 'cloaked-unit loss', 'cloaked-unit losses')} across the 78 external games)."
+        )
     open_gaps = [
-        f"<strong>Early rushes and cloaked harass:</strong> One-base Marauder rushes, mass Reapers under 4:30, early Banshees, and Dark Templars remain our sharpest early losses ({_pl(n_zk, 'zero-kill collapse', 'zero-kill collapses')} and {_pl(n_clk, 'cloaked-unit loss', 'cloaked-unit losses')} across the 78 external games).",
+        early_gap_li,
         f"<strong>Fighting into sieged lines and rotating between bases:</strong> {rot_gap_note}",
         f"<strong>Slow early Zerg drone count:</strong> Zerg active workers at 4:00 averaged {z_w4_avg:.1f} ({z_w4_gap:.1f} behind the Grandmaster median of {pro_z_w4:.1f}) because early defensive Zerglings slow mid-game Roach and Hydralisk scaling in peaceful openings.",
         f"<strong>Mid-game production, upgrades, and gas income:</strong> Terran third Command Center adoption ({t3_m_pct}% at {html.escape(t3_m_t)} vs. Pro {t3_p_pct}% at {html.escape(t3_p_t)}), overall median gas income ({gas_m_med:,} vs. Pro {gas_p_med:,} per minute), late-game production building counts, and +2 combat upgrade adoption still trail Grandmaster benchmarks.",
