@@ -110,6 +110,15 @@ def verify_repacked_zip_dry_run(out_zip: Path, vc_name: str, timeout_sec: int = 
                     break
                 except Exception:
                     pass
+        j = parsed.get("json")
+        if not isinstance(j, dict) or j.get("cheese_mode") is not True:
+            raise RuntimeError(
+                f"Dry-run missing cheese_mode=true for {vc_name} ({out_zip}): stdout={res.stdout[:300]!r}"
+            )
+        if vc_name == "Mothman-XC" and j.get("started_as_random") is not True:
+            raise RuntimeError(
+                f"Dry-run missing started_as_random=true for {vc_name} ({out_zip}): stdout={res.stdout[:300]!r}"
+            )
         return parsed
 
 
@@ -157,10 +166,14 @@ def main(argv: list[str] | None = None) -> int:
         msg = f"[VC-REPACK] {vc_name}.zip <- {src_zip.name} ({size_mb:.2f} MB, profile={args.cheese_profile}) -> {out_zip}"
         if args.dry_run:
             info = verify_repacked_zip_dry_run(out_zip, vc_name)
-            msg += f" | DRY_RUN_OK"
+            msg += " | DRY_RUN_OK"
             if "json" in info:
                 j = info["json"]
-                msg += f" (cheese_mode={j.get('cheese_mode')}, cheese_profile={j.get('cheese_profile')})"
+                msg += (
+                    f" (cheese_mode={j.get('cheese_mode')}, "
+                    f"cheese_profile={j.get('cheese_profile')}, "
+                    f"started_as_random={j.get('started_as_random')})"
+                )
         print(msg, flush=True)
     return 0
 

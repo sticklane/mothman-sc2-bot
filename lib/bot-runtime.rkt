@@ -150,6 +150,8 @@
  rt-cheese-state
  rt-cheese-mode?
  set-rt-cheese-mode?!
+ rt-cheese-started-as-random?
+ set-rt-cheese-started-as-random?!
  rt-cheese-profile
  set-rt-cheese-profile!
  rt-cheese-active-spec
@@ -265,6 +267,16 @@
        (hash-ref (rt-cheese-state rt) 'enabled? #f)
        #t))
 
+(define (rt-cheese-started-as-random? rt)
+  (and (live-bot-runtime? rt)
+       (or (hash-ref (rt-cheese-state rt) 'started-as-random? #f)
+           (eq? (live-bot-runtime-configured-race rt) 'Random))
+       #t))
+
+(define (set-rt-cheese-started-as-random?! rt val)
+  (when (live-bot-runtime? rt)
+    (hash-set! (rt-cheese-state rt) 'started-as-random? (and val #t))))
+
 (define (coerce-cheese-profile-arg prof)
   (cond
     [(not prof) 'auto]
@@ -332,7 +344,7 @@
               s)))))
 
 (define (cheese-clear-transient-state! cst)
-  (for ([k (in-list '(active-spec resolved-enemy-race last-frame
+  (for ([k (in-list '(active-spec resolved-our-race resolved-enemy-race last-frame
                       proxy-xy proxy-wp proxy-worker-tags proxy-worker-reached-wp
                       proxy-built-any? committed? commit-frame pulled-worker-tags
                       fallback-triggered?))])
@@ -459,28 +471,40 @@
        (cheese-clear-transient-state! cst))
      (hash-set! cst 'last-frame frame)
      (define elapsed-sec (/ (exact->inexact frame) 22.4))
+     ;; Resolve our actual rolled race from `obs` FIRST (falling back to ally units/bldgs if
+     ;; `obs 'race` is 'Random/"Random", then `actual-race`) so `Mothman-XC` (`BotRace: "Random"`)
+     ;; ALWAYS passes its real rolled race ('Zerg/'Terran/'Protoss — NEVER 'Random!) at frame 0.
      (define our-race
-       (let ([ar (live-bot-runtime-actual-race rt)])
-         (if (memq ar '(Zerg Terran Protoss))
-             ar
-             (let ([obs-r (hash-ref obs 'race #f)])
-               (if (memq obs-r '(Zerg Terran Protoss)) obs-r 'Zerg)))))
+       (let* ([detected (detect-actual-race-from-obs obs (live-bot-runtime-actual-race rt))]
+              [norm-det (cheese-normalize-known-race detected)])
+         (or norm-det
+             (cheese-normalize-known-race
+              (detect-actual-race-from-obs (hash-remove (hash-remove obs 'actual-race) 'race)
+                                           (live-bot-runtime-actual-race rt)))
+             (cheese-normalize-known-race (live-bot-runtime-actual-race rt))
+             'Zerg)))
      (define eff-er (cheese-infer-enemy-race-from-obs rt obs ctx-eff-er))
      (define req-prof (hash-ref cst 'requested-profile 'auto))
      (define seed (hash-ref cst 'seed 0))
+     (define started-rand? (rt-cheese-started-as-random? rt))
      (define cur-spec (hash-ref cst 'active-spec #f))
+     (define prev-our-r (hash-ref cst 'resolved-our-race #f))
      (define prev-er (hash-ref cst 'resolved-enemy-race 'Unknown))
      (define cspec
        (cond
          [(and (cheese-build-spec? cur-spec)
+               (eq? our-race prev-our-r)
                (or (not (eq? req-prof 'auto))
                    (eq? eff-er prev-er)
                    (not (memq eff-er '(Zerg Terran Protoss)))
                    (>= elapsed-sec 45.0)))
           cur-spec]
          [else
-          (define picked (select-cheese-build-spec our-race eff-er req-prof seed))
+          (define picked
+            (select-cheese-build-spec our-race eff-er req-prof seed
+                                      #:started-as-random? started-rand?))
           (hash-set! cst 'active-spec picked)
+          (hash-set! cst 'resolved-our-race our-race)
           (hash-set! cst 'resolved-enemy-race eff-er)
           picked]))
      (define live-combat-sup
@@ -1594,7 +1618,8 @@
                                #:skip-build-order? [skip-build-order? #f]
                                #:cheese-mode? [cheese-mode? #f]
                                #:cheese-profile [cheese-profile 'auto]
-                               #:cheese-seed [cheese-seed 0])
+                               #:cheese-seed [cheese-seed 0]
+                               #:started-as-random? [started-as-random? #f])
   (define norm-race (normalize-race-sym race))
   (define eff-race (if (eq? norm-race 'Random) 'Zerg norm-race))
   (define pers (or personality (default-personality-for-race norm-race)))
@@ -1633,6 +1658,8 @@
   (define norm-cprof (coerce-cheese-profile-arg cheese-profile))
   (when (or cheese-mode? (not (eq? norm-cprof 'auto)))
     (set-rt-cheese-mode?! rt #t norm-cprof cheese-seed))
+  (when (or started-as-random? (eq? norm-race 'Random))
+    (set-rt-cheese-started-as-random?! rt #t))
   rt)
 
 (struct random-stealth-harass-plan
@@ -50340,8 +50367,9 @@
                     [cstage-log (cond [(not (cheese-mode-active? rt)) "fallback"]
                                       [(rt-cheese-committed? rt) "commit"]
                                       [else "build"])]
-                    [cwcap-log (if cspec-log (cheese-build-spec-worker-cap cspec-log) 0)])
-               (format "~a cheese=~a:~a:~a" raw-state-log-line cid-log cstage-log cwcap-log))
+                    [cwcap-log (if cspec-log (cheese-build-spec-worker-cap cspec-log) 0)]
+                    [crand-sfx (if (rt-cheese-started-as-random? rt) ":R" "")])
+               (format "~a cheese=~a:~a:~a~a" raw-state-log-line cid-log cstage-log cwcap-log crand-sfx))
              raw-state-log-line))
        (values (bot-step-log-record->hash state-rec)
                final-state-log-line)]

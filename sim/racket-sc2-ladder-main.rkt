@@ -39,6 +39,7 @@
 
 (provide
  bot-name-implies-cheese?
+ bot-name-implies-random?
  infer-bot-race-and-posture
  load-bot-config
  compute-ladder-port-config
@@ -115,6 +116,16 @@
              (string-suffix? up "-TC")
              (string-suffix? up "-PC")
              (string-suffix? up "-XC")))))
+
+(define (bot-name-implies-random? bot-name)
+  (and (string? bot-name)
+       (let ([up (string-upcase (string-trim bot-name))])
+         (or (string-suffix? up "-X")
+             (string-suffix? up "-XC")
+             (string-suffix? up "-X2")
+             (string-suffix? up "-R")
+             (string-suffix? up "-RC")
+             (string-suffix? up "-R2")))))
 
 (define (cheese-variant-base-info bot-name)
   (and (string? bot-name)
@@ -838,6 +849,7 @@
                               #:skip-build-order? [skip-build-order? #f]
                               #:cheese-mode? [cheese-mode? #f]
                               #:cheese-profile [cheese-profile 'auto]
+                              #:started-as-random? [started-as-random? #f]
                               #:root-dir [root-dir (current-directory)])
   (define auto-launched-handle
     (if (and (not game-port) computer-opponent?)
@@ -929,6 +941,12 @@
       (define effective-cheese-profile
         (let ([norm (normalize-cheese-profile-str cheese-profile)])
           (if norm (string->symbol norm) 'auto)))
+      (define effective-started-as-random?
+        (and (or started-as-random?
+                 (eq? configured-race-sym 'Random)
+                 (string-ci=? our-race "Random")
+                 (bot-name-implies-random? bot-name))
+             #t))
       (define runtime
         (make-live-bot-runtime #:bot-name (string->symbol bot-name)
                                #:race configured-race-sym
@@ -936,7 +954,8 @@
                                #:skip-build-order? skip-build-order?
                                #:cheese-mode? effective-cheese-mode?
                                #:cheese-profile effective-cheese-profile
-                               #:cheese-seed (or opponent-id bot-name)))
+                               #:cheese-seed (or opponent-id bot-name)
+                               #:started-as-random? effective-started-as-random?))
 
       (define total-raw-cmds-sent 0)
       (define total-steps 0)
@@ -1425,7 +1444,8 @@
                                       (if cs
                                           (symbol->string (cheese-build-spec-id cs))
                                           (symbol->string (rt-cheese-profile runtime))))
-                                    "none")))
+                                    "none")
+                'started_as_random (rt-cheese-started-as-random? runtime)))
       (unless skip-build-order?
         (append-native-telemetry! root-dir summary))
       summary)
@@ -1568,6 +1588,11 @@
         "auto"))
   (define resolved-cheese-profile-sym
     (string->symbol resolved-cheese-profile-str))
+  (define resolved-started-as-random?
+    (and (or (eq? (string->symbol resolved-race) 'Random)
+             (string-ci=? resolved-race "Random")
+             (bot-name-implies-random? resolved-bot-name))
+         #t))
 
   (cond
     [ipc-sexp?
@@ -1577,7 +1602,8 @@
                               #:initial-posture (string->symbol resolved-posture)
                               #:skip-build-order? skip-build-order?
                               #:cheese-mode? resolved-cheese-mode?
-                              #:cheese-profile resolved-cheese-profile-sym))
+                              #:cheese-profile resolved-cheese-profile-sym
+                              #:started-as-random? resolved-started-as-random?))
      (let loop ()
        (define line (read-line (current-input-port) 'any))
        (unless (eof-object? line)
@@ -1603,7 +1629,8 @@
                              #:initial-posture (string->symbol resolved-posture)
                              #:skip-build-order? skip-build-order?
                              #:cheese-mode? resolved-cheese-mode?
-                             #:cheese-profile resolved-cheese-profile-sym))
+                             #:cheese-profile resolved-cheese-profile-sym
+                             #:started-as-random? resolved-started-as-random?))
      (define out-hash
        (hasheq 'status "DRY_RUN_OK"
                'engine "racket_native_protobuf_ws"
@@ -1616,6 +1643,7 @@
                'cheese_profile (if (rt-cheese-mode? rt)
                                    (symbol->string (rt-cheese-profile rt))
                                    "none")
+               'started_as_random (rt-cheese-started-as-random? rt)
                'map (resolve-sc2-map-path map-name)))
      (displayln (jsexpr->string out-hash))
      out-hash]
@@ -1640,7 +1668,8 @@
                              #:step-size step-size
                              #:skip-build-order? skip-build-order?
                              #:cheese-mode? resolved-cheese-mode?
-                             #:cheese-profile resolved-cheese-profile-sym))
+                             #:cheese-profile resolved-cheese-profile-sym
+                             #:started-as-random? resolved-started-as-random?))
      (displayln (jsexpr->string res))
      res]
     [else

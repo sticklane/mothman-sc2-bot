@@ -1098,6 +1098,133 @@
                       (and cspec-f0 (cheese-build-spec-id cspec-f0))
                       cid-scouted)))
 
+;; ===========================================================================
+;; Group 11: Random-Advantage `Mothman-XC` Selection, `:R` Tag & `--dry-run`
+;; ===========================================================================
+(let ()
+  (define (make-xc-f0-obs rolled-race opp-race #:obs-race [obs-race rolled-race] #:enemy-units [enemy-units '()] #:frame [frame 0])
+    (define th-type (case rolled-race [(Zerg) 'hatchery] [(Terran) 'command-center] [else 'nexus]))
+    (define w-type (case rolled-race [(Zerg) 'drone] [(Terran) 'scv] [else 'probe]))
+    (hash 'frame frame
+          'race obs-race
+          'opponent-requested-race opp-race
+          'minerals 50 'gas 0 'supply-used 12 'supply-cap 15
+          'mineral-harvesters 12 'gas-harvesters 0
+          'base-x 28.0 'base-y 28.0
+          'natural-x 48.0 'natural-y 32.0
+          'third-x 68.0 'third-y 36.0
+          'enemy-x 160.0 'enemy-y 160.0
+          'enemy-base '(160.0 160.0)
+          'map-width 200.0 'map-height 200.0
+          'ally-buildings (list (hash 'id 10 'type th-type 'x 28.0 'y 28.0 'build-progress 1.0 'busy? #f))
+          'ally-units (make-workers w-type 12 200 28.0 28.0)
+          'enemy-units enemy-units
+          'enemy-buildings '()
+          'mineral-patches (list (hash 'id 9001 'x 22.0 'y 28.0 'minerals 900))))
+
+  ;; 11a. All 9/9 rolled-race x opponent-race matchups on `Mothman-XC` (`#:race 'Random`,
+  ;;      `#:started-as-random? #t`) select strictly from the Random-Advantage table at f=0,
+  ;;      NEVER pass 'Random as our-race (even when obs 'race is 'Random!), keep struct arity 19,
+  ;;      and append `:R` to `[SCBOT_STATE]` `cheese=<id>:build:<wcap>:R`!
+  (define forbidden-slow-ids
+    '(zvt-42d-queen-ling-nydus tvz-reaper-fe-hellion-banshee
+      tvt-1base-111-tank-bunker pvt-proxy-4gate-zealot-stalker))
+  (for* ([our-r (in-list '(Zerg Terran Protoss))]
+         [enemy-r (in-list '(Zerg Terran Protoss))])
+    (define allowed-ids
+      (map cheese-build-spec-id (random-cheese-profiles-for-matchup our-r enemy-r)))
+    (define all-ok?
+      (for/and ([seed (in-list '("seed-0" "seed-1" "seed-2" "seed-3"))]
+                [obs-r (in-list (list our-r our-r 'Random "Random"))])
+        (define rt
+          (make-live-bot-runtime #:bot-name 'Mothman-XC #:race 'Random
+                                 #:cheese-mode? #t #:cheese-profile 'auto
+                                 #:cheese-seed seed #:started-as-random? #t))
+        (define res (step-live-bot-runtime! rt (make-xc-f0-obs our-r enemy-r #:obs-race obs-r)))
+        (define cspec (rt-cheese-active-spec rt))
+        (define cid (and cspec (cheese-build-spec-id cspec)))
+        (define cwcap (and cspec (cheese-build-spec-worker-cap cspec)))
+        (define sline (hash-ref (hash-ref res 'telemetry (hash)) 'state-log-line ""))
+        (define expected-tag (format "cheese=~a:build:~a:R" cid cwcap))
+        (and (= (vector-length (struct->vector rt)) 20)
+             (rt-cheese-started-as-random? rt)
+             (eq? (live-bot-runtime-actual-race rt) our-r)
+             (cheese-build-spec? cspec)
+             (not (not (memq cid allowed-ids)))
+             (not (memq cid forbidden-slow-ids))
+             (string-contains? sline expected-tag))))
+    (check-test (format "l84c-11a-mothman-xc-random-advantage-~a-vs-~a-and-colon-R-log" our-r enemy-r)
+                all-ok?
+                (format "allowed=~s" allowed-ids)))
+
+  ;; 11b. Non-Random `Mothman-TC` omits `:R` AND `Mothman-X` (`cheese-mode? = #f`) has 0% diff (no `cheese=` tag)
+  (define rt-tc
+    (make-live-bot-runtime #:bot-name 'Mothman-TC #:race 'Terran
+                           #:cheese-mode? #t #:cheese-profile 'tvz-proxy-2rax-bunker
+                           #:started-as-random? #f))
+  (define res-tc (step-live-bot-runtime! rt-tc (make-xc-f0-obs 'Terran 'Zerg)))
+  (define sline-tc (hash-ref (hash-ref res-tc 'telemetry (hash)) 'state-log-line ""))
+  (define rt-x-macro
+    (make-live-bot-runtime #:bot-name 'Mothman-X #:race 'Random
+                           #:cheese-mode? #f #:started-as-random? #t))
+  (define res-xm (step-live-bot-runtime! rt-x-macro (make-xc-f0-obs 'Terran 'Zerg)))
+  (define sline-xm (hash-ref (hash-ref res-xm 'telemetry (hash)) 'state-log-line ""))
+  (check-test "l84c-11b-non-random-cheese-omits-colon-R-and-macro-Mothman-X-zero-diff"
+              (and (not (rt-cheese-started-as-random? rt-tc))
+                   (string-contains? sline-tc "cheese=tvz-proxy-2rax-bunker:build:17")
+                   (not (string-contains? sline-tc ":R"))
+                   (rt-cheese-started-as-random? rt-x-macro)
+                   (not (rt-cheese-mode? rt-x-macro))
+                   (not (cheese-mode-active? rt-x-macro))
+                   (not (string-contains? sline-xm "cheese=")))
+              (format "tc=~s xm=~s" sline-tc sline-xm))
+
+  ;; 11c. `Mothman-XC` rolling Terran vs Random picks fast hidden-info default at f=0, then
+  ;;      updates to Random-advantage TvP (`tvp-proxy-2rax-marauder` / `tvp-1base-2gas-cyclone`) < 45s!
+  (define rt-xc-rnd
+    (make-live-bot-runtime #:bot-name 'Mothman-XC #:race 'Random
+                           #:cheese-mode? #t #:cheese-profile 'auto
+                           #:cheese-seed "xc-vs-rnd" #:started-as-random? #t))
+  (step-live-bot-runtime! rt-xc-rnd (make-xc-f0-obs 'Terran 'Random #:obs-race 'Random #:frame 0))
+  (define cid-xc-f0 (cheese-build-spec-id (rt-cheese-active-spec rt-xc-rnd)))
+  (step-live-bot-runtime!
+   rt-xc-rnd
+   (make-xc-f0-obs 'Terran 'Random #:obs-race 'Terran #:frame 672
+                   #:enemy-units (list (hash 'id 901 'type 'probe 'x 110.0 'y 110.0 'hp 20 'shields 20))))
+  (define cid-xc-scouted (cheese-build-spec-id (rt-cheese-active-spec rt-xc-rnd)))
+  (check-test "l84c-11c-mothman-xc-vs-random-fast-f0-and-rescout-random-advantage"
+              (and (eq? cid-xc-f0 'tvz-proxy-2rax-bunker)
+                   (not (not (memq cid-xc-scouted '(tvp-proxy-2rax-marauder tvp-1base-2gas-cyclone)))))
+              (format "f0=~a scouted=~a" cid-xc-f0 cid-xc-scouted))
+
+  ;; 11d. CLI `--dry-run` JSON reports `"started_as_random"` & `"cheese_mode"` accurately for all variants
+  (define dr-xc (run-cli-silent '("--BotName" "Mothman-XC" "--dry-run")))
+  (define dr-zc (run-cli-silent '("--BotName" "Mothman-ZC" "--dry-run")))
+  (define dr-tc (run-cli-silent '("--BotName" "Mothman-TC" "--dry-run")))
+  (define dr-pc (run-cli-silent '("--BotName" "Mothman-PC" "--dry-run")))
+  (define dr-x  (run-cli-silent '("--BotName" "Mothman-X"  "--dry-run")))
+  (define dr-z  (run-cli-silent '("--BotName" "Mothman-Z"  "--dry-run")))
+  (check-test "l84c-11d-cli-dry-run-reports-started-as-random-and-cheese-mode"
+              (and (eq? (hash-ref dr-xc 'cheese_mode #f) #t)
+                   (equal? (hash-ref dr-xc 'cheese_profile "") "auto")
+                   (eq? (hash-ref dr-xc 'started_as_random #f) #t)
+                   (eq? (hash-ref dr-zc 'cheese_mode #f) #t)
+                   (eq? (hash-ref dr-zc 'started_as_random 'missing) #f)
+                   (eq? (hash-ref dr-tc 'cheese_mode #f) #t)
+                   (eq? (hash-ref dr-tc 'started_as_random 'missing) #f)
+                   (eq? (hash-ref dr-pc 'cheese_mode #f) #t)
+                   (eq? (hash-ref dr-pc 'started_as_random 'missing) #f)
+                   (eq? (hash-ref dr-x  'cheese_mode 'missing) #f)
+                   (eq? (hash-ref dr-x  'started_as_random #f) #t)
+                   (eq? (hash-ref dr-z  'cheese_mode 'missing) #f)
+                   (eq? (hash-ref dr-z  'started_as_random 'missing) #f)
+                   (bot-name-implies-random? "Mothman-X")
+                   (bot-name-implies-random? "Mothman-XC")
+                   (bot-name-implies-random? "Mothman-X2")
+                   (not (bot-name-implies-random? "Mothman-ZC"))
+                   (not (bot-name-implies-random? "Mothman-T2")))
+              (format "xc=~s zc=~s x=~s z=~s" dr-xc dr-zc dr-x dr-z)))
+
 (printf "=== Results: ~a/~a passed (~a failed) ===\n"
         pass-count (+ pass-count fail-count) fail-count)
 (unless (= fail-count 0)

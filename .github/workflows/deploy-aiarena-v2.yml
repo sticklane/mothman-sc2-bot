@@ -23,6 +23,14 @@ on:
         description: "Opponent preset ('div3-5', 'div2-3', 'div1') or comma-separated names/IDs"
         required: false
         default: "div3-5"
+      cheese_mode:
+        description: "Enable Version C cheese mode ('auto' enables when suffix=='C', or 'true'/'false')"
+        required: false
+        default: "auto"
+      cheese_profile:
+        description: "Version C cheese profile ('auto' or explicit profile ID)"
+        required: false
+        default: "auto"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -51,6 +59,8 @@ jobs:
           ACTIVATE_COMPETITION: ${{ inputs.activate_competition }}
           REQUEST_MATCHES: ${{ inputs.request_matches }}
           OPPONENTS_SPEC: ${{ inputs.opponents }}
+          CHEESE_MODE: ${{ inputs.cheese_mode }}
+          CHEESE_PROFILE: ${{ inputs.cheese_profile }}
         run: |
           python3 - <<'PY'
           import base64
@@ -99,6 +109,19 @@ jobs:
           if not re.fullmatch(r"[0-9A-Za-z._-]+", suffix):
               print(f"ERROR: invalid suffix {suffix!r}", file=sys.stderr)
               sys.exit(1)
+
+          raw_cm = (os.environ.get("CHEESE_MODE") or "auto").strip().lower()
+          if raw_cm in ("true", "1", "yes", "on"):
+              cheese_mode = True
+          elif raw_cm in ("false", "0", "no", "off"):
+              cheese_mode = False
+          elif raw_cm == "auto":
+              cheese_mode = (suffix.upper() == "C")
+          else:
+              print(f"ERROR: invalid cheese_mode {raw_cm!r}", file=sys.stderr)
+              sys.exit(1)
+          cheese_profile = (os.environ.get("CHEESE_PROFILE") or "auto").strip() or "auto"
+          print(f"Deploy config: suffix={suffix!r}, cheese_mode={cheese_mode}, cheese_profile={cheese_profile!r}")
 
           def relay_id(type_name: str, obj_id: int) -> str:
               return base64.b64encode(f"{type_name}:{obj_id}".encode("utf-8")).decode("ascii")
@@ -210,7 +233,7 @@ jobs:
                   url = data.get("next")
               return bots
 
-          def repack_v2_zip(src_zip: str, base_name: str, v2_name: str, out_zip: str):
+          def repack_v2_zip(src_zip: str, base_name: str, v2_name: str, out_zip: str, cheese_mode: bool = False, cheese_profile: str = "auto"):
               with zipfile.ZipFile(src_zip, "r") as zin, zipfile.ZipFile(out_zip, "w", compression=zipfile.ZIP_DEFLATED) as zout:
                   for info in zin.infolist():
                       data = zin.read(info.filename)
@@ -218,6 +241,9 @@ jobs:
                       if new_name in ("config.json", "bot_config.json"):
                           cfg = json.loads(data.decode("utf-8"))
                           cfg["BotName"] = v2_name
+                          if cheese_mode:
+                              cfg["CheeseMode"] = True
+                              cfg["CheeseProfile"] = cheese_profile
                           data = (json.dumps(cfg, indent=2) + "\n").encode("utf-8")
                       elif new_name == "run.py":
                           txt = data.decode("utf-8")
@@ -246,6 +272,20 @@ jobs:
                   res = subprocess.run([exe, "--dry-run"], cwd=td, capture_output=True, text=True, timeout=30)
                   if res.returncode != 0 or "DRY_RUN_OK" not in res.stdout:
                       raise RuntimeError(f"Dry-run failed for {v2_name}: rc={res.returncode} out={res.stdout[:300]} err={res.stderr[:300]}")
+                  if cheese_mode:
+                      parsed = None
+                      for line in res.stdout.splitlines():
+                          s = line.strip()
+                          if s.startswith("{") and s.endswith("}"):
+                              try:
+                                  parsed = json.loads(s)
+                                  break
+                              except Exception:
+                                  pass
+                      if not isinstance(parsed, dict) or parsed.get("cheese_mode") is not True:
+                          raise RuntimeError(f"Dry-run missing cheese_mode=true for {v2_name}: {res.stdout[:300]}")
+                      if base_name == "Mothman-X" and parsed.get("started_as_random") is not True:
+                          raise RuntimeError(f"Dry-run missing started_as_random=true for {v2_name}: {res.stdout[:300]}")
                   print(f"DRY_RUN_OK {v2_name}: {res.stdout.strip()}")
 
           existing = list_user_bots()
@@ -284,7 +324,7 @@ jobs:
                   sys.exit(1)
               v2_name = f"{base_name}{suffix}"
               v2_zip = f"/tmp/v2_zips/{v2_name}.zip"
-              repack_v2_zip(src_zip, base_name, v2_name, v2_zip)
+              repack_v2_zip(src_zip, base_name, v2_name, v2_zip, cheese_mode=cheese_mode, cheese_profile=cheese_profile)
               with open(v2_zip, "rb") as fh:
                   local_md5 = hashlib.md5(fh.read()).hexdigest()
 

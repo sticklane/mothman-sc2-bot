@@ -545,6 +545,112 @@
                      (not (equal? (build-order-spec-name macro-bo)
                                   (build-order-spec-name (cheese-build-spec-bo-spec cheese-spec))))))))
 
+;; =============================================================================
+;; Group 7: Random-Advantage `Mothman-XC` Selection (`started-as-random? = #t`)
+;; =============================================================================
+(printf "\n=== Group 7: Random-Advantage Mothman-XC Selection ===\n")
+
+(let ()
+  (define EXPECTED-RANDOM-MATCHUP-PROFILES
+    (list
+     (list 'ZvZ 'Zerg    'Zerg    '(zvz-12pool-proxy-spine zvz-13-12-ling-bane))
+     (list 'ZvP 'Zerg    'Protoss '(zvp-12pool-ling-flood zvp-19d-speedling-roach-ravager))
+     (list 'ZvT 'Zerg    'Terran  '(zvt-26d-roach-ravager-bust))
+     (list 'TvP 'Terran  'Protoss '(tvp-proxy-2rax-marauder tvp-1base-2gas-cyclone))
+     (list 'TvT 'Terran  'Terran  '(tvt-proxy-2rax-reaper))
+     (list 'TvZ 'Terran  'Zerg    '(tvz-proxy-2rax-bunker))
+     (list 'PvZ 'Protoss 'Zerg    '(pvz-cannon-rush pvz-32p-8gate-chargelot-prism))
+     (list 'PvT 'Protoss 'Terran  '(pvt-proxy-stargate-voidray))
+     (list 'PvP 'Protoss 'Protoss '(pvp-cannon-rush pvp-proxy-robo-immortal))))
+
+  (define (race->short-str r)
+    (case r [(Zerg) "Z"] [(Terran) "T"] [(Protoss) "P"]))
+
+  ;; 9/9 matchups via `random-cheese-profiles-for-matchup` (1-arg & 2-arg forms)
+  (for ([row (in-list EXPECTED-RANDOM-MATCHUP-PROFILES)])
+    (define m-sym        (first row))
+    (define my-race      (second row))
+    (define opp-race     (third row))
+    (define expected-ids (fourth row))
+
+    (define p-1arg-sym   (random-cheese-profiles-for-matchup m-sym))
+    (define p-1arg-lo    (random-cheese-profiles-for-matchup (string->symbol (string-downcase (symbol->string m-sym)))))
+    (define p-1arg-str   (random-cheese-profiles-for-matchup (symbol->string m-sym)))
+    (define p-2arg-sym   (random-cheese-profiles-for-matchup my-race opp-race))
+    (define p-2arg-str   (random-cheese-profiles-for-matchup (string-downcase (symbol->string my-race))
+                                                             (string-downcase (symbol->string opp-race))))
+    (define p-2arg-short (random-cheese-profiles-for-matchup (race->short-str my-race)
+                                                             (race->short-str opp-race)))
+
+    (check-test (format "random-matchup-~a-exact-profiles-all-call-forms" m-sym)
+                (and (equal? (map cheese-build-spec-id p-1arg-sym) expected-ids)
+                     (equal? p-1arg-sym p-1arg-lo)
+                     (equal? p-1arg-sym p-1arg-str)
+                     (equal? p-1arg-sym p-2arg-sym)
+                     (equal? p-1arg-sym p-2arg-str)
+                     (equal? p-1arg-sym p-2arg-short))
+                (format "got=~a expected=~a" (map cheese-build-spec-id p-1arg-sym) expected-ids))
+
+    (check-test (format "random-select-~a-deterministic-across-seeds" m-sym)
+                (for/and ([seed (in-range 0 6)])
+                  (define s (select-cheese-build-spec my-race opp-race 'auto seed #:started-as-random? #t))
+                  (define exp-id (list-ref expected-ids (modulo seed (length expected-ids))))
+                  (and (cheese-build-spec? s)
+                       (eq? (cheese-build-spec-id s) exp-id)))))
+
+  ;; Verify excluded slow/non-Random-advantage builds are NEVER auto-selected for Mothman-XC
+  (let ([forbidden '(zvt-42d-queen-ling-nydus
+                     tvt-1base-111-tank-bunker
+                     tvz-reaper-fe-hellion-banshee
+                     pvt-proxy-4gate-zealot-stalker)]
+        [str-seeds '("MicroMachine" "SicToss" "who" "CutterSlayer" "oberon"
+                     "VeTerran-revived" "ModBotNewBuilds" "AxeFighter")])
+    (check-test "random-auto-never-picks-slow-or-wall-countered-builds"
+                (for/and ([row (in-list EXPECTED-RANDOM-MATCHUP-PROFILES)])
+                  (define r (second row))
+                  (define e (third row))
+                  (and (for/and ([seed (in-range 0 16)])
+                         (not (memq (cheese-build-spec-id
+                                     (select-cheese-build-spec r e 'auto seed #:started-as-random? #t))
+                                    forbidden)))
+                       (for/and ([sseed (in-list str-seeds)])
+                         (not (memq (cheese-build-spec-id
+                                     (select-cheese-build-spec r e 'auto sseed #:started-as-random? #t))
+                                    forbidden)))))))
+
+  ;; Fast hidden-info defaults when enemy is also 'Random / 'Unknown / #f / "R"
+  (check-test "random-vs-random-or-unknown-uses-race-safe-fast-hidden-defaults"
+              (and (eq? (cheese-build-spec-id (select-cheese-build-spec 'Zerg    'Random  'auto 0 #:started-as-random? #t)) 'zvz-13-12-ling-bane)
+                   (eq? (cheese-build-spec-id (select-cheese-build-spec 'Zerg    'Unknown 'auto 1 #:started-as-random? #t)) 'zvz-13-12-ling-bane)
+                   (eq? (cheese-build-spec-id (select-cheese-build-spec "Z"      "R"      'auto 2 #:started-as-random? #t)) 'zvz-13-12-ling-bane)
+                   (eq? (cheese-build-spec-id (select-cheese-build-spec 'Terran  'Random  'auto 0 #:started-as-random? #t)) 'tvz-proxy-2rax-bunker)
+                   (eq? (cheese-build-spec-id (select-cheese-build-spec 'Terran  'Unknown 'auto 1 #:started-as-random? #t)) 'tvz-proxy-2rax-bunker)
+                   (eq? (cheese-build-spec-id (select-cheese-build-spec "T"      #f       'auto 2 #:started-as-random? #t)) 'tvz-proxy-2rax-bunker)
+                   (eq? (cheese-build-spec-id (select-cheese-build-spec 'Protoss 'Random  'auto 0 #:started-as-random? #t)) 'pvt-proxy-stargate-voidray)
+                   (eq? (cheese-build-spec-id (select-cheese-build-spec 'Protoss 'Unknown 'auto 1 #:started-as-random? #t)) 'pvt-proxy-stargate-voidray)
+                   (eq? (cheese-build-spec-id (select-cheese-build-spec "P"      "R"      'auto 2 #:started-as-random? #t)) 'pvt-proxy-stargate-voidray)
+                   (equal? (map cheese-build-spec-id (random-cheese-profiles-for-matchup 'Zerg 'Random)) '(zvz-13-12-ling-bane))
+                   (equal? (map cheese-build-spec-id (random-cheese-profiles-for-matchup 'Terran 'Unknown)) '(tvz-proxy-2rax-bunker))
+                   (equal? (map cheese-build-spec-id (random-cheese-profiles-for-matchup 'Protoss 'Random)) '(pvt-proxy-stargate-voidray))
+                   (cheese-build-spec? (select-cheese-build-spec 'Random 'Random 'auto 0 #:started-as-random? #t))
+                   (cheese-build-spec? (select-cheese-build-spec #f #f 'auto 0 #:started-as-random? #t))))
+
+  ;; Explicit profile override still works when `started-as-random? = #t`,
+  ;; and `#:started-as-random? #f` is 100% identical to omitted keyword.
+  (check-test "random-explicit-override-and-false-backward-compat"
+              (and (eq? (cheese-build-spec-id
+                         (select-cheese-build-spec 'Zerg 'Terran 'zvt-42d-queen-ling-nydus 0 #:started-as-random? #t))
+                        'zvt-42d-queen-ling-nydus)
+                   (eq? (cheese-build-spec-id
+                         (select-cheese-build-spec 'Protoss 'Terran #:started-as-random? #t))
+                        'pvt-proxy-stargate-voidray)
+                   (for/and ([row (in-list EXPECTED-MATCHUP-PROFILES)])
+                     (define r (second row))
+                     (define e (third row))
+                     (for/and ([seed (in-range 0 4)])
+                       (equal? (select-cheese-build-spec r e 'auto seed)
+                               (select-cheese-build-spec r e 'auto seed #:started-as-random? #f)))))))
+
 (printf "\n=== Results: ~a/~a passed (~a failed) ===\n"
         pass-count (+ pass-count fail-count) fail-count)
 (unless (= fail-count 0)

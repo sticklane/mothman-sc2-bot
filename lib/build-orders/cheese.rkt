@@ -24,6 +24,7 @@
  (struct-out cheese-build-spec)
  lookup-cheese-build-spec
  list-cheese-profiles-for-matchup
+ random-cheese-profiles-for-matchup
  select-cheese-build-spec
  all-cheese-build-specs)
 
@@ -1048,6 +1049,30 @@
    'PvT (list PvT-PROXY-4GATE-ZEALOT-STALKER PvT-PROXY-STARGATE-VOIDRAY)
    'PvP (list PvP-PROXY-ROBO-IMMORTAL PvP-CANNON-RUSH)))
 
+;; Random-Advantage Playbook Table (`Mothman-XC` when `started-as-random? = #t`):
+;; Strictly fast hidden-information cheeses that exploit opponent not knowing
+;; our race until ~1:05-1:30 (never slow 42d Nydus, Reaper-FE, 1-1-1 Tank, or
+;; 4-Gate Zealot into sealed Terran walls).
+(define RANDOM-CHEESE-PROFILES-BY-MATCHUP
+  (hasheq
+   'ZvZ (list ZvZ-12POOL-PROXY-SPINE ZvZ-13-12-LING-BANE)
+   'ZvP (list ZvP-12POOL-LING-FLOOD ZvP-19D-SPEEDLING-ROACH-RAVAGER)
+   'ZvT (list ZvT-26D-ROACH-RAVAGER-BUST)
+   'TvP (list TvP-PROXY-2RAX-MARAUDER TvP-1BASE-2GAS-CYCLONE)
+   'TvT (list TvT-PROXY-2RAX-REAPER)
+   'TvZ (list TvZ-PROXY-2RAX-BUNKER)
+   'PvZ (list PvZ-CANNON-RUSH PvZ-32P-8GATE-CHARGELOT-PRISM)
+   'PvT (list PvT-PROXY-STARGATE-VOIDRAY)
+   'PvP (list PvP-CANNON-RUSH PvP-PROXY-ROBO-IMMORTAL)))
+
+;; Fast race-safe hidden-info defaults when enemy is also `'Random` / `'Unknown`
+;; (until enemy race is scouted < 45s).
+(define RANDOM-VS-UNKNOWN-CHEESE-BY-RACE
+  (hasheq
+   'Zerg    (list ZvZ-13-12-LING-BANE)
+   'Terran  (list TvZ-PROXY-2RAX-BUNKER)
+   'Protoss (list PvT-PROXY-STARGATE-VOIDRAY)))
+
 (define all-cheese-build-specs
   (list
    ZvZ-13-12-LING-BANE
@@ -1086,20 +1111,43 @@
   (define m-sym (coerce-matchup-sym matchup-or-race enemy-race))
   (hash-ref CHEESE-PROFILES-BY-MATCHUP m-sym '()))
 
-;; Select a cheese-build-spec for `(race enemy-race [profile 'auto] [seed 0])`.
+;; List ordered fast hidden-information cheese-build-specs for `Mothman-XC`
+;; (`started-as-random? = #t`). Accepts 1-arg matchup (`'TvP` / `"TvP"`) or
+;; 2-arg `(race enemy-race)`. When `enemy-race` is `'Random` / `'Unknown` / `#f`,
+;; returns the race-safe fast hidden-info default until enemy race is scouted.
+(define (random-cheese-profiles-for-matchup matchup-or-race [enemy-race #f])
+  (cond
+    [(and (not enemy-race) (matchup-sym? matchup-or-race))
+     (hash-ref RANDOM-CHEESE-PROFILES-BY-MATCHUP matchup-or-race '())]
+    [(and (not enemy-race) (parse-matchup-token matchup-or-race))
+     => (lambda (m-sym) (hash-ref RANDOM-CHEESE-PROFILES-BY-MATCHUP m-sym '()))]
+    [else
+     (define my-r (normalize-known-race (coerce-race-input matchup-or-race)))
+     (define er (coerce-race-input (or enemy-race 'Unknown)))
+     (if (memq er '(Random Unknown))
+         (hash-ref RANDOM-VS-UNKNOWN-CHEESE-BY-RACE my-r (list ZvZ-13-12-LING-BANE))
+         (let ([m-sym (resolve-matchup-symbol my-r er)])
+           (hash-ref RANDOM-CHEESE-PROFILES-BY-MATCHUP m-sym '())))]))
+
+;; Select a cheese-build-spec for `(race enemy-race [profile 'auto] [seed 0]
+;; #:started-as-random? [started-as-random? #f])`.
 ;; - Explicit known profile ID returns that exact spec (even if cross-matchup).
 ;; - `'auto` (or unknown/empty profile) deterministically selects from the
-;;   matchup's ordered profiles using `(modulo (seed->nonneg-int seed) len)`.
-;; - Safe fallback for `'Random` / `'Unknown` enemy race via `resolve-matchup-symbol`.
-(define (select-cheese-build-spec race enemy-race [profile 'auto] [seed 0])
+;;   Random-Advantage table when `started-as-random?` is `#t`, or the standard
+;;   matchup table when `#f`, using `(modulo (seed->nonneg-int seed) len)`.
+;; - Safe fallback for `'Random` / `'Unknown` enemy race.
+(define (select-cheese-build-spec race enemy-race [profile 'auto] [seed 0]
+                                  #:started-as-random? [started-as-random? #f])
   (define prof-sym (coerce-profile-sym profile))
   (define explicit (and (not (eq? prof-sym 'auto))
                         (lookup-cheese-build-spec prof-sym)))
   (cond
     [explicit explicit]
     [else
-     (define m-sym (coerce-matchup-sym race enemy-race))
-     (define pool (hash-ref CHEESE-PROFILES-BY-MATCHUP m-sym '()))
+     (define pool
+       (if started-as-random?
+           (random-cheese-profiles-for-matchup race enemy-race)
+           (hash-ref CHEESE-PROFILES-BY-MATCHUP (coerce-matchup-sym race enemy-race) '())))
      (if (pair? pool)
          (list-ref pool (modulo (seed->nonneg-int seed) (length pool)))
          ZvP-19D-SPEEDLING-ROACH-RAVAGER)]))

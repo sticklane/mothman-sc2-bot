@@ -295,6 +295,75 @@ class VersionCHarnessTests(unittest.TestCase):
             self.assertIn("DRY_RUN_OK", dry["stdout"])
             self.assertTrue(dry["json"]["cheese_mode"])
 
+            # Verify Mothman-XC requires started_as_random=true
+            src_x_zip = src_dir / "Mothman-X.zip"
+            stub_x_ok = (
+                "#!/bin/sh\n"
+                'echo "DRY_RUN_OK"\n'
+                'echo \'{"status":"DRY_RUN_OK","cheese_mode":true,"cheese_profile":"auto","started_as_random":true}\'\n'
+            ).encode("utf-8")
+            with zipfile.ZipFile(src_x_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zi_exe = zipfile.ZipInfo("Mothman-X")
+                zi_exe.create_system = 3
+                zi_exe.external_attr = (stat.S_IFREG | 0o755) << 16
+                zf.writestr(zi_exe, stub_x_ok)
+                zf.writestr("config.json", json.dumps({"BotName": "Mothman-X", "BotRace": "Random"}, indent=2) + "\n")
+                zf.writestr("bot_config.json", json.dumps({"BotName": "Mothman-X", "BotRace": "Random"}, indent=2) + "\n")
+                zf.writestr("run.py", run_py)
+            out_x_zip = out_dir / "Mothman-XC.zip"
+            REPACK.repack_version_c_zip(src_x_zip, "Mothman-X", "Mothman-XC", out_x_zip)
+            dry_x = REPACK.verify_repacked_zip_dry_run(out_x_zip, "Mothman-XC")
+            self.assertTrue(dry_x["json"]["cheese_mode"])
+            self.assertTrue(dry_x["json"]["started_as_random"])
+
+            # Verify Mothman-XC rejects missing started_as_random=true
+            src_x_bad = src_dir / "Mothman-X-bad.zip"
+            with zipfile.ZipFile(src_x_bad, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zi_exe = zipfile.ZipInfo("Mothman-X")
+                zi_exe.create_system = 3
+                zi_exe.external_attr = (stat.S_IFREG | 0o755) << 16
+                zf.writestr(zi_exe, stub_exe)
+                zf.writestr("config.json", json.dumps({"BotName": "Mothman-X", "BotRace": "Random"}, indent=2) + "\n")
+            out_x_bad = out_dir / "Mothman-XC-bad.zip"
+            REPACK.repack_version_c_zip(src_x_bad, "Mothman-X", "Mothman-XC", out_x_bad)
+            with self.assertRaises(RuntimeError):
+                REPACK.verify_repacked_zip_dry_run(out_x_bad, "Mothman-XC")
+
+    def test_deploy_aiarena_v2_workflow_yaml_and_version_c_wiring(self) -> None:
+        wf_path = REPO_ROOT / ".github" / "workflows" / "deploy-aiarena-v2.yml"
+        self.assertTrue(wf_path.is_file())
+        raw_txt = wf_path.read_text(encoding="utf-8")
+        # Structural & Version C input checks
+        self.assertIn("cheese_mode:", raw_txt)
+        self.assertIn("cheese_profile:", raw_txt)
+        self.assertIn('suffix.upper() == "C"', raw_txt)
+        self.assertIn('cfg["CheeseMode"] = True', raw_txt)
+        self.assertIn('cfg["CheeseProfile"] = cheese_profile', raw_txt)
+        self.assertIn('parsed.get("cheese_mode") is not True', raw_txt)
+        self.assertIn('parsed.get("started_as_random") is not True', raw_txt)
+
+        # Parse YAML if PyYAML is available, and compile the embedded Python block
+        try:
+            import yaml  # type: ignore
+            doc = yaml.safe_load(raw_txt)
+            self.assertIsInstance(doc, dict)
+            on_block = doc.get("on") or doc.get(True)
+            inputs = on_block["workflow_dispatch"]["inputs"]
+            self.assertEqual(inputs["suffix"]["default"], "2")
+            self.assertEqual(inputs["cheese_mode"]["default"], "auto")
+            self.assertEqual(inputs["cheese_profile"]["default"], "auto")
+            steps = doc["jobs"]["deploy-v2"]["steps"]
+            run_script = steps[1]["run"]
+            m_py = run_script.split("python3 - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+            compile(m_py, str(wf_path), "exec")
+        except ImportError:
+            # Fallback: extract and compile embedded Python block directly
+            marker = "          python3 - <<'PY'\n"
+            self.assertIn(marker, raw_txt)
+            tail = raw_txt.split(marker, 1)[1].split("\n          PY", 1)[0]
+            dedented = "\n".join(line[10:] if line.startswith(" " * 10) else line for line in tail.splitlines())
+            compile(dedented, str(wf_path), "exec")
+
     def test_cli_dry_run_presets(self) -> None:
         # 1) --cheese-defense-drill --dry-run
         res1 = subprocess.run(
