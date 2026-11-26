@@ -355,6 +355,8 @@ def classify_ship_verdict(loop_id: int, entry: Dict[str, Any]) -> Tuple[str, Opt
 
     if "HOLD_ZIP" in status.upper() or "HOLD-ZIP" in combined.upper():
         return "HOLD-ZIP", None
+    if "CHECKPOINT" in status.upper():
+        return "CHECKPOINT", None
 
     # Explicit live ships (L34 Ship #1, L36 Ship #2, L37 Ship #3, L40 Ship #4, L42 Ship #5, L45 Ship #6, ...)
     m_ship = re.search(r"LIVE[ _]SHIP[ _#]*(\d+)|SHIP[ _#]+(\d+)\b", combined, re.IGNORECASE)
@@ -380,7 +382,7 @@ def classify_ship_verdict(loop_id: int, entry: Dict[str, Any]) -> Tuple[str, Opt
 
 
 def parse_wlt(text: str) -> Optional[Tuple[int, int, int]]:
-    m = re.search(r"(\d+)W-(\d+)L-(\d+)T", text)
+    m = re.search(r"(\d+)W-(\d+)L-(\d+)[TD]", text)
     if m:
         return int(m.group(1)), int(m.group(2)), int(m.group(3))
     m2 = re.search(r"(\d+)-(\d+)-(\d+)", text)

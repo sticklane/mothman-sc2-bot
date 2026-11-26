@@ -1518,35 +1518,51 @@ DEPLOY_LABELS: Dict[str, str] = {
 BOT_META: Dict[str, Dict[str, str]] = {
     "Mothman-P": {
         "race": "Protoss",
-        "highlight": "Promoted into Division 8 (1412 Elo, 34.6% career win rate); now facing ~1478 average opponent Elo.",
+        "highlight": "Long-running Protoss macro account (1412 Elo); went 3–2–1 in recent non-mirror ladder play.",
     },
     "Mothman-T": {
         "race": "Terran",
-        "highlight": "Promoted into Division 8 (1430 Elo, highest long-running rating); now facing ~1477 average opponent Elo.",
+        "highlight": "Highest long-running rating (1440 Elo in Division 9); facing ~1469 average opponent Elo.",
     },
     "Mothman-Z": {
         "race": "Zerg",
-        "highlight": "Went 7–4–1 in recent non-mirror Division 9 play against ~1289 average opponent Elo.",
+        "highlight": "Long-running Zerg macro account (1417 Elo); went 48–19–5 across its last 80 recorded matches.",
     },
     "Mothman-X": {
         "race": "Random",
-        "highlight": "Climbed to 1399 (+5 Elo) on an 8–4 recent Division 9 run across Random spawns.",
+        "highlight": "Long-running Random macro account (1417 Elo in Division 9); went 42–35–2 across its last 80 recorded matches.",
     },
     "Mothman-P2": {
         "race": "Protoss",
-        "highlight": "Zero crashes across 93 Division 8 games against ~1506 average opponent Elo.",
+        "highlight": "Zero crashes across 120 Division 9 games against ~1472 average opponent Elo.",
     },
     "Mothman-T2": {
         "race": "Terran",
-        "highlight": "31 wins at 1471 Elo with zero crashes across 93 Division 8 games.",
+        "highlight": "43 wins at 1459 Elo with zero crashes across 120 Division 9 games.",
     },
     "Mothman-Z2": {
         "race": "Zerg",
-        "highlight": "Highest current-season rating (1482); went 6–9 in recent non-mirror Division 8 play with zero crashes in 92 games.",
+        "highlight": "Highest current-season rating (1465); went 7–3 in recent non-mirror Division 9 play with zero crashes in 119 games.",
     },
     "Mothman-X2": {
         "race": "Random",
-        "highlight": "Zero crashes across 92 Division 8 games against ~1499 average opponent Elo.",
+        "highlight": "Zero crashes across 119 Division 9 games against ~1473 average opponent Elo.",
+    },
+    "Mothman-PC": {
+        "race": "Protoss",
+        "highlight": "Pre-6:00 Protoss pressure (Cannon Rush, Proxy Robotics, Proxy Stargate, 8-Gate Prism); opened 1–1 with zero crashes.",
+    },
+    "Mothman-TC": {
+        "race": "Terran",
+        "highlight": "Pre-6:00 Terran pressure (Proxy 2-Rax Marauder, Reaper, Bunker, and 1-base tech); opened 2–0 with zero crashes (12–11–3 locally).",
+    },
+    "Mothman-ZC": {
+        "race": "Zerg",
+        "highlight": "Pre-6:00 Zerg pressure (12-Pool Ling/Spine, 13-12 Ling-Bane, Roach-Ravager, and Nydus); opened 1–1 with zero crashes.",
+    },
+    "Mothman-XC": {
+        "race": "Random",
+        "highlight": "Random-advantage early pressure using hidden starting race; opened 2–0 with zero crashes.",
     },
 }
 
@@ -1560,6 +1576,7 @@ def load_aiarena_live_summary(brain_dir: Path, sqlite_path: Path) -> Dict[str, A
         "available": False,
         "v2_bots": [],
         "v1_bots": [],
+        "vc_bots": [],
         "v2_opp_elo_avg": 0.0,
         "v2_opp_elo_min": 0,
         "v2_opp_elo_max": 0,
@@ -1570,7 +1587,7 @@ def load_aiarena_live_summary(brain_dir: Path, sqlite_path: Path) -> Dict[str, A
         "v1_nonmirror": {"w": 0, "l": 0, "t": 0},
     }
     cand_dirs: List[Path] = []
-    for pat in ("aiarena_v1_v2_fetch*", "aiarena_prod_audit_*"):
+    for pat in ("aiarena_v1_v2_fetch*", "aiarena_prod_audit_*", "aiarena_live_*"):
         for p in sorted(Path("/tmp").glob(pat)):
             if p.is_dir():
                 if (p / "aiarena-replays" / "all_bots_summary.json").is_file():
@@ -1677,6 +1694,32 @@ def load_aiarena_live_summary(brain_dir: Path, sqlite_path: Path) -> Dict[str, A
         result["v1_opp_elo_min"] = min(v1_elos)
         result["v1_opp_elo_max"] = max(v1_elos)
 
+    # Backfill per-bot ranked opponent Elo from older snapshots if a bot only had unranked matches in meta_dir
+    for b_need in ("Mothman-P2", "Mothman-T2", "Mothman-Z2", "Mothman-X2", "Mothman-P", "Mothman-T", "Mothman-Z", "Mothman-X"):
+        if by_bot_nm.get(b_need, {}).get("elos"):
+            continue
+        for cand_d in sorted(
+            cand_dirs,
+            key=lambda d: (d / "all_bots_summary.json").stat().st_mtime,
+            reverse=True,
+        ):
+            if cand_d == meta_dir:
+                continue
+            found_elos: List[int] = []
+            for mf in sorted(cand_d.glob("*_meta.json")):
+                try:
+                    m = json.loads(mf.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if m.get("both_ours") or str(m.get("our_bot_name") or "") != b_need:
+                    continue
+                oelo = m.get("opp_elo_before")
+                if isinstance(oelo, (int, float)) and oelo > 0:
+                    found_elos.append(int(oelo))
+            if found_elos:
+                by_bot_nm.setdefault(b_need, {"w": 0, "l": 0, "t": 0, "elos": []})["elos"] = found_elos
+                break
+
     # Pull recent SQLite trade ratios for v1 bots so v1 rows include trade efficiency
     v1_trade_by_bot: Dict[str, Tuple[int, int, float]] = {}
     if sqlite_path.is_file():
@@ -1703,6 +1746,7 @@ def load_aiarena_live_summary(brain_dir: Path, sqlite_path: Path) -> Dict[str, A
     for cohort_key, names in (
         ("v2_bots", ("Mothman-P2", "Mothman-T2", "Mothman-Z2", "Mothman-X2")),
         ("v1_bots", ("Mothman-P", "Mothman-T", "Mothman-Z", "Mothman-X")),
+        ("vc_bots", ("Mothman-PC", "Mothman-TC", "Mothman-ZC", "Mothman-XC")),
     ):
         rows = []
         for bname in names:
@@ -1717,11 +1761,16 @@ def load_aiarena_live_summary(brain_dir: Path, sqlite_path: Path) -> Dict[str, A
             nm = by_bot_nm.get(bname, {"w": 0, "l": 0, "t": 0, "elos": []})
             opp_avg = round(sum(nm["elos"]) / len(nm["elos"])) if nm["elos"] else 0
             rec_w, rec_l, rec_tr = v1_trade_by_bot.get(bname, (0, 0, 0.0))
+            rps = b.get("recent_participations") or []
+            rp_w = sum(1 for r in rps if str(r.get("result") or "").lower() == "win")
+            rp_l = sum(1 for r in rps if str(r.get("result") or "").lower() == "loss")
+            rp_t = sum(1 for r in rps if str(r.get("result") or "").lower() == "tie")
             rows.append(
                 {
                     "bot": bname,
                     "race": race,
                     "division": int(cp.get("division_num") or 0),
+                    "in_placements": bool(cp.get("in_placements")),
                     "elo": int(cp.get("elo") or 1600),
                     "w": int(cp.get("win_count") or 0),
                     "l": int(cp.get("loss_count") or 0),
@@ -1731,6 +1780,9 @@ def load_aiarena_live_summary(brain_dir: Path, sqlite_path: Path) -> Dict[str, A
                     "nm_w": nm["w"],
                     "nm_l": nm["l"],
                     "nm_t": nm["t"],
+                    "rp_w": rp_w,
+                    "rp_l": rp_l,
+                    "rp_t": rp_t,
                     "opp_elo_avg": opp_avg,
                     "recent_w": rec_w,
                     "recent_l": rec_l,
@@ -1740,7 +1792,7 @@ def load_aiarena_live_summary(brain_dir: Path, sqlite_path: Path) -> Dict[str, A
             )
         result[cohort_key] = rows
 
-    result["available"] = bool(result["v2_bots"] or result["v1_bots"])
+    result["available"] = bool(result["v2_bots"] or result["v1_bots"] or result["vc_bots"])
     return result
 
 
@@ -2366,7 +2418,7 @@ def _clean_drill_caption(desc: str) -> str:
 def _format_ledger_record(rec_raw: str) -> str:
     """Extract concise W-L-T (WR% win, NL% win+tie) from raw loop_ledger record strings."""
     s = str(rec_raw or "").strip()
-    m = re.search(r"(\d+)\s*W\s*[-–]\s*(\d+)\s*L(?:\s*[-–]\s*(\d+)\s*T)?", s, flags=re.I)
+    m = re.search(r"(\d+)\s*W\s*[-–]\s*(\d+)\s*L(?:\s*[-–]\s*(\d+)\s*[TD])?", s, flags=re.I)
     if not m:
         return s if len(s) <= 44 else s[:41].rsplit(" ", 1)[0] + "…"
     w = int(m.group(1))
@@ -4262,26 +4314,110 @@ def _render_standings_tables(
   </div>
 """)
 
+        # 3. Version C Early-Pressure Cohort (Placements / Division)
+        vc_bots = ai_live.get("vc_bots") or []
+        if vc_bots:
+            vc_rows = []
+            vc_mob = []
+            vc_tot_w = 0
+            vc_tot_l = 0
+            vc_tot_t = 0
+            vc_tot_cr = 0
+            for b in vc_bots:
+                dw = int(b.get("w") or 0) or int(b.get("rp_w") or 0)
+                dl = int(b.get("l") or 0) or int(b.get("rp_l") or 0)
+                dt = int(b.get("t") or 0) or int(b.get("rp_t") or 0)
+                vc_tot_w += dw
+                vc_tot_l += dl
+                vc_tot_t += dt
+                vc_tot_cr += int(b.get("crashes") or 0)
+                rec = f"{dw}–{dl}" + (f"–{dt}" if dt else "") if (dw + dl + dt) else "—"
+                stage_s = "Placements" if (b.get("in_placements") or not b.get("division")) else f"Div {b['division']}"
+                vc_rows.append(
+                    f"<tr>"
+                    f'<td class="nw"><strong>{html.escape(b["bot"])}</strong></td>'
+                    f'<td class="nw">{html.escape(b["race"])}</td>'
+                    f'<td class="nw" style="text-align:right">{stage_s}</td>'
+                    f'<td class="nw" style="text-align:right"><strong>{b["elo"]}</strong></td>'
+                    f'<td class="nw" style="text-align:right">{rec}</td>'
+                    f'<td class="nw" style="text-align:right">{b["crashes"]}</td>'
+                    f"<td>{html.escape(b['highlight'])}</td>"
+                    f"</tr>"
+                )
+                vc_mob.append(
+                    f'<div class="standing-row">'
+                    f'<div class="standing-top">'
+                    f'<span class="standing-bot">{html.escape(b["bot"])} '
+                    f'<span class="standing-race">· {html.escape(b["race"])} · {stage_s}</span></span>'
+                    f'<span class="standing-elo">{b["elo"]}</span>'
+                    f"</div>"
+                    f'<div class="standing-stats">Debut {rec} · {b["crashes"]} crashes</div>'
+                    f'<p class="standing-note">{html.escape(b["highlight"])}</p>'
+                    f"</div>"
+                )
+            vc_all_pl = all(b.get("in_placements") or not b.get("division") for b in vc_bots)
+            vc_stage_hdr = "Placements" if vc_all_pl else "Active"
+            vc_tot_n = vc_tot_w + vc_tot_l + vc_tot_t
+            vc_wr_pct = round(100.0 * vc_tot_w / vc_tot_n) if vc_tot_n else 0
+            vc_tag = (
+                f"Version C accounts · 18 pre-6:00 playbooks · {vc_tot_w}–{vc_tot_l}"
+                + (f"–{vc_tot_t}" if vc_tot_t else "")
+                + f" ({vc_wr_pct}%) opening debut"
+                if vc_tot_n
+                else "Version C accounts · 18 pre-6:00 playbooks"
+            )
+            blocks.append(f"""
+  <div class="cohort-heading">
+    <h3>Early-Pressure Bots ({html.escape(vc_stage_hdr)})</h3>
+    <span class="cohort-tag">{html.escape(vc_tag)}</span>
+  </div>
+  <div class="table-wrap standings-desktop">
+    <table>
+      <thead>
+        <tr>
+          <th>Bot</th>
+          <th>Race</th>
+          <th style="text-align:right">Stage</th>
+          <th style="text-align:right">Rating</th>
+          <th style="text-align:right">Debut</th>
+          <th style="text-align:right">Crashes</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>{"".join(vc_rows)}</tbody>
+    </table>
+  </div>
+  <div class="standings-mobile" aria-label="Live AI Arena Version C early-pressure standings">
+    {"".join(vc_mob)}
+  </div>
+""")
+
         v2_tot_games = sum(int(b.get("w", 0)) + int(b.get("l", 0)) + int(b.get("t", 0)) for b in v2_bots)
         v2_tot_crashes = sum(int(b.get("crashes", 0)) for b in v2_bots)
         v2_divs_note = sorted({int(b["division"]) for b in v2_bots if b.get("division")})
         v2_div_note_lbl = (
             f"Division {v2_divs_note[0]}–{v2_divs_note[-1]}"
             if len(v2_divs_note) > 1
-            else (f"Division {v2_divs_note[0]}" if v2_divs_note else "Division 8")
+            else (f"Division {v2_divs_note[0]}" if v2_divs_note else "Division 9")
         )
         crash_phrase = (
-            f"zero career crashes across {v2_tot_games} current-season {v2_div_note_lbl} games"
+            f"zero career crashes across {v2_tot_games} {v2_div_note_lbl} games"
             if v2_tot_crashes == 0
-            else f"{v2_tot_crashes} crashes across {v2_tot_games} current-season {v2_div_note_lbl} games"
+            else f"{v2_tot_crashes} crashes across {v2_tot_games} {v2_div_note_lbl} games"
         )
-        n_div8_all = sum(1 for b in (v2_bots + v1_bots) if int(b.get("division") or 0) <= 8)
+        n_active_all = len(v2_bots) + len(v1_bots) + len(vc_bots)
+        acct_word = "twelve" if n_active_all == 12 else ("eight" if n_active_all == 8 else str(n_active_all))
+        vc_note_tail = (
+            f", and the four new early-pressure accounts (Mothman-PC, Mothman-TC, Mothman-ZC, Mothman-XC) opened {vc_tot_w}–{vc_tot_l} ({vc_wr_pct}%) with zero crashes"
+            if vc_bots and vc_tot_cr == 0 and vc_tot_n > 0
+            else ""
+        )
         note_html = (
             '<p class="table-note">'
-            "AI Arena ratings start at 1600. All eight ladder accounts run "
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45762014159" target="_blank" rel="noopener noreferrer"><strong>Release #24 (Build 82B)</strong></a>, '
-            "which ships 100% Terran main-ramp walling at 3:00, a 16× jump in Protoss live walling, emergency doorway cancels, upgraded Adept Shade micro, and scout-triggered open-wall punishes. "
-            f"Both Mothman-P and Mothman-T promoted into Division 8 ({n_div8_all} of 8 accounts now compete in Division 8, with {html.escape(crash_phrase)}). "
+            f"AI Arena ratings start at 1600. All {acct_word} active ladder accounts run "
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45889518683" target="_blank" rel="noopener noreferrer"><strong>Release #25 (Build 85C)</strong></a>, '
+            "which ships 82.8% Protoss and 100.0% Terran live walling, zero-false-positive proxy and one-base rush detection, Protoss mid-game recovery, and four early-pressure cheese accounts. "
+            f"Current-season accounts hold {html.escape(crash_phrase)}{html.escape(vc_note_tail)}. "
             "Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
         )
@@ -4574,13 +4710,20 @@ def build_index_page(
         if len(v1_lead_divs) > 1
         else (f"Division {v1_lead_divs[0]}" if v1_lead_divs else "Division 9")
     )
+    has_vc_lead = bool(ai_live.get("vc_bots"))
+    bot_count_lead = "Twelve" if has_vc_lead else "Eight"
+    ladder_span_lead = (
+        f"{html.escape(v2_div_lead)} (current season), {html.escape(v1_div_lead)} (long-running), and placement (early-pressure)"
+        if has_vc_lead
+        else f"{html.escape(v2_div_lead)} (current season) and {html.escape(v1_div_lead)} (long-running)"
+    )
     body = f"""
 <header class="masthead wide-col">
   <p class="eyebrow">{html.escape(eyebrow_txt)}</p>
   <h1>Mothman StarCraft II Bots</h1>
   <p class="lead" style="max-width:740px;">
-    Eight StarCraft II bots written in Racket play Protoss, Terran, Zerg, and Random across AI Arena's
-    {html.escape(v2_div_lead)} (current season) and {html.escape(v1_div_lead)} (long-running) ladders. This page covers where the live build stands right now;
+    {bot_count_lead} StarCraft II bots written in Racket play Protoss, Terran, Zerg, and Random across AI Arena's
+    {ladder_span_lead} ladders. This page covers where the live build stands right now;
     past releases, bug write-ups, and iteration history live on <a href="./history.html">History &amp; Fixes</a>.
   </p>
   <nav class="jump-bar" aria-label="Current state sections">
@@ -4711,9 +4854,9 @@ def build_history_page(
         f"The first deployed build went 0–10 on AI Arena. Recent v1 builds win roughly 55–61% of their games: "
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
         f"and Release #9 (Build 51) climbed to 19–9–3 (61.3% wins). Release #21 (Build 73) went 40–19–1 (66.7%, 31–7–1 in Division 9) "
-        f"and promoted both Mothman-P and Mothman-T into Division 8, followed by Releases #22, #23, and "
-        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45762014159" target="_blank" rel="noopener noreferrer">Release #24 (Build 82B)</a> '
-        f"across all 8 ladder bots."
+        f"and promoted both Mothman-P and Mothman-T, followed by Releases #22 through #24 and "
+        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45889518683" target="_blank" rel="noopener noreferrer">Release #25 (Build 85C)</a> '
+        f"across all 12 active ladder bots (8 macro accounts plus 4 early-pressure Version C accounts)."
     )
 
     sec_loop = render_loop_diagram_section(rich, section_num="Section 2")
@@ -4787,6 +4930,7 @@ def build_history_page(
         "iter79b_ship22_full": 22,
         "iter81c_ship23_full": 23,
         "iter82b_ship24_full": 24,
+        "iter85c_ship25_full": 25,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:
@@ -4803,8 +4947,15 @@ def build_history_page(
             if m_sh and btag:
                 return f"Release #{int(m_sh.group(1))} (Build {btag})"
         if btag:
-            if "canary" in rid.lower():
+            rid_l = rid.lower()
+            if "canary" in rid_l:
                 return f"Build {btag} (Canary)"
+            if "tactics_arena" in rid_l:
+                return f"Build {btag} (Micro Drills)"
+            if "version_c" in rid_l or "cheese" in rid_l:
+                return f"Build {btag} (Version C)"
+            if "precheck" in rid_l:
+                return f"Build {btag} (Pre-Check)"
             return f"Build {btag}"
         return rid
 
@@ -4860,7 +5011,7 @@ def build_history_page(
                     f'<td style="text-align:right">{sb_s}</td>'
                     f"</tr>"
                 )
-            recent = list(reversed(iters[-33:]))
+            recent = list(reversed(iters[-38:]))
             already_has_cur = bool(
                 cur_tag
                 and any(
@@ -4940,6 +5091,8 @@ def build_history_page(
                     st_lbl = "Canary pass"
                 elif "CANARY_OVERRIDE" in st_u:
                     st_lbl = "Canary → Full"
+                elif "CHECKPOINT" in st_u:
+                    st_lbl = "Deployed" if "DEPLOYED" in st_u else "Milestone"
                 elif "HOLD" in st_u:
                     st_lbl = "Held"
                 else:
@@ -5021,12 +5174,13 @@ def build_history_page(
   <div class="section-head">
     <h2 class="section-kicker">Shipped Releases &amp; Practice Runs</h2>
     <p class="section-intro">
-      Every shipped release cleared our standalone 4-race package smoke check, crash-free local verification, and either a full local benchmark gain or targeted live drill validation on top of an unchanged macro baseline.
+      Every shipped release cleared our standalone package smoke check, crash-free local verification, and either a full local benchmark gain or targeted live drill validation on top of an unchanged macro baseline.
     </p>
   </div>
   <div class="release-highlights" style="margin-bottom:1.15rem;">
-    <div class="rh-kicker">Recent Campaign &amp; Release Arc (Loops 69–82)</div>
+    <div class="rh-kicker">Recent Campaign &amp; Release Arc (Loops 69–85)</div>
     <ul class="rh-list">
+      <li><strong>Loops 83–85C (Shipped as Release #25):</strong> Upgraded the combat drill harness to real Fog-of-War with macro actions disabled (zero macro leaks across 133 checks, 55–54–6 core pass at 1.11× trade, 9–0 creep Transfusion checks, 12–2–1 self-play at 1.76× and 97.0% active firing share); built and deployed four Version C early-pressure bots (Mothman-PC, Mothman-TC, Mothman-ZC, Mothman-XC) with 18 pre-6:00 playbooks across all 9 matchups (Mothman-TC went 12–11–3 locally, combined coverage reached 19 of 26 opponents, and the four accounts opened 6–2 on AI Arena); and overhauled main macro walling and rush defense so Protoss reached 82.8% live walls (PvZ 77.8%, PvT 90.0%, zero self-traps), Terran sealed 100.0% at 4:30 with zero Barracks lifts, rush detection hit 100% true-positive precision (13 of 13), and Terran plus Zerg went 8–0–4 unbeaten against all 12 pro cheeses. Lifted overall trade to 0.78× (30–45–9, 2.4% supply-blocked), held-out trade from 0.37× to 0.55×, beat Release #24 4–2 (1.20×) head-to-head, and swept 5–0 in standalone smoke (9.77× trade).</li>
       <li><strong>Loops 82–82B (Shipped as Release #24):</strong> Shipped live binary-grid walling upgrades (Terran 100.0% walled at 3:00 across all 28 games with Barracks lifts down from 29.0% to 3.6%; Protoss up 16× from 3.4% to 55.2% with zero self-traps), emergency doorway cancels, expansion-block recovery (-71.5 s blocked Terran natural), upgraded Adept Shade micro, and scout-verified open-wall punishes (35 Drones killed in PvZ, zero fogged Terran false-fires). Improved overall local play to 32–49–3 (0.73× trade), lifted 14 Core Bots to 22–19–1 (52.4% wins, 1.12× trade), split 3–3 (1.19× trade) head-to-head against Release #23, and swept 4–0 in standalone smoke (6.59× trade, 10.08 ms step time).</li>
       <li><strong>Loops 80–81C (Shipped as Release #23):</strong> Merged late-game +2/+3 upgrade chaining, Protoss Phoenix caps, Terran MULE and Scan policy, Viper Consume, Hydralisk Transfuse, and Stalker forward-blink arcs while dropping mid-fight attack-position scatter, then shipped Division 8 replay-audit fixes across all three races plus a deterministic map-and-seed local harness. Beat the Release #22 package 4–1–1 head-to-head (1.38× trade, Protoss 3–0, Terran 1–0–1), went 9–6–3 on the 18-match canary, pulled Terran's 3rd Command Center 54 s earlier (+0.27× same-race trade), and swept 4–0 in standalone package smoke (4.56× trade, 11.68 ms step time).</li>
       <li><strong>Loop 79 (Shipped as Release #22):</strong> Added three pro-validated tactical micro systems (224 LotV human replays studied) on top of Release #21's unchanged macro base: Swarm Host Locust splash-or-retreat, Terran behind-mineral multi-prong Liberators with all-race worker evacuation and minimal anti-air peel, and squad-wide Anti-Carrier snipe-or-burn commitment. Cleared 12–1 across 13 live drills (6–0 on the new pro scenarios), 186 crash-free local games with zero wire rejects, and a 4–0 standalone package smoke (13.86× trade, 10.65 ms step time).</li>
@@ -5038,7 +5192,7 @@ def build_history_page(
   </div>
   {shipped_table_html}
   <p class="table-note" style="margin:-0.65rem 0 1.05rem;">
-    Release #24 (Build 82B) cleared 32–49–3 across all 84 deterministic local matches (29–46–3 external, 22–19–1 or 52.4% at 1.12× trade against the 14 Core bots, 3–3 at 1.19× trade head-to-head vs. Release #23, zero crashes or wire rejects) alongside a 4–0 standalone smoke (6.59× trade). Release #22 (Build 79B) kept Release #21's macro code untouched and cleared deployment via 12–1 live drill verification against Carriers, Swarm Hosts, and Liberators rarely fielded by the local bot pool.
+    Release #25 (Build 85C) cleared 30–45–9 across all 84 deterministic local matches (0.78× overall trade, 2.4% supply-blocked, 26–43–9 external at 0.74× trade, 20–20–2 at 0.99× against the 14 Core bots, 0.55× trade against the 12 held-out bots, 4–2 at 1.20× head-to-head vs. Release #24, zero crashes or wire rejects) alongside a 5–0 standalone smoke (9.77× trade) across all macro and Version C builds. Release #22 (Build 79B) kept Release #21's macro code untouched and cleared deployment via 12–1 live drill verification against Carriers, Swarm Hosts, and Liberators rarely fielded by the local bot pool.
   </p>
   {ledger_section}
   {hist_faults}
@@ -5242,6 +5396,8 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
                 "L80B": ("3–3", "no", "Held for ladder fixes", "Reverted scatter (31–44–3 external, Protoss 12–14); held to bundle Division 8 replay-audit fixes before shipping"),
                 "L81B": ("2–4", "YES", "Timing & hold guards", "Passive 4:00–6:30 PvP hold, 5:30 Robotics Bay rush, and unguarded 5:18 Terran 3rd Command Center hurt mirror defense (fixed in L81C)"),
                 "L82": ("1–5", "YES", "Wall wire & fog guards", "Doorway wire check rejected Protoss walls and fogged Terran ramps triggered false open-wall punishes (fixed in L82B)"),
+                "L85": ("Canary-18", "YES", "Pre-check cheese gate", "Stopped at the 18-match cheese-defense pre-check (3–7–8) before full-roster testing (tightened in L85B)"),
+                "L85B": ("3–3", "YES", "Rush false alarms & PvT", "Loose proxy and early-pool thresholds inflated rush alerts 9.7× and starved Protoss Stargate and 3rd Nexus (fixed in L85C)"),
             }
 
             def _disambig_3a_row(m: re.Match[str]) -> str:

@@ -403,6 +403,7 @@ def load_rich_report_telemetry(
             or (it_n == 79 and suf.lower() == "b" and sh_n == 22)
             or (it_n == 81 and suf.lower() == "c" and sh_n == 23)
             or (it_n == 82 and suf.lower() == "b" and sh_n == 24)
+            or (it_n == 85 and suf.lower() == "c" and sh_n == 25)
         )
 
     # A2. Load Combat Positioning (Section 5) & Army-Group Positioning (Section 6) vs. Pro
@@ -1341,7 +1342,7 @@ def load_rich_report_telemetry(
                  OR m.run_id LIKE '%iter65h_ship17_full%' OR m.run_id LIKE '%iter66_ship18_full%'
                  OR m.run_id LIKE '%iter67b_ship19_full%' OR m.run_id LIKE '%iter68c_ship20_full%'
                  OR m.run_id LIKE '%iter73_ship21_full%' OR m.run_id LIKE '%iter81c_ship23_full%'
-                 OR m.run_id LIKE '%iter82b_ship24_full%')
+                 OR m.run_id LIKE '%iter82b_ship24_full%' OR m.run_id LIKE '%iter85c_ship25_full%')
         """
 
         # Per-matchup Local stats (All 26 external opponents)
@@ -1988,7 +1989,7 @@ def render_loop_diagram_section(rich: Dict[str, Any], section_num: str = "Sectio
             "title": "1. Live & Practice Games",
             "badge": "Step 1 · Replays",
             "what": (
-                "Eight Mothman bots play continuously on AI Arena and across local practice batches. "
+                "Twelve Mothman bots play continuously on AI Arena and across local practice batches. "
                 "Every replay is parsed into minute-by-minute worker counts, army values, expansion timings, and fault flags."
             ),
             "why": (
@@ -2717,11 +2718,10 @@ def render_tactics_explorer_section(
   <div class="section-head">
     <h2 class="section-kicker">Isolated Micro &amp; Spell Drills</h2>
     <p class="section-intro">
-      Short combat, harassment, and spell-casting drills run inside StarCraft II to verify unit control directly.
-      Release #22 went <strong>12–1 (92.3%)</strong> across 13 targeted pro-micro drills, with a <strong>6–0</strong> sweep
-      across the six new Swarm Host, multi-prong Liberator, and Anti-Carrier scenarios
-      (latest full core drill pass: <strong>{html.escape(a3['dummy_rec'])}</strong> at <strong>{a3['dummy_trade']:.2f}×</strong>
-      trade vs. scripted AI, <strong>{html.escape(a3['sp_rec'])}</strong> at <strong>{a3['sp_trade']:.2f}×</strong> vs. self).
+      Short combat, harassment, and spell-casting drills run inside StarCraft II under real Fog-of-War with macro actions disabled
+      so unit control is verified in isolation (zero macro leaks across 133 checks: <strong>55–54–6</strong> at <strong>1.11×</strong>
+      trade on the core pass, <strong>9–0</strong> on creep Transfusion checks, and <strong>12–2–1</strong> at <strong>1.76×</strong>
+      trade with <strong>97.0%</strong> active firing share across 15 full-bot self-play matchups).
       The drill harness also logs live battle-geometry telemetry per clip: concave arc width, melee-ranged role inversion,
       anti-splash spacing, and active firing share. Videos stay unloaded until you press play.
     </p>
@@ -3049,7 +3049,7 @@ def render_matchup_evaluation_section(
         elif (co.get("selfplay") or {}).get("n"):
             sp = co["selfplay"]
             rid_low = str(cb.get("run_id") or "").lower()
-            if "iter81c_" in rid_low or "iter82b_" in rid_low:
+            if "iter81c_" in rid_low or "iter82b_" in rid_low or "iter85c_" in rid_low:
                 chips.append(
                     (f"Head-to-Head ({sp['n']}g)", f"{_fmt_wlt(sp)}", f"{sp['wr']:.1f}% vs. prev live · {sp['tr']:.2f}×")
                 )
@@ -3255,12 +3255,12 @@ def render_matchup_evaluation_section(
     <div class="base-control-grid">
       <div class="base-control-stack">
         <div class="base-control-card">
-          <div class="bc-kicker">Protoss · 55.2% Live Ramp &amp; Choke Walls (0 Self-Traps)</div>
-          <p>16× jump from 3.4% with zero self-traps (PvP 77.8%, PvT 60.0%, PvZ 30.0%), 0.0% Pylon clumping, and emergency doorway Battery or Pylon cancels.</p>
+          <div class="bc-kicker">Protoss · 82.8% Live Ramp &amp; Choke Walls (0 Self-Traps)</div>
+          <p>Up from 55.2% in Release #24 with zero self-traps across 29 live games (PvT 90.0%, PvP 80.0%, PvZ 77.8% up from 30.0%), 0.0% Pylon clumping, and emergency doorway cancels.</p>
         </div>
         <div class="base-control-card">
-          <div class="bc-kicker">Terran · 100.0% Main-Ramp Wall at 3:00</div>
-          <p>28 of 28 live games sealed at 3:00 across every spawn (including all 5 formerly broken spawns), and Barracks add-on auto-lifts fell from 29.0% to 3.6%.</p>
+          <div class="bc-kicker">Terran · 100.0% Live Wall at 4:30 (0% Barracks Lifts)</div>
+          <p>26 of 26 live games sealed at 4:30 (92.9% by 3:00 across every spawn), and Barracks add-on auto-lifts dropped to 0 of 28 (down from 29.0%).</p>
         </div>
       </div>
       <div class="base-control-card base-control-card-media">
@@ -3294,8 +3294,15 @@ def render_matchup_evaluation_section(
         def _fmt_pcp_tile(v: Any) -> str:
             return "—" if v is None else f"{float(v):.2f}t"
 
+        def _norm_wrap(v: Any) -> float:
+            fv = float(v)
+            return 0.0 if abs(fv) < 0.005 else fv
+
         def _fmt_pcp_signed(v: Any) -> str:
-            return "—" if v is None else f"{float(v):+.2f}"
+            if v is None:
+                return "—"
+            fv = _norm_wrap(v)
+            return "0.00" if fv == 0.0 else f"{fv:+.2f}"
 
         pcp_rows = []
         pro_large_vals: List[float] = []
@@ -3330,19 +3337,30 @@ def render_matchup_evaluation_section(
             )
         if pcp_rows:
             if our_wrap_pairs and pro_wrap_vals and our_large_vals and pro_large_vals:
-                pos_w = [f"{r} ({v:+.2f})" for r, v in our_wrap_pairs if v > 0.0]
-                neg_w = [f"{r} ({v:+.2f})" for r, v in our_wrap_pairs if v <= 0.0]
-                if len(pos_w) == len(our_wrap_pairs):
-                    wrap_clause = f"All three Mothman races form positive concave arcs ({', '.join(pos_w)} vs. Grandmaster {min(pro_wrap_vals):+.2f} to {max(pro_wrap_vals):+.2f})"
-                elif pos_w and neg_w:
+                norm_pairs = [(r, _norm_wrap(v)) for r, v in our_wrap_pairs]
+                pos_w = [f"{r} ({_fmt_pcp_signed(v)})" for r, v in norm_pairs if v > 0.0]
+                flat_w = [f"{r} (0.00)" for r, v in norm_pairs if v == 0.0]
+                neg_w = [f"{r} ({_fmt_pcp_signed(v)})" for r, v in norm_pairs if v < 0.0]
+                pro_min_s = _fmt_pcp_signed(min(pro_wrap_vals))
+                pro_max_s = _fmt_pcp_signed(max(pro_wrap_vals))
+                if len(pos_w) == len(norm_pairs):
+                    wrap_clause = f"All three Mothman races form positive concave arcs ({', '.join(pos_w)} vs. Grandmaster {pro_min_s} to {pro_max_s})"
+                elif pos_w and (flat_w or neg_w):
                     pos_join = " and ".join(pos_w) if len(pos_w) == 2 else ", ".join(pos_w)
-                    neg_join = " and ".join(neg_w) if len(neg_w) == 2 else ", ".join(neg_w)
                     pos_phrase = "form positive concave arcs" if len(pos_w) > 1 else "forms a positive concave arc"
-                    verb_neg = "sit" if len(neg_w) > 1 else "sits"
-                    wrap_clause = f"{pos_join} {pos_phrase} (vs. Grandmaster {min(pro_wrap_vals):+.2f} to {max(pro_wrap_vals):+.2f}) while {neg_join} {verb_neg} narrower"
+                    tail_parts: List[str] = []
+                    if flat_w:
+                        f_join = " and ".join(flat_w) if len(flat_w) == 2 else ", ".join(flat_w)
+                        f_verb = "stay" if len(flat_w) > 1 else "stays"
+                        tail_parts.append(f"{f_join} {f_verb} flat")
+                    if neg_w:
+                        n_join = " and ".join(neg_w) if len(neg_w) == 2 else ", ".join(neg_w)
+                        n_verb = "sit" if len(neg_w) > 1 else "sits"
+                        tail_parts.append(f"{n_join} {n_verb} narrower")
+                    wrap_clause = f"{pos_join} {pos_phrase} (vs. Grandmaster {pro_min_s} to {pro_max_s}) while {' and '.join(tail_parts)}"
                 else:
-                    all_join = ", ".join(f"{r} ({v:+.2f})" for r, v in our_wrap_pairs)
-                    wrap_clause = f"Measured concave wrap sits at {all_join} (vs. Grandmaster {min(pro_wrap_vals):+.2f} to {max(pro_wrap_vals):+.2f})"
+                    all_join = ", ".join(f"{r} ({_fmt_pcp_signed(v)})" for r, v in norm_pairs)
+                    wrap_clause = f"Measured concave wrap sits at {all_join} (vs. Grandmaster {pro_min_s} to {pro_max_s})"
                 concave_svg_cap = (
                     f"{wrap_clause}, and armies still engage in smaller packs "
                     f"({min(our_large_vals):.0f}% to {max(our_large_vals):.0f}% 10+ unit fights vs. Pro {min(pro_large_vals):.0f}% to {max(pro_large_vals):.0f}%)."
@@ -3739,7 +3757,26 @@ def render_matchup_evaluation_section(
         run_id_low = str(pro_curves.get("run_id") or "").lower()
         live_ship_n = int(cb.get("live_ship_num") or cb.get("ship_num") or 0)
         live_loop_n = int(cb.get("live_loop_num") or cb.get("loop_num") or 0)
-        if live_ship_n >= 24 or "iter82b_" in run_id_low:
+        if live_ship_n >= 25 or "iter85c_" in run_id_low:
+            r_mech_para = f"""
+    <div class="release-highlights">
+      <div class="rh-kicker">What Changed in Release #{live_ship_n} ({html.escape(build_lbl)})</div>
+      <ul class="rh-list">
+        <li><strong>Wide-choke walling &amp; zero Barracks lifts:</strong> Protoss live walling jumped from 55.2% to 82.8% (24 of 29 games, with PvZ up from 30.0% to 77.8% and zero self-traps), while Terran reached 100.0% sealed by 4:30 with zero Barracks add-on auto-lifts.</li>
+        <li><strong>Proxy detection, Protoss mid-game &amp; cheese defense:</strong> Tightened early-rush and proxy detection hit 100% true-positive precision across all 13 flagged games (zero macro false alarms), Protoss jumped to 0.87× external trade (up from 0.53×, led by 5–3–1 external PvT), and Terran plus Zerg went 8–0–4 unbeaten against all 12 pro cheeses.</li>
+        <li><strong>Early-pressure Version C accounts &amp; pro-realism drills:</strong> Launched four new early-pressure AI Arena bots (Mothman-PC, Mothman-TC, Mothman-ZC, Mothman-XC) with 18 pre-6:00 playbooks (6–2 opening debut), alongside real Fog-of-War micro drills with zero macro leaks across 133 checks.</li>
+      </ul>
+      <details style="margin-top:0.65rem;">
+        <summary>Release #{live_ship_n} benchmark, walling &amp; Version C audit</summary>
+        <ul class="compact-list" style="margin-top:0.5rem;">
+          <li><strong>Live binary-grid walling (84 replays):</strong> Protoss sealed 82.8% (24 of 29, zero self-traps: PvT 90.0%, PvP 80.0%, PvZ 77.8%); Terran sealed 92.9% at 3:00 and 100.0% at 4:30 (26 of 26) with zero Barracks lifts (0 of 28).</li>
+          <li><strong>Full 84-match benchmark &amp; head-to-head:</strong> Finished 30–45–9 overall (0.78× trade up from 0.73×, 2.4% supply-blocked down from 2.6%, 42 North / 42 South spawns, 17.01 ms average step time, zero crashes or wire rejects), 26–43–9 external (0.74× trade), 20–20–2 (0.99×) against the 14 Core bots, 0.55× trade (up from 0.37×) against the 12 held-out bots, and 4–2 (66.7% wins, 1.20× trade) head-to-head against Release #24. Across the 78 external games, Zerg cut third Hatchery timing to 4:50 (down from 5:00, with 100.0% Natural Hatchery at 0:53) and Protoss matched Grandmaster Warp Gate timing (4:03).</li>
+          <li><strong>Version C playbooks &amp; full-bot micro harness:</strong> All 18 pre-6:00 playbooks executed crash-free across 78 local games (Mothman-TC finished 12–11–3 at 46.2% wins) and expanded combined Main plus Version C coverage to 19 of 26 opponents; the upgraded Fog-of-War drill harness cleared 55–54–6 (1.11× trade) on the core pass, 9–0 on creep Transfusion checks, and 12–2–1 (1.76×, 97.0% active firing share) across 15 full-bot self-play matchups.</li>
+          <li><strong>Standalone 5-bot package smoke:</strong> Swept 5–0 across Mothman-P, Mothman-T, Mothman-Z, Mothman-X, and Mothman-XC at 9.77× average trade, 3.3% supply-blocked time, and 18.07 ms average step time.</li>
+        </ul>
+      </details>
+    </div>"""
+        elif live_ship_n >= 24 or "iter82b_" in run_id_low:
             r_mech_para = f"""
     <div class="release-highlights">
       <div class="rh-kicker">What Changed in Release #{live_ship_n} ({html.escape(build_lbl)})</div>
