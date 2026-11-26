@@ -8,6 +8,7 @@
          "sc2-common.rkt"
          "sc2-game-constants.rkt"
          "build-orders.rkt"
+         "build-orders/cheese.rkt"
          "econ-ledger.rkt"
          "stall-watchdog.rkt"
          "plan/situational-counter.rkt")
@@ -36,6 +37,7 @@
  make-macro-world-state
  obs-hash->macro-world-state
  step-priority-macro-brain
+ evaluate-cheese-bo-next-step
  macro-brain-can-spend?
  pro-min-workers-for-next-gas-bldg
  min-workers-for-next-gas-bldg
@@ -2143,19 +2145,174 @@
       (max 2 base-df)
       base-df))
 
+;; Loop 84 (Version C): Evaluate a `cheese-build-spec` directly into a `pro-bo-eval-result`
+;; with target-workers strictly capped by `(cheese-build-spec-worker-cap cspec)` and zero
+;; standard macro fallback drift.
+(define (normalize-cheese-bo-sym sym)
+  (case sym
+    [(barracks-tech-lab) 'barracks-techlab]
+    [(factory-tech-lab) 'factory-techlab]
+    [(starport-tech-lab) 'starport-techlab]
+    [else sym]))
+
+(define (cheese-spec-allowed-sym-hash cspec)
+  (define ht (make-hasheq))
+  (define (add-sym! s)
+    (when (symbol? s)
+      (define ns (normalize-brain-sym (normalize-cheese-bo-sym s)))
+      (hash-set! ht ns #t)
+      (hash-set! ht s #t)))
+  (for ([s (in-list '(overlord pylon supply-depot drone probe scv))])
+    (add-sym! s))
+  (define bo-spec (cheese-build-spec-bo-spec cspec))
+  (for ([g (in-list (build-order-spec-steps bo-spec))])
+    (add-sym! (pro-bo-goal-target-sym g))
+    (when (pro-bo-goal-prereq-ready-sym g)
+      (add-sym! (pro-bo-goal-prereq-ready-sym g))))
+  (for ([s (in-list (cheese-build-spec-proxy-buildings cspec))])
+    (add-sym! s))
+  (for ([s (in-list (cheese-build-spec-army-comp cspec))])
+    (add-sym! s))
+  (for ([s (in-list (cheese-build-spec-key-upgrades cspec))])
+    (add-sym! s))
+  ht)
+
+(define (evaluate-cheese-bo-next-step cspec
+                                      #:frame [raw-frame 0]
+                                      #:minerals [raw-minerals 200]
+                                      #:gas [raw-gas 0]
+                                      #:supply-used [raw-supply-used 12]
+                                      #:supply-left [raw-supply-left 4]
+                                      #:active-bases [raw-active-bases 1]
+                                      #:ready-building-counts [ready-bldg-counts (hash)]
+                                      #:total-building-counts [total-bldg-counts (hash)]
+                                      #:unit-counts [unit-counts (hash)]
+                                      #:researched-upgrades [researched-upgrades '()]
+                                      #:pending-upgrades [pending-upgrades '()]
+                                      #:base-x [raw-base-x 32.5]
+                                      #:base-y [raw-base-y 32.5]
+                                      #:nat-x [raw-nat-x 50.5]
+                                      #:nat-y [raw-nat-y 50.5]
+                                      #:third-x [raw-third-x 60.5]
+                                      #:third-y [raw-third-y 40.5])
+  (define bo-spec (cheese-build-spec-bo-spec cspec))
+  (define frame (max 0 (if (exact-integer? raw-frame) raw-frame 0)))
+  (define elapsed-sec (/ (exact->inexact frame) 22.4))
+  (define supply-used (max 0 (if (exact-integer? raw-supply-used) raw-supply-used 12)))
+  (define active-bases (max 1 (if (exact-integer? raw-active-bases) raw-active-bases 1)))
+  (define minerals (max 0 (if (real? raw-minerals) (inexact->exact (floor raw-minerals)) 0)))
+  (define gas (max 0 (if (real? raw-gas) (inexact->exact (floor raw-gas)) 0)))
+  (define supply-left (if (real? raw-supply-left) (inexact->exact (floor raw-supply-left)) 0))
+  (define base-x (if (real? raw-base-x) (exact->inexact raw-base-x) 32.5))
+  (define base-y (if (real? raw-base-y) (exact->inexact raw-base-y) 32.5))
+  (define nat-x (if (real? raw-nat-x) (exact->inexact raw-nat-x) 50.5))
+  (define nat-y (if (real? raw-nat-y) (exact->inexact raw-nat-y) 50.5))
+  (define third-x (if (real? raw-third-x) (exact->inexact raw-third-x) 60.5))
+  (define third-y (if (real? raw-third-y) (exact->inexact raw-third-y) 40.5))
+  (define-values (raw-tw target-army)
+    (pro-supply-curve-target-for-spec bo-spec frame active-bases))
+  (define wcap (max 12 (cheese-build-spec-worker-cap cspec)))
+  (define target-workers (min wcap raw-tw))
+  (define all-upgs
+    (append (if (list? researched-upgrades) researched-upgrades '())
+            (if (list? pending-upgrades) pending-upgrades '())))
+  (define (count-total-bldg sym)
+    (define nsym (normalize-cheese-bo-sym sym))
+    (max (bldg-count-equivalent total-bldg-counts nsym)
+         (bldg-count-equivalent total-bldg-counts sym)))
+  (define (prereq-ready? prereq-sym)
+    (or (not prereq-sym)
+        (let ([nsym (normalize-cheese-bo-sym prereq-sym)])
+          (or (> (bldg-count-equivalent ready-bldg-counts nsym) 0)
+              (> (bldg-count-equivalent ready-bldg-counts prereq-sym) 0)))))
+  (define (goal-satisfied? g)
+    (match-define (pro-bo-goal kind raw-sym tgt-cnt _ _ _) g)
+    (define sym (normalize-cheese-bo-sym raw-sym))
+    (case kind
+      [(build expand)
+       (>= (count-total-bldg sym) tgt-cnt)]
+      [(morph)
+       (if (memq sym '(baneling ravager lurker brood-lord overseer archon))
+           (>= (unit-count-equivalent unit-counts sym) tgt-cnt)
+           (>= (count-total-bldg sym) tgt-cnt))]
+      [(train)
+       (>= (unit-count-equivalent unit-counts sym) tgt-cnt)]
+      [(research)
+       (define upg-syms
+         (case sym
+           [(metabolic-boost zergling-movementspeed) '(metabolic-boost zergling-movementspeed)]
+           [(centrifical-hooks centrifugal-hooks) '(centrifical-hooks centrifugal-hooks)]
+           [(warp-gate-research warpgate) '(warp-gate-research warpgate)]
+           [(banshee-cloak cloaking-field) '(banshee-cloak cloaking-field)]
+           [(concussive-shells punisher-grenades) '(concussive-shells punisher-grenades)]
+           [else (list sym)]))
+       (ormap (lambda (u) (not (not (memq u all-upgs)))) upg-syms)]
+      [else #t]))
+  (define (goal-due? g)
+    (define min-sup (pro-bo-goal-min-supply g))
+    (define tgt-sec (exact->inexact (pro-bo-goal-target-sec g)))
+    (or (>= supply-used min-sup)
+        (and (> frame 0) (> tgt-sec 0.0) (>= elapsed-sec tgt-sec))))
+  (define (goal->action g)
+    (match-define (pro-bo-goal kind raw-sym tgt-cnt _ _ _) g)
+    (define sym (normalize-cheese-bo-sym raw-sym))
+    (case kind
+      [(expand)
+       (list 'expand (if (>= tgt-cnt 3) third-x nat-x) (if (>= tgt-cnt 3) third-y nat-y))]
+      [(morph) (list 'morph sym)]
+      [(research) (list 'research sym)]
+      [(train) (list 'train sym)]
+      [(build)
+       (if (memq sym '(extractor refinery assimilator
+                       barracks-techlab barracks-reactor
+                       factory-techlab factory-reactor
+                       starport-techlab starport-reactor))
+           (list 'build sym)
+           (list 'build sym (+ base-x 4.0) (+ base-y 4.0)))]
+      [else (list 'build sym)]))
+  (define active-goal
+    (for/first ([g (in-list (build-order-spec-steps bo-spec))]
+                #:when (and (not (goal-satisfied? g))
+                            (goal-due? g)
+                            (prereq-ready? (pro-bo-goal-prereq-ready-sym g))))
+      g))
+  (define-values (ready-acts res-min res-gas)
+    (if (not active-goal)
+        (values '() 0 0)
+        (let* ([nsym (normalize-cheese-bo-sym (pro-bo-goal-target-sym active-goal))]
+               [m-cost (sc2-min-cost nsym 0)]
+               [g-cost (sc2-gas-cost nsym 0)]
+               [s-cost (if (eq? (pro-bo-goal-kind active-goal) 'train) (sc2-supply-cost nsym 0) 0)])
+          (if (and (>= minerals m-cost)
+                   (>= gas g-cost)
+                   (or (<= s-cost 0) (>= supply-left s-cost)))
+              (values (list (goal->action active-goal)) 0 0)
+              (values '() m-cost g-cost)))))
+  (pro-bo-eval-result
+   (cheese-build-spec-matchup cspec)
+   active-goal
+   ready-acts
+   res-min
+   res-gas
+   target-workers
+   target-army))
+
 ;; Filters build-order steps by `effective-phase-supply` and, when `frame > 0`,
 ;; elapsed Faster clock time (`elapsed-sec >= target-sec`), plus due empirical
 ;; unit and upgrade timings (`frame > 0`). Automatically selects reactive
 ;; anti-early-pool / rush build-order specs when scouted.
 (define (collect-due-bo-context race enemy-race frame effective-phase-supply
                                 #:early-pool-or-rush? [early-pool-or-rush? #f]
-                                #:variant [variant #f])
+                                #:variant [variant #f]
+                                #:cheese-spec [cheese-spec #f])
   (define elapsed-sec (/ (exact->inexact frame) 22.4))
   (define active-spec
-    (select-reactive-build-order-spec
-     race enemy-race
-     #:early-pool-or-rush? (and early-pool-or-rush? #t)
-     #:variant variant))
+    (if (cheese-build-spec? cheese-spec)
+        (cheese-build-spec-bo-spec cheese-spec)
+        (select-reactive-build-order-spec
+         race enemy-race
+         #:early-pool-or-rush? (and early-pool-or-rush? #t)
+         #:variant variant)))
   (define steps-so-far
     (filter (lambda (g)
               (or (>= effective-phase-supply (pro-bo-goal-min-supply g))
@@ -2164,11 +2321,11 @@
                        (>= elapsed-sec (exact->inexact (pro-bo-goal-target-sec g))))))
             (build-order-spec-steps active-spec)))
   (define due-upgs
-    (if (> frame 0)
+    (if (and (> frame 0) (not (cheese-build-spec? cheese-spec)))
         (due-pro-upgrade-timings race enemy-race frame effective-phase-supply)
         '()))
   (define due-units
-    (if (> frame 0)
+    (if (and (> frame 0) (not (cheese-build-spec? cheese-spec)))
         (due-pro-unit-timings race enemy-race frame effective-phase-supply)
         '()))
   (define due-timing-goals
@@ -2325,7 +2482,8 @@
                                          #:enemy-wall-open? [override-enemy-wall-open? 'unset]
                                          #:enemy-wall-assessment [override-enemy-wall-assessment #f]
                                          #:total-adepts-produced [override-total-adepts-produced #f]
-                                         #:total-zerglings-produced [override-total-zerglings-produced #f])
+                                         #:total-zerglings-produced [override-total-zerglings-produced #f]
+                                         #:cheese-spec [cheese-spec #f])
   (define enemy-u-counts
     (or (and (hash? override-enemy-unit-counts) override-enemy-unit-counts)
         (macro-world-state-enemy-unit-counts state)))
@@ -2691,7 +2849,8 @@
                       (or (< frame 2688) (> enemy-threat-supply 0)))))))
   (define-values (elapsed-sec raw-steps-so-far due-upgs due-units due-timing-goals)
     (collect-due-bo-context race enemy-race frame effective-phase-supply
-                            #:early-pool-or-rush? scouted-early-pool-or-rush?))
+                            #:early-pool-or-rush? scouted-early-pool-or-rush?
+                            #:cheese-spec cheese-spec))
   (define custom-due-bo-steps
     (if (and (hash? raw-mirror-signals) (list? (hash-ref raw-mirror-signals 'bo-steps #f)))
         (filter (lambda (g)
@@ -5076,7 +5235,8 @@
 ;; Synthesizes the live 5-track `dynamic-macro-plan` from `macro-world-state` on every frame.
 (define (synthesize-dynamic-macro-plan state
                                      #:enemy-unit-counts [override-enemy-unit-counts #f]
-                                     #:enemy-building-counts [override-enemy-building-counts #f])
+                                     #:enemy-building-counts [override-enemy-building-counts #f]
+                                     #:cheese-spec [cheese-spec #f])
   (define rbc (macro-world-state-ready-building-counts state))
   (define tbc (macro-world-state-total-building-counts state))
   (define uc (macro-world-state-unit-counts state))
@@ -5084,13 +5244,15 @@
     (if (current-ready-bldg-cache)
         (synthesize-dynamic-macro-plan/ctx state
                                            #:enemy-unit-counts override-enemy-unit-counts
-                                           #:enemy-building-counts override-enemy-building-counts)
+                                           #:enemy-building-counts override-enemy-building-counts
+                                           #:cheese-spec cheese-spec)
         (parameterize ([current-ready-bldg-cache (cons rbc (make-hasheq))]
                        [current-total-bldg-cache (cons tbc (make-hasheq))]
                        [current-unit-count-cache (cons uc (make-hasheq))])
           (synthesize-dynamic-macro-plan/ctx state
                                              #:enemy-unit-counts override-enemy-unit-counts
-                                             #:enemy-building-counts override-enemy-building-counts))))
+                                             #:enemy-building-counts override-enemy-building-counts
+                                             #:cheese-spec cheese-spec))))
   dp)
 
 (define (macro-brain-decision-dynamic-plan decision)
@@ -5209,7 +5371,8 @@
                                    #:total-adepts-produced [override-total-adepts-produced #f]
                                    #:total-zerglings-produced [override-total-zerglings-produced #f]
                                    #:arbiter-gas-override-count [arbiter-gas-overrides 0]
-                                   #:arbiter-facility-override-count [arbiter-fac-overrides 0])
+                                   #:arbiter-facility-override-count [arbiter-fac-overrides 0]
+                                   #:cheese-spec [cheese-spec #f])
   (define enemy-u-counts
     (or (and (hash? override-enemy-unit-counts) override-enemy-unit-counts)
         (macro-world-state-enemy-unit-counts state)))
@@ -5252,27 +5415,51 @@
     (define effective-phase-supply (max supply-used peak-supply-reached))
 
     ;; 1. Evaluate pro supply curve targets & synthesize live Dynamic Macro Plan
+    (define cheese-active? (cheese-build-spec? cheese-spec))
+    (define cheese-worker-cap (and cheese-active? (cheese-build-spec-worker-cap cheese-spec)))
+    (define cheese-max-bases (and cheese-active? (cheese-build-spec-max-bases cheese-spec)))
+    (define cheese-allowed-syms (and cheese-active? (cheese-spec-allowed-sym-hash cheese-spec)))
     (define bo-eval
-      (evaluate-build-order-next-step
-       #:race race
-       #:enemy-race enemy-race
-       #:frame frame
-       #:minerals minerals
-       #:gas gas
-       #:supply-used effective-phase-supply
-       #:supply-left (max 0 supply-left)
-       #:active-bases active-bases
-       #:ready-building-counts ready-bldg-counts
-       #:total-building-counts total-bldg-counts
-       #:unit-counts unit-counts
-       #:researched-upgrades researched-upgrades
-       #:pending-upgrades pending-upgrades
-       #:base-x base-x #:base-y base-y
-       #:nat-x nat-x #:nat-y nat-y
-       #:third-x third-x #:third-y third-y))
+      (if cheese-active?
+          (evaluate-cheese-bo-next-step
+           cheese-spec
+           #:frame frame
+           #:minerals minerals
+           #:gas gas
+           #:supply-used effective-phase-supply
+           #:supply-left (max 0 supply-left)
+           #:active-bases active-bases
+           #:ready-building-counts ready-bldg-counts
+           #:total-building-counts total-bldg-counts
+           #:unit-counts unit-counts
+           #:researched-upgrades researched-upgrades
+           #:pending-upgrades pending-upgrades
+           #:base-x base-x #:base-y base-y
+           #:nat-x nat-x #:nat-y nat-y
+           #:third-x third-x #:third-y third-y)
+          (evaluate-build-order-next-step
+           #:race race
+           #:enemy-race enemy-race
+           #:frame frame
+           #:minerals minerals
+           #:gas gas
+           #:supply-used effective-phase-supply
+           #:supply-left (max 0 supply-left)
+           #:active-bases active-bases
+           #:ready-building-counts ready-bldg-counts
+           #:total-building-counts total-bldg-counts
+           #:unit-counts unit-counts
+           #:researched-upgrades researched-upgrades
+           #:pending-upgrades pending-upgrades
+           #:base-x base-x #:base-y base-y
+           #:nat-x nat-x #:nat-y nat-y
+           #:third-x third-x #:third-y third-y)))
 
     (define bo-raw-goal (pro-bo-eval-result-active-goal bo-eval))
-    (define target-workers (pro-bo-eval-result-target-workers bo-eval))
+    (define target-workers
+      (if cheese-active?
+          (min cheese-worker-cap (pro-bo-eval-result-target-workers bo-eval))
+          (pro-bo-eval-result-target-workers bo-eval)))
     (define-values (dyn-plan dp-ctx)
       (synthesize-dynamic-macro-plan/ctx state
                                          #:enemy-unit-counts enemy-u-counts
@@ -5280,7 +5467,8 @@
                                          #:enemy-wall-open? ws-enemy-wall-open?
                                          #:enemy-wall-assessment ws-enemy-wall-assessment
                                          #:total-adepts-produced ws-total-adepts-produced
-                                         #:total-zerglings-produced ws-total-zerglings-produced))
+                                         #:total-zerglings-produced ws-total-zerglings-produced
+                                         #:cheese-spec cheese-spec))
     (define plan-active-nodes (dynamic-macro-plan-active-goals dyn-plan))
     (define plan-actionable-nodes (dynamic-macro-plan-actionable-goals dyn-plan))
     (define plan-next-actions-ht (dynamic-macro-plan-translated-next-actions dyn-plan))
@@ -5769,11 +5957,13 @@
          #:max-buffer 6)))
 
   (define eff-desired-bases
-    (max sg-desired-bases
-         (cond [(>= effective-phase-supply 108) 5]
-               [(>= effective-phase-supply 64) 4]
-               [(>= effective-phase-supply 40) 3]
-               [else 2])))
+    (if cheese-active?
+        cheese-max-bases
+        (max sg-desired-bases
+             (cond [(>= effective-phase-supply 108) 5]
+                   [(>= effective-phase-supply 64) 4]
+                   [(>= effective-phase-supply 40) 3]
+                   [else 2]))))
 
   (define base-metrics
     (compute-state-pressure-metrics
@@ -6196,7 +6386,10 @@
 
   ;; 4. Generate base candidates from `econ-ledger` + inject all translated next-actions
   ;;    from `dyn-plan`, any missing repaired prerequisites, and emergency recovery candidates.
-  (define race-max-workers (race-macro-worker-cap race))
+  (define race-max-workers
+    (if cheese-active?
+        (min cheese-worker-cap (race-macro-worker-cap race))
+        (race-macro-worker-cap race)))
   (define raw-cands
     (map (lambda (c)
            (define a0 (priority-candidate-action c))
@@ -13454,12 +13647,14 @@
   (define zerg-midgame-drone-brake-cap
     (if zerg-midgame-enemy-army-drone-brake? (min 55 workers) 80))
   (define worker-cap-now
-    (min race-max-workers
-         zerg-2base-hard-drone-cap
-         zerg-live-low-army-drone-cap
-         zerg-midgame-drone-brake-cap
-         (max target-workers
-              (+ (* 22 active-bases) (* 10 pending-townhalls-cnt)))))
+    (if cheese-active?
+        cheese-worker-cap
+        (min race-max-workers
+             zerg-2base-hard-drone-cap
+             zerg-live-low-army-drone-cap
+             zerg-midgame-drone-brake-cap
+             (max target-workers
+                  (+ (* 22 active-bases) (* 10 pending-townhalls-cnt))))))
   (define macro-regime
     (cond
       [(or emergency-army-before-workers?
@@ -14738,7 +14933,8 @@
                               (>= workers (min 24 (* 11 active-bases)))))))
             #t]
            [(eq? cat 'worker)
-            (and (not protoss-12pool-pause-probe-for-zealot?)
+            (and (or (not cheese-active?) (< workers cheese-worker-cap))
+                 (not protoss-12pool-pause-probe-for-zealot?)
                  (not early-worker-rush-pause-workers?)
                  (not zerg-unwalled-speedling-pause-drones?)
                  (or (<= workers 0)
@@ -14749,22 +14945,23 @@
                          (< workers (min zerg-2base-hard-drone-cap
                                    (min 80 (max target-workers (* 20 active-bases))))))))]
            [(eq? cat 'expansion)
-            (or terran-contained-breakout-cc?
-                depletion-or-mirror-expand?
-                protoss-3rd-exp-due?
-                (and sg-high-bank-inject? (not under-attack?) (>= workers 20) (< total-townhalls-incl-pending 6))
-                (and (not under-attack?)
-                     (or overdue-1base-expand?
-                         protoss-4th-exp-due?
-                         (and (< active-bases
-                                 (max eff-desired-bases
-                                      (cond [(>= effective-phase-supply 108) 5]
-                                            [(>= effective-phase-supply 64) 4]
-                                            [(>= effective-phase-supply 30) 3]
-                                            [else 2])))
-                              (>= workers (if (= active-bases 1)
-                                              (if (eq? race 'Zerg) 15 18)
-                                              24))))))]
+            (and (or (not cheese-active?) (< total-townhalls-incl-pending cheese-max-bases))
+                 (or terran-contained-breakout-cc?
+                     depletion-or-mirror-expand?
+                     protoss-3rd-exp-due?
+                     (and sg-high-bank-inject? (not under-attack?) (>= workers 20) (< total-townhalls-incl-pending 6))
+                     (and (not under-attack?)
+                          (or overdue-1base-expand?
+                              protoss-4th-exp-due?
+                              (and (< active-bases
+                                      (max eff-desired-bases
+                                           (cond [(>= effective-phase-supply 108) 5]
+                                                 [(>= effective-phase-supply 64) 4]
+                                                 [(>= effective-phase-supply 30) 3]
+                                                 [else 2])))
+                                   (>= workers (if (= active-bases 1)
+                                                   (if (eq? race 'Zerg) 15 18)
+                                                   24)))))))]
            [(eq? cat 'counter-tech)
             (cond
               [(memq id '(queen observer))
@@ -19820,6 +20017,17 @@
     (define sched-tech-cnt (hash-ref seen-tech-counts csym 0))
     (define tech-cap-ok?
       (cond
+        [(and cheese-active?
+              (eq? cat 'expansion)
+              (>= (+ total-townhalls-incl-pending sched-tech-cnt) cheese-max-bases))
+         #f]
+        [(and cheese-active?
+              (not (eq? cat 'supply))
+              (not (eq? cat 'worker))
+              (not (and under-attack? (memq csym '(spine-crawler spore-crawler bunker missile-turret photon-cannon shield-battery))))
+              (not (hash-ref cheese-allowed-syms csym #f))
+              (not (hash-ref cheese-allowed-syms id #f)))
+         #f]
         [(wd-sym-on-cooldown? csym)
          #f]
         [(zerg-2base-3rd-hatch-deferred-sym? csym)
@@ -20311,7 +20519,10 @@
              [(not rem-slots) #t]
              [else (> (hash-ref rem-slots pslot 0) 0)])))
     (define worker-cap-ok?
-      (and (not (and late-1base-commit-pause-units?
+      (and (or (not cheese-active?)
+               (not (eq? cat 'worker))
+               (< workers cheese-worker-cap))
+           (not (and late-1base-commit-pause-units?
                      (memq csym '(scv probe))))
            (not (and early-worker-rush-pause-workers?
                      (eq? cat 'worker)))

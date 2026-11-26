@@ -3315,6 +3315,18 @@
                    [iy (in-range y0 (add1 y1))])
            (image-grid-pixel-set? creep-grid ix iy)))))
 
+;; L84B: O(1) check whether every tile covered by a Zerg building footprint centered at `(cx, cy)`
+;; with half-dims `(hw, hh)` sits on Creep (`creep-grid`).
+(define (zerg-footprint-on-creep? creep-grid cx cy hw hh)
+  (or (not (sc2-image-grid? creep-grid))
+      (let* ([x0 (inexact->exact (floor (- cx hw)))]
+             [x1 (inexact->exact (floor (+ cx (- hw 0.01))))]
+             [y0 (inexact->exact (floor (- cy hh)))]
+             [y1 (inexact->exact (floor (+ cy (- hh 0.01))))])
+        (for*/and ([ix (in-range x0 (add1 x1))]
+                   [iy (in-range y0 (add1 y1))])
+          (image-grid-pixel-set? creep-grid ix iy)))))
+
 (define (calibrate-image-grid-orientation! grid start-locs)
   (define (loc-xy sl)
     (cond
@@ -7696,7 +7708,8 @@
                                           #:prefer-3x3-fallback? [prefer-3x3-fallback? #f]
                                           #:creep-grid [creep-grid #f]
                                           #:wide-fallback? [wide-fallback? #f]
-                                          #:min-pylon-spacing [min-pylon-spacing 0.0])
+                                          #:min-pylon-spacing [min-pylon-spacing 0.0]
+                                          #:proxy-mode? [proxy-mode? #f])
   (define eff-creep-grid (or creep-grid (unbox SC2-ACTIVE-STEP-CREEP-GRID)))
   ;; For Terran production facilities (Barracks=321, Factory=328, Starport=329), also filter out
   ;; candidates whose East (+X) add-on footprint at (cx + 2.5, cy - 0.5) collides with structures or reserved AABBs,
@@ -7725,6 +7738,11 @@
   (define neg-cd-key
     (and ws-active? canon-bldg
          (cond
+           [proxy-mode?
+            (list canon-bldg
+                  (inexact->exact (round anchor-x))
+                  (inexact->exact (round anchor-y))
+                  'proxy)]
            [require-addon-clear?
             (list canon-bldg
                   (inexact->exact (round anchor-x))
@@ -7747,6 +7765,12 @@
   (define step-fail-key
     (and ws-active? canon-bldg
          (cond
+           [proxy-mode?
+            (list canon-bldg
+                  (inexact->exact (round anchor-x))
+                  (inexact->exact (round anchor-y))
+                  (inexact->exact (round max-radius))
+                  'proxy)]
            [require-addon-clear?
             (list canon-bldg
                   (inexact->exact (round anchor-x))
@@ -7900,7 +7924,9 @@
         (list (cons anchor-x anchor-y))))
   (define last-ap (last anchors0))
   (define safe-base-anchor
-    (friendly-safe-base-anchor existing-units (car last-ap) (cdr last-ap)))
+    (if proxy-mode?
+        (cons anchor-x anchor-y)
+        (friendly-safe-base-anchor existing-units (car last-ap) (cdr last-ap))))
 
   ;; Count existing or in-transit friendly Barracks so ONLY the 1st Barracks (`existing-rax == 0`)
   ;; may seal an East-facing ramp wall without East `(+2.5, -0.5)` add-on clearance.
@@ -8018,6 +8044,14 @@
                          (> (+ (* dx dx) (* dy dy)) (vector-ref ob 3))))))
             c-list))
 
+  (define eff-power-sources
+    (if (and proxy-mode? (list? power-sources))
+        (filter (lambda (ps)
+                  (and (sc2-power-source? ps)
+                       (let ([p (sc2-power-source-pos ps)])
+                         (<= (pt-dist anchor-x anchor-y (sc2-point3d-x p) (sc2-point3d-y p)) 20.0))))
+                power-sources)
+        power-sources))
   (define completed-power-pylons
     (if requires-pylon-power?
         (filter (lambda (u)
@@ -8025,36 +8059,59 @@
                        (not (= (sc2-unit-display-type u) 4))
                        (memq (sc2-id->unit-symbol (sc2-unit-unit-type u) 'unknown)
                              '(pylon pylon-overcharged warp-prism-phasing))
-                       (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+                       (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                       (or (not proxy-mode?)
+                           (let ([p (sc2-unit-pos u)])
+                             (<= (pt-dist anchor-x anchor-y (sc2-point3d-x p) (sc2-point3d-y p)) 20.0)))))
                 existing-units)
         '()))
   (define has-completed-pylon?
     (and requires-pylon-power?
-         (or (and (list? power-sources) (pair? power-sources))
+         (or (and (list? eff-power-sources) (pair? eff-power-sources))
              (pair? completed-power-pylons))))
   (define (pt-in-completed-pylon-power? px py)
-    (or (not requires-pylon-power?)
-        (not has-completed-pylon?)
-        (and (list? power-sources)
-             (ormap (lambda (ps)
-                      (and (sc2-power-source? ps)
-                           (let ([p (sc2-power-source-pos ps)])
-                             (<= (pt-dist px py (sc2-point3d-x p) (sc2-point3d-y p))
-                                 (sc2-power-source-radius ps)))))
-                    power-sources))
-        (ormap (lambda (u)
-                 (define p (sc2-unit-pos u))
-                 (define usym (sc2-id->unit-symbol (sc2-unit-unit-type u) 'unknown))
-                 (define prad (if (eq? usym 'warp-prism-phasing) 3.75 6.5))
-                 (<= (pt-dist px py (sc2-point3d-x p) (sc2-point3d-y p)) prad))
-               completed-power-pylons)))
+    (cond
+      [(not requires-pylon-power?) #t]
+      [(and proxy-mode? (not has-completed-pylon?)) #f]
+      [(not has-completed-pylon?) #t]
+      [else
+       (or (and (list? eff-power-sources)
+                (ormap (lambda (ps)
+                         (and (sc2-power-source? ps)
+                              (let ([p (sc2-power-source-pos ps)])
+                                (<= (pt-dist px py (sc2-point3d-x p) (sc2-point3d-y p))
+                                    (sc2-power-source-radius ps)))))
+                       eff-power-sources))
+           (ormap (lambda (u)
+                    (define p (sc2-unit-pos u))
+                    (define usym (sc2-id->unit-symbol (sc2-unit-unit-type u) 'unknown))
+                    (define prad (if (eq? usym 'warp-prism-phasing) 3.75 6.5))
+                    (<= (pt-dist px py (sc2-point3d-x p) (sc2-point3d-y p)) prad))
+                  completed-power-pylons))]))
   (define (filter-pylon-powered pts)
-    (if (and requires-pylon-power? has-completed-pylon?)
-        (let ([powered (filter (lambda (pt)
-                                 (pt-in-completed-pylon-power? (sc2-point2d-x pt)
-                                                               (sc2-point2d-y pt)))
-                               pts)])
-          (if (pair? powered) powered pts))
+    (cond
+      [(and proxy-mode? requires-pylon-power?)
+       (if has-completed-pylon?
+           (filter (lambda (pt)
+                     (pt-in-completed-pylon-power? (sc2-point2d-x pt)
+                                                   (sc2-point2d-y pt)))
+                   pts)
+           '())]
+      [(and requires-pylon-power? has-completed-pylon?)
+       (let ([powered (filter (lambda (pt)
+                                (pt-in-completed-pylon-power? (sc2-point2d-x pt)
+                                                              (sc2-point2d-y pt)))
+                              pts)])
+         (if (pair? powered) powered pts))]
+      [else pts]))
+  (define (filter-proxy-creep pts)
+    (if (and proxy-mode? is-zerg-creep-bldg? (sc2-image-grid? eff-creep-grid))
+        (filter (lambda (pt)
+                  (zerg-footprint-on-creep? eff-creep-grid
+                                            (sc2-point2d-x pt)
+                                            (sc2-point2d-y pt)
+                                            cand-hw cand-hh))
+                pts)
         pts))
 
   ;; Fast positive verified-placement cache lookup (0 RPCs, 0 BFS, 0 spiral search when still locally clear)
@@ -8220,7 +8277,7 @@
         '()))
 
   (define anchors-raw
-    (if (and requires-pylon-power? has-completed-pylon?)
+    (if (or proxy-mode? (and requires-pylon-power? has-completed-pylon?))
         anchors0
         (remove-duplicates (append anchors0 (list safe-base-anchor)))))
   ;; Cap priority-sorted anchors to top 8 normally (24 for tight-spacing Protoss across all bases,
@@ -8250,7 +8307,8 @@
              (ground-reachability-checker game-info existing-units
                                           (car shared-base-ref) (cdr shared-base-ref)))))
   (define shared-layout-safety-ok?
-    (and (not is-townhall-target?)
+    (and (not proxy-mode?)
+         (not is-townhall-target?)
          (not is-creep-tumor-target?)
          (make-base-layout-safety-checker game-info existing-units
                                           (car shared-base-ref) (cdr shared-base-ref)
@@ -8262,13 +8320,20 @@
   (define spiral-eval-budget (box (if ws-active? 160 600)))
   (define primary-cand-limit
     (if ws-active?
-        (min 20 (max (if tight-spacing? 4 8) (quotient 36 (max 1 (length anchors)))))
-        (if (or first-rax-allow-wall-3x3? needs-terran-addon-clearance?) 8 2)))
+        (if require-addon-clear?
+            32
+            (min 20 (max (if tight-spacing? 4 8) (quotient 36 (max 1 (length anchors))))))
+        (cond
+          [require-addon-clear? 48]
+          [(or first-rax-allow-wall-3x3? needs-terran-addon-clearance? proxy-mode?) 8]
+          [else 2])))
   (define primary-max-evals
     (if ws-active?
-        (if (and tight-spacing? (> (length anchors) 8))
-            (max 16 (quotient 160 (max 1 (length anchors))))
-            64)
+        (cond
+          [require-addon-clear? 120]
+          [(and tight-spacing? (> (length anchors) 8))
+           (max 16 (quotient 160 (max 1 (length anchors))))]
+          [else 64])
         450))
   (define spiral-cands
     (let ([all-pts
@@ -8353,6 +8418,7 @@
     (define rel-rad
       (cond
         [(and requires-pylon-power? has-completed-pylon?) 6.5]
+        [proxy-mode? max-radius]
         [wide-fallback? (max 30.0 max-radius)]
         [needs-terran-addon-clearance? (max 22.0 max-radius)]
         [else (max 18.0 max-radius)]))
@@ -8370,10 +8436,12 @@
     (define rel-budget (box (if wide-fallback? 420 260)))
     (define rel-limit
       (if ws-active?
-          (if (and tight-spacing? (> (length anchors) 8))
-              (max 8 (quotient 96 (max 1 (length anchors))))
-              16)
-          4))
+          (cond
+            [require-addon-clear? 32]
+            [(and tight-spacing? (> (length anchors) 8))
+             (max 8 (quotient 96 (max 1 (length anchors))))]
+            [else 16])
+          (if require-addon-clear? 48 4)))
     (define rel-max-evals
       (if (and tight-spacing? (> (length anchors) 8))
           (max 16 (quotient (if wide-fallback? 420 260) (max 1 (length anchors))))
@@ -8398,7 +8466,7 @@
                                     #:game-info game-info
                                     #:check-bfs #f
                                     #:layout-safety-ok? #f))))
-    (dedup-point2ds (take raw-rel (min (if (and tight-spacing? requires-pylon-power?) 48 36)
+    (dedup-point2ds (take raw-rel (min (if (or require-addon-clear? (and tight-spacing? requires-pylon-power?)) 48 36)
                                        (length raw-rel)))))
 
   (define (compute-inmain-safe-anchors base-pt)
@@ -8443,6 +8511,9 @@
     (append safe-pts cont-pts))
 
   (define (near-base-emergency-cands)
+    (if proxy-mode?
+        '()
+        (let ()
     (define inmain-em-pts
       (if (and emergency-rush-bldg? (not (and requires-pylon-power? has-completed-pylon?)))
           (take (compute-inmain-safe-anchors safe-base-anchor) 3)
@@ -8568,7 +8639,7 @@
     ;; W12-P0-3-wire: Preserve `game-info` (`pl-grid`) first so emergency batches only query buildable
     ;; ground (never cliffs/void); only drop `game-info` if `pl-grid` yielded zero spots!
     (define grid-em (if game-info (collect-em game-info) '()))
-    (if (pair? grid-em) grid-em (collect-em #f)))
+    (if (pair? grid-em) grid-em (collect-em #f)))))
 
   (define (collect-creep-tight-cands max-r safety? gi?)
     (define creep-budget (box 240))
@@ -8773,15 +8844,17 @@
                             #:when (= res 1))
                   pt)])])]
          [else
-          (define p1 (filter-pylon-powered cands))
+          (define p1 (filter-proxy-creep (filter-pylon-powered cands)))
           (define p2
             (cond
+              [(and proxy-mode? is-zerg-creep-bldg?)
+               (filter-proxy-creep (collect-creep-tight-cands (max 14.0 max-radius) #f #t))]
               [is-zerg-creep-bldg?
                (append (if (null? p1) (collect-creep-tight-cands 8.5 #t #t) '())
                        (collect-creep-tight-cands 14.0 #f #t))]
               [else
                (filter-pylon-powered (relaxed-safety-cands))]))
-          (define p3 (filter-pylon-powered (near-base-emergency-cands)))
+          (define p3 (filter-proxy-creep (filter-pylon-powered (near-base-emergency-cands))))
           (define unified-single
             (merge-priority-batches
              (if (and tight-spacing?
@@ -8805,6 +8878,21 @@
              (dedup-point2ds (append (relaxed-safety-cands) (near-base-emergency-cands)))
              #:ignore-reserved-aabbs? #t))
           (and (pair? ac-fallback) (first ac-fallback))])]
+      [(and proxy-mode? requires-pylon-power?)
+       (define pp-primary (filter-pylon-powered cands))
+       (cond
+         [(pair? pp-primary) (first pp-primary)]
+         [else
+          (define pp-fallback (filter-pylon-powered (relaxed-safety-cands)))
+          (and (pair? pp-fallback) (first pp-fallback))])]
+      [(and proxy-mode? is-zerg-creep-bldg? (sc2-image-grid? eff-creep-grid))
+       (define pc-primary (filter-proxy-creep cands))
+       (cond
+         [(pair? pc-primary) (first pc-primary)]
+         [else
+          (define pc-fallback
+            (filter-proxy-creep (collect-creep-tight-cands (max 14.0 max-radius) #f #t)))
+          (and (pair? pc-fallback) (first pc-fallback))])]
       [(null? cands)
        (define em-cands
          (if is-zerg-creep-bldg?
@@ -8816,6 +8904,7 @@
              (dedup-point2ds (append (relaxed-safety-cands) (near-base-emergency-cands)))))
        (cond
          [(not (null? em-cands)) (first em-cands)]
+         [proxy-mode? #f]
          [(and (static-footprint-placement-ok? pl-grid anchor-x anchor-y cand-hw cand-hh)
                (or (not check-bfs) (< (check-bfs anchor-x anchor-y 4) +inf.0)))
           (sc2-point2d anchor-x anchor-y)]
@@ -10034,6 +10123,7 @@
 ;; preserving `Sec 6` MULE/Chrono wire safety net & opening anti-bounce close-patch lock.
 (define (saturate-workers-and-gas-commands obs
                                            #:excluded-worker-tags [excluded-worker-tags (seteqv)]
+                                           #:exclude-worker-tags [exclude-worker-tags (set)]
                                            #:role-leases [role-leases #f]
                                            #:reserved-aabbs [reserved-aabbs '()]
                                            #:game-info [game-info #f]
@@ -10041,6 +10131,17 @@
                                            #:apm-pressure-backoff? [apm-pressure-backoff? #f]
                                            #:mineral-override-pressure? [mineral-override-pressure? #f])
   (void reserved-aabbs)
+  (define eff-excluded-worker-tags
+    (let ([s (mutable-seteqv)])
+      (for ([src (in-list (list excluded-worker-tags exclude-worker-tags))])
+        (cond
+          [(list? src)
+           (for ([t (in-list src)])
+             (when (exact-integer? t) (set-add! s t)))]
+          [(generic-set? src)
+           (for ([t (in-set src)])
+             (when (exact-integer? t) (set-add! s t)))]))
+      s))
   (define cur-loop (sc2-observation-game-loop obs))
   (define prev-sat-loop (unbox (worker-sat-state-last-loop SC2-DEFAULT-WORKER-SAT-STATE)))
   (when (or (< cur-loop prev-sat-loop)
@@ -10137,7 +10238,7 @@
     (filter (lambda (w)
               (define wtag (sc2-unit-tag w))
               (and (not (memv 57 (sc2-unit-buff-ids w)))
-                   (not (set-member? excluded-worker-tags wtag))
+                   (not (set-member? eff-excluded-worker-tags wtag))
                    (not (worker-excavating-thin-wall? w))
                    (not (and (hash? role-leases)
                              (unit-leased-above? role-leases wtag 'harvester cur-loop)))
@@ -10419,7 +10520,7 @@
              #t))
       (define base-excl?
         (or (and (memv 57 (sc2-unit-buff-ids w)) #t)
-            (set-member? excluded-worker-tags wtag)
+            (set-member? eff-excluded-worker-tags wtag)
             (set-member? commanded-this-frame wtag)
             (worker-excavating-thin-wall? w)
             (and (worker-has-build-order? w cur-loop sat-self-structures)
@@ -10849,7 +10950,32 @@
             [_ a]))
         '()))
   (define-values (actions step-action-rejects)
-    (filter-valid-bot-actions normalized-raw-actions))
+    (if (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build-proxy))) normalized-raw-actions)
+        (let-values ([(acc-rev rej-rev)
+                      (for/fold ([ok '()] [rej '()]) ([a (in-list normalized-raw-actions)])
+                        (match a
+                          [(list 'build-proxy bldg-sym px py)
+                           (define-values (v r)
+                             (filter-valid-bot-actions (list (list 'build bldg-sym px py))))
+                           (if (pair? v)
+                               (values (cons a ok) rej)
+                               (values ok (cons (list 'invalid-build-proxy a r) rej)))]
+                          [(list 'build-proxy bldg-sym px py wtag)
+                           (define-values (v r)
+                             (filter-valid-bot-actions (list (list 'build bldg-sym px py))))
+                           (if (and (pair? v)
+                                    (or (not wtag)
+                                        (and (exact-integer? wtag) (>= wtag 0))))
+                               (values (cons a ok) rej)
+                               (values ok (cons (list 'invalid-build-proxy a r) rej)))]
+                          [(cons 'build-proxy _)
+                           (values ok (cons (list 'invalid-build-proxy a) rej))]
+                          [_
+                           (define-values (v r) (filter-valid-bot-actions (list a)))
+                           (values (append (reverse v) ok)
+                                   (append (reverse r) rej))]))])
+          (values (reverse acc-rev) (reverse rej-rev)))
+        (filter-valid-bot-actions normalized-raw-actions)))
   (set-box! SC2-LAST-BOT-ACTION-REJECTS step-action-rejects)
   (when (pair? step-action-rejects)
     (set-box! SC2-TOTAL-BOT-ACTION-REJECT-COUNT
@@ -11973,7 +12099,7 @@
            (for/fold ([s (seteq)])
                      ([act (in-list actions)])
              (cond
-               [(and (pair? act) (eq? (car act) 'build) (pair? (cdr act)))
+               [(and (pair? act) (memq (car act) '(build build-proxy)) (pair? (cdr act)))
                 (define bsym (normalize-sc2-name->symbol (cadr act)))
                 (if (memq bsym '(pylon nexus gateway forge cybernetics-core photon-cannon shield-battery
                                  twilight-council robotics-facility robotics-bay robotics-support-bay
@@ -11989,7 +12115,7 @@
                   (for/fold ([as (seteq)] [cs (seteq)] [sp #f])
                             ([act (in-list actions)])
                     (cond
-                      [(and (pair? act) (eq? (car act) 'build) (pair? (cdr act)))
+                      [(and (pair? act) (memq (car act) '(build build-proxy)) (pair? (cdr act)))
                        (define bsym (normalize-sc2-name->symbol (cadr act)))
                        (define is-t-bldg?
                          (memq bsym '(command-center supply-depot barracks factory starport
@@ -12132,6 +12258,8 @@
          (set-add s wid)]
         [(list 'mineral-harass (? exact-integer? wid) _ _ _ _)
          (set-add s wid)]
+        [(list 'build-proxy _ _ _ (? exact-integer? wid))
+         (if (> wid 0) (set-add s wid) s)]
         [_ s])))
 
   (define (reserve-step-build-pt! pt [ab-id 0])
@@ -14102,6 +14230,424 @@
            [else
             (emit! (sc2-raw-unit-command ab-id #f 0 (list ptag) #f))]))]
 
+      ;; 1b. Explicit Proxy Build: `(build-proxy <bldg-sym> <px> <py> [worker-tag])`
+      ;; Bypasses `fragile-tech-main-protect?`, home ramp wall slots, and home-Pylon anchoring;
+      ;; filters Protoss power strictly to completed Pylons/WarpPrisms within `<= 14.0t` of `(px, py)`;
+      ;; enforces `#:require-addon-clear? #t` for Terran Barracks/Factory/Starport; and dispatches
+      ;; strictly to `worker-tag` when alive & ready (falling back to closest available worker).
+      [(or (list 'build-proxy bldg-sym raw-px raw-py)
+           (list 'build-proxy bldg-sym raw-px raw-py _))
+       (define norm (normalize-sc2-name->symbol bldg-sym))
+       (define ab-id (build-symbol->ability-id norm))
+       (define px (scale-bot-coord-to-world raw-px home-x))
+       (define py (scale-bot-coord-to-world raw-py home-y))
+       (define opt-wtag
+         (if (and (= (length act) 5)
+                  (exact-integer? (fifth act))
+                  (> (fifth act) 0))
+             (fifth act)
+             #f))
+       (when (and ab-id (tech-cap-allows-build? norm))
+         (cond
+           ;; Proxy Terran Add-ons: attach directly to bare completed idle matching facility within <= 20t of `(px, py)`
+           [(memq norm '(barracks-tech-lab barracks-techlab barracks-reactor
+                         factory-tech-lab factory-techlab factory-reactor
+                         starport-tech-lab starport-techlab starport-reactor
+                         tech-lab techlab reactor))
+            (define fac-types
+              (cond
+                [(memq norm '(barracks-tech-lab barracks-techlab barracks-reactor)) '(barracks)]
+                [(memq norm '(factory-tech-lab factory-techlab factory-reactor)) '(factory)]
+                [(memq norm '(starport-tech-lab starport-techlab starport-reactor)) '(starport)]
+                [else '(barracks factory starport)]))
+            (define proxy-cand-facs
+              (sort
+               (filter (lambda (u)
+                         (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u)) fac-types)
+                              (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                              (= (sc2-unit-add-on-tag u) 0)
+                              (= (unit-blocking-order-count u) 0)
+                              (not (set-member? used-producer-tags (sc2-unit-tag u)))
+                              (let ([p (sc2-unit-pos u)])
+                                (<= (pt-dist px py (sc2-point3d-x p) (sc2-point3d-y p)) 20.0))
+                              (or (<= cur-loop 0)
+                                  (>= cur-loop
+                                      (hash-ref SC2-WIRE-NONSTACK-CMD-COOLDOWN
+                                                (list 'wire-addon norm (sc2-unit-tag u))
+                                                -1)))))
+                       self-units)
+               <
+               #:key (lambda (u)
+                       (define p (sc2-unit-pos u))
+                       (pt-dist px py (sc2-point3d-x p) (sc2-point3d-y p)))))
+            (define (proxy-fac-addon-block-key u)
+              (define p (sc2-unit-pos u))
+              (list (sc2-unit-tag u)
+                    (inexact->exact (round (sc2-point3d-x p)))
+                    (inexact->exact (round (sc2-point3d-y p)))))
+            (define (proxy-fac-addon-cached-blocked? u)
+              (and (> cur-loop 0)
+                   (let ([bloop (hash-ref SC2-ADDON-SLOT-BLOCKED-CACHE (proxy-fac-addon-block-key u) #f)])
+                     (and bloop (>= cur-loop bloop) (< (- cur-loop bloop) 224)))))
+            (define (proxy-fac-addon-locally-clear? u)
+              (define p (sc2-unit-pos u))
+              (define ax (+ (sc2-point3d-x p) SC2-TERRAN-ADDON-OFFSET-X))
+              (define ay (+ (sc2-point3d-y p) SC2-TERRAN-ADDON-OFFSET-Y))
+              (and (>= ax SC2-MAP-PLAYABLE-MIN-COORD) (<= ax SC2-MAP-PLAYABLE-MAX-COORD)
+                   (>= ay SC2-MAP-PLAYABLE-MIN-COORD) (<= ay SC2-MAP-PLAYABLE-MAX-COORD)
+                   (static-footprint-placement-ok? step-pl-grid ax ay 1.0 1.0)
+                   (not (terran-footprint-has-creep? step-creep-grid ax ay 1.0 1.0))
+                   (for/and ([ou (in-list units)]
+                             #:when (and (not (= (sc2-unit-tag ou) (sc2-unit-tag u)))
+                                         (not (sc2-unit-is-flying ou))
+                                         (or (sc2-unit-is-structure? ou)
+                                             (sc2-unit-is-mineral-field? ou)
+                                             (sc2-unit-is-vespene-geyser? ou))))
+                     (define op (sc2-unit-pos ou))
+                     (define osym (sc2-id->unit-symbol (sc2-unit-unit-type ou) 'unknown))
+                     (define-values (o-hw o-hh)
+                       (cond
+                         [(sc2-unit-is-mineral-field? ou) (values 1.0 0.5)]
+                         [(sc2-unit-is-vespene-geyser? ou) (values 1.5 1.5)]
+                         [else (sc2-structure-half-dims osym)]))
+                     (not (and (< (abs (- ax (sc2-point3d-x op))) (- (+ 1.0 o-hw) 0.05))
+                               (< (abs (- ay (sc2-point3d-y op))) (- (+ 1.0 o-hh) 0.05)))))))
+            (define (proxy-fac-reloc-pt fac0)
+              (define-values (base-fac-ab base-fac-sym)
+                (case (sc2-id->unit-symbol (sc2-unit-unit-type fac0))
+                  [(barracks) (values 321 'barracks)]
+                  [(factory)  (values 328 'factory)]
+                  [(starport) (values 329 'starport)]
+                  [else       (values 321 'barracks)]))
+              (define bud-before (unbox step-placement-rpc-budget))
+              (define pt
+                (find-verified-building-placement ws-conn base-fac-ab px py (remq fac0 units)
+                                                  #:min-spacing 1.5
+                                                  #:max-radius 10.0
+                                                  #:step 1.0
+                                                  #:extra-reserved-points step-reserved-build-pts
+                                                  #:anchor-points (list (cons px py))
+                                                  #:reserved-aabbs '()
+                                                  #:expansion-pads all-expansion-pads
+                                                  #:bldg-sym base-fac-sym
+                                                  #:game-info eff-game-info
+                                                  #:rpc-budget step-placement-rpc-budget
+                                                  #:cur-loop cur-loop
+                                                  #:require-addon-clear? #t
+                                                  #:creep-grid step-creep-grid
+                                                  #:proxy-mode? #t))
+              (values base-fac-ab pt (and (not pt) (<= bud-before 0))))
+            (define (mark-proxy-addon-backoff! fac0)
+              (when (> cur-loop 0)
+                (hash-set! SC2-ADDON-SLOT-BLOCKED-CACHE (proxy-fac-addon-block-key fac0) cur-loop)
+                (hash-set! SC2-WIRE-NONSTACK-CMD-COOLDOWN
+                           (list 'wire-addon norm (sc2-unit-tag fac0))
+                           (+ cur-loop 64))))
+            (define ws-active-proxy-addon?
+              (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))
+            (define locally-clear-proxy-facs
+              (filter (lambda (u)
+                        (and (proxy-fac-addon-locally-clear? u)
+                             (not (proxy-fac-addon-cached-blocked? u))))
+                      proxy-cand-facs))
+            (define-values (fac-u addon-target-pt addon-reloc-ab addon-cd)
+              (cond
+                [(null? proxy-cand-facs) (values #f #f 0 24)]
+                [ws-active-proxy-addon?
+                 (cond
+                   [(pair? locally-clear-proxy-facs)
+                    (if (consume-placement-rpc-budget! step-placement-rpc-budget)
+                        (let* ([q-items
+                                (for/list ([u (in-list locally-clear-proxy-facs)])
+                                  (define p (sc2-unit-pos u))
+                                  (sc2-query-placement 319
+                                                       (+ (sc2-point3d-x p) SC2-TERRAN-ADDON-OFFSET-X)
+                                                       (+ (sc2-point3d-y p) SC2-TERRAN-ADDON-OFFSET-Y)
+                                                       0))]
+                               [q-resp
+                                (sc2-ws-rpc! ws-conn
+                                             (make-request-query-placement q-items
+                                                                           #:ignore-resource-requirements? #t))]
+                               [q-results (sc2-response-query-placements q-resp)])
+                          (cond
+                            [(not (= (length q-results) (length locally-clear-proxy-facs)))
+                             (values (first locally-clear-proxy-facs) #f 0 24)]
+                            [(for/first ([u (in-list locally-clear-proxy-facs)]
+                                         [res (in-list q-results)]
+                                         #:when (= res 1))
+                               u)
+                             => (lambda (clear-u) (values clear-u #f 0 24))]
+                            [(for/first ([u (in-list locally-clear-proxy-facs)]
+                                         #:when (let* ([p (sc2-unit-pos u)]
+                                                       [ax (+ (sc2-point3d-x p) SC2-TERRAN-ADDON-OFFSET-X)]
+                                                       [ay (+ (sc2-point3d-y p) SC2-TERRAN-ADDON-OFFSET-Y)])
+                                                  (ormap (lambda (fu)
+                                                           (and (not (sc2-unit-is-structure? fu))
+                                                                (not (sc2-unit-is-flying fu))
+                                                                (let ([fp (sc2-unit-pos fu)])
+                                                                  (<= (pt-dist ax ay (sc2-point3d-x fp) (sc2-point3d-y fp))
+                                                                      2.25))))
+                                                         self-units)))
+                               u)
+                             => (lambda (nudgable-u) (values nudgable-u #f 0 16))]
+                            [else
+                             (for ([u (in-list locally-clear-proxy-facs)])
+                               (hash-set! SC2-ADDON-SLOT-BLOCKED-CACHE (proxy-fac-addon-block-key u) cur-loop))
+                             (define reloc-u (first proxy-cand-facs))
+                             (define-values (r-ab r-pt bud-def?) (proxy-fac-reloc-pt reloc-u))
+                             (cond
+                               [r-pt (values reloc-u r-pt r-ab 48)]
+                               [else
+                                (unless bud-def? (mark-proxy-addon-backoff! reloc-u))
+                                (values #f #f 0 24)])]))
+                        (values #f #f 0 24))]
+                   [else
+                    (define reloc-u (first proxy-cand-facs))
+                    (define-values (r-ab r-pt bud-def?) (proxy-fac-reloc-pt reloc-u))
+                    (cond
+                      [r-pt (values reloc-u r-pt r-ab 48)]
+                      [else
+                       (unless bud-def? (mark-proxy-addon-backoff! reloc-u))
+                       (values #f #f 0 24)])])]
+                [(pair? locally-clear-proxy-facs)
+                 (values (first locally-clear-proxy-facs) #f 0 24)]
+                [else
+                 (define reloc-u (first proxy-cand-facs))
+                 (define-values (r-ab r-pt _bud-def?) (proxy-fac-reloc-pt reloc-u))
+                 (cond
+                   [r-pt (values reloc-u r-pt r-ab 48)]
+                   [else
+                    (mark-proxy-addon-backoff! reloc-u)
+                    (values #f #f 0 24)])]))
+            (when (and fac-u (wire-nonstack-allow?! (list 'wire-addon norm (sc2-unit-tag fac-u)) addon-cd))
+              (set-add! used-producer-tags (sc2-unit-tag fac-u))
+              (hash-set! used-producer-counts (sc2-unit-tag fac-u)
+                         (add1 (hash-ref used-producer-counts (sc2-unit-tag fac-u) 0)))
+              (when (sc2-point2d? addon-target-pt)
+                (reserve-step-build-pt! addon-target-pt addon-reloc-ab))
+              (record-step-built-structure! norm)
+              (emit! (sc2-raw-unit-command ab-id addon-target-pt 0 (list (sc2-unit-tag fac-u)) #f)))]
+
+           ;; Proxy Nydus Worm (1768): cast by completed allied Nydus Network at `(px, py)`
+           [(memq norm '(nydus-worm nydus-canal build-nydus-worm))
+            (define nydus-net-tag
+              (for/first ([u (in-list self-units)]
+                          #:when (and (= (sc2-unit-unit-type u) 95)
+                                      (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                                      (not (set-member? used-producer-tags (sc2-unit-tag u)))))
+                (sc2-unit-tag u)))
+            (when nydus-net-tag
+              (define worm-pt
+                (find-verified-building-placement ws-conn 1768 px py units
+                                                  #:min-spacing 1.5
+                                                  #:max-radius 10.0
+                                                  #:step 1.0
+                                                  #:extra-reserved-points step-reserved-build-pts
+                                                  #:anchor-points (list (cons px py))
+                                                  #:reserved-aabbs '()
+                                                  #:expansion-pads '()
+                                                  #:bldg-sym 'nydus-worm
+                                                  #:game-info eff-game-info
+                                                  #:rpc-budget step-placement-rpc-budget
+                                                  #:cur-loop cur-loop
+                                                  #:proxy-mode? #t))
+              (when worm-pt
+                (set-add! used-producer-tags nydus-net-tag)
+                (hash-set! used-producer-counts nydus-net-tag
+                           (add1 (hash-ref used-producer-counts nydus-net-tag 0)))
+                (reserve-step-build-pt! worm-pt 1768)
+                (record-step-built-structure! norm)
+                (emit! (sc2-raw-unit-command 1768 worm-pt 0 (list nydus-net-tag) #f))))]
+
+           ;; Worker-built proxy structures (all races)
+           [else
+            (define is-protoss-powered-bldg?
+              (and (memq norm '(gateway forge cybernetics-core photon-cannon shield-battery
+                                twilight-council robotics-facility robotics-bay robotics-support-bay
+                                stargate templar-archive templar-archives dark-shrine fleet-beacon))
+                   #t))
+            (define is-zerg-creep-proxy?
+              (and (memq norm '(spawning-pool evolution-chamber roach-warren baneling-nest
+                                hydralisk-den lurker-den lurker-den-mp spire infestation-pit
+                                ultralisk-cavern nydus-network spine-crawler spore-crawler))
+                   #t))
+            (define proxy-power-sources
+              (if (and is-protoss-powered-bldg? (list? power-sources))
+                  (filter (lambda (ps)
+                            (and (sc2-power-source? ps)
+                                 (let ([p (sc2-power-source-pos ps)])
+                                   (<= (pt-dist px py (sc2-point3d-x p) (sc2-point3d-y p)) 20.0))))
+                          power-sources)
+                  '()))
+            (define proxy-completed-pylons
+              (if is-protoss-powered-bldg?
+                  (filter (lambda (u)
+                            (let ([p (sc2-unit-pos u)])
+                              (<= (pt-dist px py (sc2-point3d-x p) (sc2-point3d-y p)) 20.0)))
+                          completed-pylons)
+                  '()))
+            (define proxy-creep-anchors
+              (if (and is-zerg-creep-proxy? (sc2-image-grid? step-creep-grid))
+                  (let*-values ([(hw hh) (sc2-structure-half-dims norm)])
+                    (define half-off (if (= (round (* 2.0 hw)) (* 2.0 (round hw))) 0.0 0.5))
+                    (define bx0 (inexact->exact (round px)))
+                    (define by0 (inexact->exact (round py)))
+                    (define raw-creep-pts
+                      (for*/list ([dx (in-range -14 15)]
+                                  [dy (in-range -14 15)]
+                                  #:when (<= (+ (* dx dx) (* dy dy)) 196)
+                                  [cx (in-value (+ bx0 dx half-off))]
+                                  [cy (in-value (+ by0 dy half-off))]
+                                  #:when (and (>= cx SC2-MAP-PLAYABLE-MIN-COORD)
+                                              (<= cx SC2-MAP-PLAYABLE-MAX-COORD)
+                                              (>= cy SC2-MAP-PLAYABLE-MIN-COORD)
+                                              (<= cy SC2-MAP-PLAYABLE-MAX-COORD)
+                                              (zerg-footprint-on-creep? step-creep-grid cx cy hw hh)
+                                              (static-footprint-placement-ok? step-pl-grid cx cy hw hh)))
+                        (cons cx cy)))
+                    (define sorted-creep
+                      (sort raw-creep-pts <
+                            #:key (lambda (pt) (pt-dist px py (car pt) (cdr pt)))))
+                    (reverse
+                     (for/fold ([picked '()]) ([pt (in-list sorted-creep)]
+                                               #:break (>= (length picked) 8))
+                       (if (or (null? picked)
+                               (andmap (lambda (pk)
+                                         (>= (pt-dist (car pt) (cdr pt) (car pk) (cdr pk)) 2.0))
+                                       picked))
+                           (cons pt picked)
+                           picked))))
+                  '()))
+            (when (and (or (not is-protoss-powered-bldg?)
+                           (pair? proxy-power-sources)
+                           (pair? proxy-completed-pylons))
+                       (or (not is-zerg-creep-proxy?)
+                           (not (sc2-image-grid? step-creep-grid))
+                           (pair? proxy-creep-anchors)))
+              (define proxy-anchors
+                (cond
+                  [is-protoss-powered-bldg?
+                   (let* ([near-pts
+                           (append
+                            (for/list ([u (in-list proxy-completed-pylons)])
+                              (define p (sc2-unit-pos u))
+                              (cons (sc2-point3d-x p) (sc2-point3d-y p)))
+                            (for/list ([ps (in-list proxy-power-sources)])
+                              (define p (sc2-power-source-pos ps))
+                              (cons (sc2-point3d-x p) (sc2-point3d-y p))))]
+                          [sorted-near
+                           (sort near-pts <
+                                 #:key (lambda (pt) (pt-dist px py (car pt) (cdr pt))))]
+                          [px-powered?
+                           (point-in-completed-power-field? px py proxy-power-sources proxy-completed-pylons)])
+                     (if px-powered?
+                         (remove-duplicates (cons (cons px py) sorted-near))
+                         (let* ([np (first sorted-near)]
+                                [dx (- px (car np))]
+                                [dy (- py (cdr np))]
+                                [d (pt-dist px py (car np) (cdr np))]
+                                [edge-pt
+                                 (if (> d 1.0)
+                                     (cons (max SC2-MAP-PLAYABLE-MIN-COORD
+                                                (min SC2-MAP-PLAYABLE-MAX-COORD (+ (car np) (* 4.0 (/ dx d)))))
+                                           (max SC2-MAP-PLAYABLE-MIN-COORD
+                                                (min SC2-MAP-PLAYABLE-MAX-COORD (+ (cdr np) (* 4.0 (/ dy d))))))
+                                     np)])
+                           (remove-duplicates (cons edge-pt sorted-near)))))]
+                  [(pair? proxy-creep-anchors)
+                   proxy-creep-anchors]
+                  [else
+                   (list (cons px py))]))
+              (define proxy-tight-bldg?
+                (and (memq norm '(pylon photon-cannon shield-battery bunker
+                                  spine-crawler spore-crawler supply-depot))
+                     #t))
+              (define proxy-ignore-exp-pads?
+                (or proxy-tight-bldg? (eq? norm 'hatchery)))
+              (define proxy-addon-bldg?
+                (and (memq norm '(barracks factory starport)) #t))
+              (define place-pt
+                (find-verified-building-placement ws-conn ab-id px py units
+                                                  #:min-spacing (if proxy-tight-bldg? 0.5 1.5)
+                                                  #:max-radius (if is-zerg-creep-proxy? 14.0 10.0)
+                                                  #:step 1.0
+                                                  #:extra-reserved-points step-reserved-build-pts
+                                                  #:anchor-points proxy-anchors
+                                                  #:reserved-aabbs '()
+                                                  #:expansion-pads (if proxy-ignore-exp-pads? '() all-expansion-pads)
+                                                  #:bldg-sym norm
+                                                  #:game-info eff-game-info
+                                                  #:power-sources (if is-protoss-powered-bldg? proxy-power-sources #f)
+                                                  #:rpc-budget step-placement-rpc-budget
+                                                  #:cur-loop cur-loop
+                                                  #:require-addon-clear? proxy-addon-bldg?
+                                                  #:creep-grid step-creep-grid
+                                                  #:proxy-mode? #t))
+              (when place-pt
+                (define tx (sc2-point2d-x place-pt))
+                (define ty (sc2-point2d-y place-pt))
+                (define (proxy-worker-ready? w)
+                  (define wt (sc2-unit-tag w))
+                  (and (not (set-member? used-worker-tags wt))
+                       (not (set-member? builder-worker-tags wt))
+                       (not (worker-has-build-order? w cur-loop self-structures))))
+                (define exact-w
+                  (and opt-wtag
+                       (for/first ([w (in-list workers)]
+                                   #:when (= (sc2-unit-tag w) opt-wtag))
+                         w)))
+                (define wtag
+                  (cond
+                    [(and exact-w (proxy-worker-ready? exact-w))
+                     opt-wtag]
+                    [exact-w
+                     ;; Explicit proxy worker is alive but currently building or already commanded:
+                     ;; only substitute another eligible worker already staged near the proxy (<= 24t)
+                     (define near-pool
+                       (filter (lambda (w)
+                                 (define wt (sc2-unit-tag w))
+                                 (define wp (sc2-unit-pos w))
+                                 (and (proxy-worker-ready? w)
+                                      (not (set-member? step-scout-worker-tags wt))
+                                      (not (and (hash? role-leases)
+                                                (unit-leased-above? role-leases wt 'door-guard cur-loop)))
+                                      (<= (pt-dist tx ty (sc2-point3d-x wp) (sc2-point3d-y wp)) 24.0)))
+                               workers))
+                     (and (pair? near-pool)
+                          (sc2-unit-tag
+                           (argmin (lambda (w)
+                                     (define wp (sc2-unit-pos w))
+                                     (pt-dist tx ty (sc2-point3d-x wp) (sc2-point3d-y wp)))
+                                   near-pool)))]
+                    [else
+                     ;; No explicit worker tag (or locked worker died): closest eligible worker to `(tx, ty)`
+                     (define all-elig
+                       (filter (lambda (w)
+                                 (define wt (sc2-unit-tag w))
+                                 (and (proxy-worker-ready? w)
+                                      (not (set-member? step-scout-worker-tags wt))
+                                      (not (and (hash? role-leases)
+                                                (unit-leased-above? role-leases wt 'door-guard cur-loop)))))
+                               workers))
+                     (define non-gas-elig
+                       (filter (lambda (w) (not (worker-is-gas-harvester? w))) all-elig))
+                     (define pool (if (pair? non-gas-elig) non-gas-elig all-elig))
+                     (and (pair? pool)
+                          (sc2-unit-tag
+                           (argmin (lambda (w)
+                                     (define wp (sc2-unit-pos w))
+                                     (+ (pt-dist tx ty (sc2-point3d-x wp) (sc2-point3d-y wp))
+                                        (if (null? (sc2-unit-orders w)) 0.0 4.0)))
+                                   pool)))]))
+                (when wtag
+                  (record-worker-used! wtag #t)
+                  (when (hash? role-leases)
+                    (acquire-unit-lease! role-leases wtag 'builder cur-loop 224 #:x tx #:y ty))
+                  (reserve-step-build-pt! place-pt ab-id)
+                  (record-step-built-structure! norm)
+                  (record-builder-reservation! wtag tx ty ab-id)
+                  (emit! (sc2-raw-unit-command ab-id place-pt 0 (list wtag) #f)))))]))]
+
       ;; 2. Build structure: `(build <bldg-sym> <x> <y>)` or `(build <bldg-sym>)`
       [(or (list 'build bldg-sym _ _)
            (list 'build bldg-sym))
@@ -14396,10 +14942,18 @@
                                              (let ([sp (sc2-unit-pos s)])
                                                (<= (pt-dist ux uy (sc2-point3d-x sp) (sc2-point3d-y sp)) 5.5))))
                                       self-structures))))))
+            (define has-explicit-addon-xy? (pair? (cddr act)))
             (define ordered-cand-facs
               (let-values ([(non-wall wall-only)
                             (partition (lambda (u) (not (barracks-is-protected-wall-seal? u))) cand-facs)])
-                (append non-wall wall-only)))
+                (define ordered-non-wall
+                  (if (and has-explicit-addon-xy? (pair? non-wall) (pair? (cdr non-wall)))
+                      (sort non-wall <
+                            #:key (lambda (u)
+                                    (define p (sc2-unit-pos u))
+                                    (pt-dist req-x req-y (sc2-point3d-x p) (sc2-point3d-y p))))
+                      non-wall))
+                (append ordered-non-wall wall-only)))
             (define reloc-cand-facs
               (filter (lambda (u) (not (barracks-is-protected-wall-seal? u))) ordered-cand-facs))
             (define locally-clear-facs

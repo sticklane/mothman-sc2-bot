@@ -50,12 +50,51 @@ DEFAULT_BENCH_SEED = "mothman-v1"
 MAP_HASH_SALT = "map-171"
 RANDOM_BENCH_SEEDS = frozenset({"", "0", "none", "random", "off", "false"})
 
-MOTHMAN_VARIANTS: dict[str, dict[str, str]] = {
-    "Mothman-P": {"race": "P", "race_full": "Protoss", "bot_path": "bots/Mothman-P.rkt"},
-    "Mothman-T": {"race": "T", "race_full": "Terran", "bot_path": "bots/Mothman-T.rkt"},
-    "Mothman-Z": {"race": "Z", "race_full": "Zerg", "bot_path": "bots/Mothman-Z.rkt"},
-    "Mothman-X": {"race": "R", "race_full": "Random", "bot_path": "bots/Mothman-R.rkt"},
+MOTHMAN_VARIANTS: dict[str, dict[str, Any]] = {
+    "Mothman-P": {"race": "P", "race_full": "Protoss", "bot_path": "bots/Mothman-P.rkt", "cheese_mode": False, "cheese_profile": ""},
+    "Mothman-T": {"race": "T", "race_full": "Terran", "bot_path": "bots/Mothman-T.rkt", "cheese_mode": False, "cheese_profile": ""},
+    "Mothman-Z": {"race": "Z", "race_full": "Zerg", "bot_path": "bots/Mothman-Z.rkt", "cheese_mode": False, "cheese_profile": ""},
+    "Mothman-X": {"race": "R", "race_full": "Random", "bot_path": "bots/Mothman-R.rkt", "cheese_mode": False, "cheese_profile": ""},
+    "Mothman-PC": {"race": "P", "race_full": "Protoss", "bot_path": "bots/Mothman-P.rkt", "base_zip": "Mothman-P", "cheese_mode": True, "cheese_profile": "auto"},
+    "Mothman-TC": {"race": "T", "race_full": "Terran", "bot_path": "bots/Mothman-T.rkt", "base_zip": "Mothman-T", "cheese_mode": True, "cheese_profile": "auto"},
+    "Mothman-ZC": {"race": "Z", "race_full": "Zerg", "bot_path": "bots/Mothman-Z.rkt", "base_zip": "Mothman-Z", "cheese_mode": True, "cheese_profile": "auto"},
+    "Mothman-XC": {"race": "R", "race_full": "Random", "bot_path": "bots/Mothman-R.rkt", "base_zip": "Mothman-X", "cheese_mode": True, "cheese_profile": "auto"},
 }
+
+CHEESE_DEFAULT_MAX_GAME_TIME = 16128  # 12m (12 * 60 * 22.4 loops)
+STANDARD_DEFAULT_MAX_GAME_TIME = 33600  # 25m (25 * 60 * 22.4 loops)
+
+# 18-match Cheese Defense Drill (9 matchups x 2 pro <6:00 cheeses each):
+# P1 = Main Macro Mothman-{Z,T,P} vs P2 = Version C Mothman-{ZC,TC,PC}
+CHEESE_DEFENSE_DRILL_18: tuple[tuple[str, str, str], ...] = (
+    # ZvZ (P2 = Mothman-ZC)
+    ("Mothman-Z", "Mothman-ZC", "zvz-13-12-ling-bane"),
+    ("Mothman-Z", "Mothman-ZC", "zvz-12pool-proxy-spine"),
+    # PvZ defense (P2 = Mothman-ZC plays ZvP)
+    ("Mothman-P", "Mothman-ZC", "zvp-19d-speedling-roach-ravager"),
+    ("Mothman-P", "Mothman-ZC", "zvp-12pool-ling-flood"),
+    # TvZ defense (P2 = Mothman-ZC plays ZvT)
+    ("Mothman-T", "Mothman-ZC", "zvt-26d-roach-ravager-bust"),
+    ("Mothman-T", "Mothman-ZC", "zvt-42d-queen-ling-nydus"),
+    # PvT defense (P2 = Mothman-TC plays TvP)
+    ("Mothman-P", "Mothman-TC", "tvp-proxy-2rax-marauder"),
+    ("Mothman-P", "Mothman-TC", "tvp-1base-2gas-cyclone"),
+    # TvT defense (P2 = Mothman-TC plays TvT)
+    ("Mothman-T", "Mothman-TC", "tvt-proxy-2rax-reaper"),
+    ("Mothman-T", "Mothman-TC", "tvt-1base-111-tank-bunker"),
+    # ZvT defense (P2 = Mothman-TC plays TvZ)
+    ("Mothman-Z", "Mothman-TC", "tvz-proxy-2rax-bunker"),
+    ("Mothman-Z", "Mothman-TC", "tvz-reaper-fe-hellion-banshee"),
+    # ZvP defense (P2 = Mothman-PC plays PvZ)
+    ("Mothman-Z", "Mothman-PC", "pvz-32p-8gate-chargelot-prism"),
+    ("Mothman-Z", "Mothman-PC", "pvz-cannon-rush"),
+    # TvP defense (P2 = Mothman-PC plays PvT)
+    ("Mothman-T", "Mothman-PC", "pvt-proxy-4gate-zealot-stalker"),
+    ("Mothman-T", "Mothman-PC", "pvt-proxy-stargate-voidray"),
+    # PvP defense (P2 = Mothman-PC plays PvP)
+    ("Mothman-P", "Mothman-PC", "pvp-proxy-robo-immortal"),
+    ("Mothman-P", "Mothman-PC", "pvp-cannon-rush"),
+)
 
 # Full-game Self-Play schedule covering all 6 canonical SC2 matchups (3 mirrors + 3 cross-race)
 SELFPLAY_MATCHUPS_6: list[tuple[str, str]] = [
@@ -98,6 +137,8 @@ class BotSpec:
     is_mothman: bool = False
     source_bot_name: str = ""  # underlying Mothman variant when aliased (e.g. Mothman-P-SP -> Mothman-P)
     bot_mode: str = ""         # zip | elf | source (allows mixed source-vs-zip selfplay baseline!)
+    cheese_mode: bool = False
+    cheese_profile: str = ""
     elo: int | float | None = None
     aiarena_id: int | str | None = None
     gauntlet_core: bool = False
@@ -337,18 +378,70 @@ def ensure_portable_racket_etc(arena_dir: Path, repo_dir: Path) -> Path:
     return etc_dir
 
 
-def stage_mothman_cache(bot_name: str, mode: str, arena_dir: Path, repo_dir: Path) -> Path:
+def _apply_cheese_to_config_json(cfg_path: Path, bot_name: str, cheese_mode: bool, cheese_profile: str) -> None:
+    if not cfg_path.is_file():
+        return
+    try:
+        cfg_obj = json.loads(cfg_path.read_text(encoding="utf-8"))
+        if not isinstance(cfg_obj, dict):
+            return
+        cfg_obj["BotName"] = bot_name
+        if cheese_mode or cheese_profile:
+            cfg_obj["CheeseMode"] = True
+            cfg_obj["CheeseProfile"] = cheese_profile or "auto"
+        cfg_path.write_text(json.dumps(cfg_obj, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _apply_cheese_to_launcher(exe_script: Path, cheese_mode: bool, cheese_profile: str) -> None:
+    if not (cheese_mode or cheese_profile) or not exe_script.is_file():
+        return
+    try:
+        raw_head = exe_script.read_bytes()[:16]
+        if not raw_head.startswith(b"#!/bin/sh"):
+            return
+        txt = exe_script.read_text(encoding="utf-8")
+        # Strip any existing --cheese-mode / --cheese-profile flags before re-inserting
+        txt = re.sub(r"\s+--cheese-mode\b", "", txt)
+        txt = re.sub(r"\s+--cheese-profile\s+\S+", "", txt)
+        eff_prof = cheese_profile or "auto"
+        flags = f" --cheese-mode --cheese-profile {eff_prof}"
+        if ' "$@"' in txt:
+            txt = txt.replace(' "$@"', f'{flags} "$@"', 1)
+        else:
+            txt = txt.rstrip() + flags + "\n"
+        exe_script.write_text(txt, encoding="utf-8")
+    except Exception:
+        pass
+
+
+def stage_mothman_cache(
+    bot_name: str,
+    mode: str,
+    arena_dir: Path,
+    repo_dir: Path,
+    cheese_profile: str | None = None,
+) -> Path:
     if bot_name not in MOTHMAN_VARIANTS:
         raise ValueError(f"Unknown Mothman variant: {bot_name}")
     meta = MOTHMAN_VARIANTS[bot_name]
+    is_cheese = bool(meta.get("cheese_mode", False)) or bool(cheese_profile)
+    eff_profile = (cheese_profile or str(meta.get("cheese_profile") or "") or ("auto" if is_cheese else "")).strip()
+    cache_sub = f"{bot_name}__{sanitize_slug(eff_profile)}" if (is_cheese and eff_profile and eff_profile != "auto") else bot_name
 
     if mode == "zip":
         zip_path = repo_dir / "ladder" / f"{bot_name}.zip"
+        base_zip_name = str(meta.get("base_zip") or "")
+        used_base_zip = False
+        if not zip_path.is_file() and base_zip_name:
+            zip_path = repo_dir / "ladder" / f"{base_zip_name}.zip"
+            used_base_zip = True
         if not zip_path.is_file():
             raise RuntimeError(f"Missing Mothman zip: {zip_path} (run ladder/build-aiarena-zip.rkt or use --mothman-mode source)")
         st = zip_path.stat()
-        sig = f"{st.st_size}:{st.st_mtime_ns}"
-        dest = arena_dir / "cache" / "mothman_zip" / bot_name
+        sig = f"{st.st_size}:{st.st_mtime_ns}:{int(is_cheese)}:{eff_profile}"
+        dest = arena_dir / "cache" / "mothman_zip" / cache_sub
         stamp = dest / ".zip_stamp"
         if stamp.is_file() and stamp.read_text(encoding="utf-8").strip() == sig and (dest / bot_name).is_file():
             return dest
@@ -357,10 +450,15 @@ def stage_mothman_cache(bot_name: str, mode: str, arena_dir: Path, repo_dir: Pat
         dest.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(dest)
+        if used_base_zip and base_zip_name and (dest / base_zip_name).is_file() and not (dest / bot_name).exists():
+            (dest / base_zip_name).rename(dest / bot_name)
         exe = dest / bot_name
         if not exe.is_file():
             raise RuntimeError(f"Expected executable {exe} inside {zip_path}")
         exe.chmod(0o755)
+        if is_cheese or used_base_zip:
+            _apply_cheese_to_config_json(dest / "config.json", bot_name, is_cheese, eff_profile)
+            _apply_cheese_to_config_json(dest / "bot_config.json", bot_name, is_cheese, eff_profile)
         (dest / "data").mkdir(exist_ok=True)
         stamp.write_text(sig, encoding="utf-8")
         return dest
@@ -370,20 +468,38 @@ def stage_mothman_cache(bot_name: str, mode: str, arena_dir: Path, repo_dir: Pat
         if not elf_path.is_file():
             raise RuntimeError(f"Missing standalone ELF: {elf_path}")
         st = elf_path.stat()
-        sig = f"{st.st_size}:{st.st_mtime_ns}"
-        dest = arena_dir / "cache" / "mothman_elf" / bot_name
+        sig = f"{st.st_size}:{st.st_mtime_ns}:{int(is_cheese)}:{eff_profile}"
+        dest = arena_dir / "cache" / "mothman_elf" / cache_sub
         stamp = dest / ".elf_stamp"
         if stamp.is_file() and stamp.read_text(encoding="utf-8").strip() == sig and (dest / bot_name).is_file():
             return dest
         if dest.exists():
             shutil.rmtree(dest)
         dest.mkdir(parents=True, exist_ok=True)
-        copy_file_cow(elf_path, dest / bot_name)
-        (dest / bot_name).chmod(0o755)
-        (dest / "config.json").write_text(
-            json.dumps({"BotName": bot_name, "BotRace": meta["race_full"], "BotPath": meta["bot_path"]}, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        cfg_obj: dict[str, Any] = {
+            "BotName": bot_name,
+            "BotRace": meta["race_full"],
+            "BotPath": meta["bot_path"],
+        }
+        if is_cheese:
+            cfg_obj["CheeseMode"] = True
+            cfg_obj["CheeseProfile"] = eff_profile or "auto"
+            # Place ELF alongside a thin `exec` launcher so both config.json AND CLI flags are passed
+            elf_bin = dest / f"{bot_name}.elf"
+            copy_file_cow(elf_path, elf_bin)
+            elf_bin.chmod(0o755)
+            launcher = dest / bot_name
+            launcher.write_text(
+                "#!/bin/sh\n"
+                'DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
+                f'exec "$DIR/{bot_name}.elf" --BotName {bot_name} --cheese-mode --cheese-profile {eff_profile or "auto"} "$@"\n',
+                encoding="utf-8",
+            )
+            launcher.chmod(0o755)
+        else:
+            copy_file_cow(elf_path, dest / bot_name)
+            (dest / bot_name).chmod(0o755)
+        (dest / "config.json").write_text(json.dumps(cfg_obj, indent=2) + "\n", encoding="utf-8")
         (dest / "data").mkdir(exist_ok=True)
         (dest / "data" / "mirror_mind_opponents.json").write_text(
             json.dumps({"bot_name": bot_name, "opponents": {}}, indent=2) + "\n",
@@ -397,27 +513,26 @@ def stage_mothman_cache(bot_name: str, mode: str, arena_dir: Path, repo_dir: Pat
         if not portable_racket.is_file():
             raise RuntimeError(f"Missing portable Racket binary at {portable_racket}")
         ensure_portable_racket_etc(arena_dir, repo_dir)
-        dest = arena_dir / "cache" / "mothman_source" / bot_name
+        dest = arena_dir / "cache" / "mothman_source" / cache_sub
         if dest.exists():
             shutil.rmtree(dest)
         dest.mkdir(parents=True, exist_ok=True)
-        (dest / "config.json").write_text(
-            json.dumps(
-                {
-                    "BotName": bot_name,
-                    "BotRace": meta["race_full"],
-                    "BotPath": f"/mothman-repo/{meta['bot_path']}",
-                },
-                indent=2,
-            ) + "\n",
-            encoding="utf-8",
-        )
+        cfg_obj = {
+            "BotName": bot_name,
+            "BotRace": meta["race_full"],
+            "BotPath": f"/mothman-repo/{meta['bot_path']}",
+        }
+        if is_cheese:
+            cfg_obj["CheeseMode"] = True
+            cfg_obj["CheeseProfile"] = eff_profile or "auto"
+        (dest / "config.json").write_text(json.dumps(cfg_obj, indent=2) + "\n", encoding="utf-8")
         launcher = dest / bot_name
+        cheese_cli = f" --cheese-mode --cheese-profile {eff_profile or 'auto'}" if is_cheese else ""
         # CRITICAL: `exec` replaces the shell so `bot_controller`'s PID-to-TCP-port lookup sees `racket`!
         launcher.write_text(
             "#!/bin/sh\n"
             f"exec /usr/local/bin/racket -U -X /usr/share/racket/collects -G /etc/racket-portable "
-            f"/mothman-repo/sim/racket-sc2-ladder-main.rkt --BotName {bot_name} \"$@\"\n",
+            f"/mothman-repo/sim/racket-sc2-ladder-main.rkt --BotName {bot_name}{cheese_cli} \"$@\"\n",
             encoding="utf-8",
         )
         launcher.chmod(0o755)
@@ -438,7 +553,15 @@ def copy_file_cow(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
-def clone_bot_dir(src: Path, dst: Path, orig_name: str, alias_name: str, bot_type: str) -> None:
+def clone_bot_dir(
+    src: Path,
+    dst: Path,
+    orig_name: str,
+    alias_name: str,
+    bot_type: str,
+    cheese_mode: bool = False,
+    cheese_profile: str = "",
+) -> None:
     if dst.exists():
         shutil.rmtree(dst)
     try:
@@ -494,6 +617,12 @@ def clone_bot_dir(src: Path, dst: Path, orig_name: str, alias_name: str, bot_typ
                         exe_script.write_text(txt, encoding="utf-8")
                 except Exception:
                     pass
+
+    if cheese_mode or cheese_profile:
+        _apply_cheese_to_config_json(dst / "config.json", alias_name, True, cheese_profile or "auto")
+        _apply_cheese_to_config_json(dst / "bot_config.json", alias_name, True, cheese_profile or "auto")
+        if bot_type == "cpplinux":
+            _apply_cheese_to_launcher(dst / alias_name, True, cheese_profile or "auto")
 
     if bot_type == "cpplinux":
         exe = dst / alias_name
@@ -840,8 +969,24 @@ def run_single_match(
     bot2_orig = task.bot2.source_bot_name or task.bot2.name
 
     assert task.bot1.source_dir is not None and task.bot2.source_dir is not None
-    clone_bot_dir(task.bot1.source_dir, bots_dir / bot1_alias, bot1_orig, bot1_alias, task.bot1.bot_type)
-    clone_bot_dir(task.bot2.source_dir, bots_dir / bot2_alias, bot2_orig, bot2_alias, task.bot2.bot_type)
+    clone_bot_dir(
+        task.bot1.source_dir,
+        bots_dir / bot1_alias,
+        bot1_orig,
+        bot1_alias,
+        task.bot1.bot_type,
+        cheese_mode=task.bot1.cheese_mode,
+        cheese_profile=task.bot1.cheese_profile,
+    )
+    clone_bot_dir(
+        task.bot2.source_dir,
+        bots_dir / bot2_alias,
+        bot2_orig,
+        bot2_alias,
+        task.bot2.bot_type,
+        cheese_mode=task.bot2.cheese_mode,
+        cheese_profile=task.bot2.cheese_profile,
+    )
 
     cfg_path = workdir / "config.toml"
     write_config_toml(cfg_path, max_game_time, max_frame_time, strikes, realtime)
@@ -1066,6 +1211,12 @@ def run_single_match(
         "opp_log_path": opp_log_saved,
         "controller_log_path": str(controller_log_dest),
     }
+    if task.bot1.cheese_mode or task.bot1.cheese_profile:
+        rec["bot1_cheese_mode"] = True
+        rec["bot1_cheese_profile"] = task.bot1.cheese_profile or "auto"
+    if task.bot2.cheese_mode or task.bot2.cheese_profile:
+        rec["bot2_cheese_mode"] = True
+        rec["bot2_cheese_profile"] = task.bot2.cheese_profile or "auto"
     if our_apm_cap_drops is not None:
         rec["apm_cap_drops"] = our_apm_cap_drops
     if opp_telemetry:
@@ -1154,6 +1305,55 @@ def aggregate_spawn_balance(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def aggregate_cheese_vulnerability(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Aggregate per-opponent Cheese Vulnerability table for Version C Cheese Radar runs.
+
+    Ranks opponents by vulnerability (highest cheese win-rate first, then fastest avg win time).
+    """
+    by_opp: dict[str, list[dict[str, Any]]] = {}
+    for r in records:
+        if r.get("cohort") == "selfplay":
+            continue
+        opp = str(r.get("bot2") or "").strip()
+        if not opp:
+            continue
+        by_opp.setdefault(opp, []).append(r)
+
+    rows: list[dict[str, Any]] = []
+    for opp, grp in by_opp.items():
+        w = sum(1 for r in grp if r.get("outcome") == "Win")
+        l = sum(1 for r in grp if r.get("outcome") == "Loss")
+        t = sum(1 for r in grp if r.get("outcome") == "Tie")
+        e = sum(1 for r in grp if r.get("outcome") == "Error")
+        dec = w + l + t
+        wr = round(100.0 * w / dec, 1) if dec > 0 else 0.0
+        win_mins = [float(r["game_minutes"]) for r in grp if r.get("outcome") == "Win" and r.get("game_minutes")]
+        avg_win_min = round(sum(win_mins) / len(win_mins), 2) if win_mins else None
+        sub6_wins = sum(1 for m in win_mins if m <= 6.0)
+        by_race: dict[str, str] = {}
+        for r in grp:
+            rc = str(r.get("bot1_race") or "?")
+            oc = str(r.get("outcome") or "?")[0]
+            by_race[rc] = oc
+        rows.append({
+            "opponent": opp,
+            "opp_race": str(grp[0].get("bot2_race") or "?"),
+            "cohort": str(grp[0].get("cohort") or "unknown"),
+            "elo": grp[0].get("bot2_elo"),
+            "matches": len(grp),
+            "wins": w,
+            "losses": l,
+            "ties": t,
+            "errors": e,
+            "cheese_wr_pct": wr,
+            "sub6_wins": sub6_wins,
+            "avg_win_minutes": avg_win_min,
+            "by_cheese_race": dict(sorted(by_race.items())),
+        })
+    rows.sort(key=lambda x: (-x["cheese_wr_pct"], -x["wins"], x["avg_win_minutes"] if x["avg_win_minutes"] is not None else 999.0, x["opponent"].lower()))
+    return rows
+
+
 def format_summary_text(summary: dict[str, Any]) -> str:
     t = summary["totals"]
     lines = [
@@ -1230,6 +1430,19 @@ def format_summary_text(summary: dict[str, Any]) -> str:
                 f"(err={v['errors']}) WR={v['win_rate_pct']:>5.1f}% | "
                 f"clean={v['clean_wins']}W-{v['clean_losses']}L | avgGame={v['avg_game_minutes']:.1f}m"
             )
+    cv_rows = summary.get("cheese_vulnerability")
+    if isinstance(cv_rows, list) and cv_rows:
+        lines.append("")
+        lines.append("--- Cheese Vulnerability (by Opponent) ---")
+        lines.append(f"  {'Opponent':<22} {'Race':<4} {'Coh':<7} {'W-L-T':<7} {'CheeseWR':>8} {'<6m':>4} {'AvgWin':>7}  {'ByRace'}")
+        for row in cv_rows:
+            wlt = f"{row['wins']}-{row['losses']}-{row['ties']}"
+            avg_w = f"{row['avg_win_minutes']:.1f}m" if row.get("avg_win_minutes") is not None else "-"
+            br = " ".join(f"{k}:{v}" for k, v in sorted((row.get("by_cheese_race") or {}).items()))
+            lines.append(
+                f"  {row['opponent']:<22} {row['opp_race']:<4} {row['cohort'][:7]:<7} "
+                f"{wlt:<7} {row['cheese_wr_pct']:>7.1f}% {row['sub6_wins']:>4} {avg_w:>7}  {br}"
+            )
     lines.append("")
     lines.append("--- Match Details ---")
     lines.append(f"{'#':>3} {'Cohort':<8} {'Bot':<10} {'Opponent':<20} {'Map':<20} {'Outcome':<7} {'RawResult':<16} {'Loops':>6} {'Min':>5} {'Wall':>6} {'Step':>6}")
@@ -1251,26 +1464,35 @@ def resolve_bot_spec(
     mothman_mode: str,
     arena_dir: Path,
     repo_dir: Path,
-    mothman_cache: dict[tuple[str, str], Path],
+    mothman_cache: dict[tuple[str, ...], Path],
     alias_name: str = "",
     stage_mothman: bool = True,
+    cheese_profile: str | None = None,
 ) -> BotSpec:
     if name in MOTHMAN_VARIANTS:
+        meta = MOTHMAN_VARIANTS[name]
+        is_cheese = bool(meta.get("cheese_mode", False)) or bool(cheese_profile)
+        eff_profile = (cheese_profile or str(meta.get("cheese_profile") or "") or ("auto" if is_cheese else "")).strip()
         src_dir: Path | None = None
         if stage_mothman:
-            ckey = (name, mothman_mode)
+            ckey = (name, mothman_mode, eff_profile if is_cheese else "")
             if ckey not in mothman_cache:
-                mothman_cache[ckey] = stage_mothman_cache(name, mothman_mode, arena_dir, repo_dir)
+                mothman_cache[ckey] = stage_mothman_cache(
+                    name, mothman_mode, arena_dir, repo_dir,
+                    cheese_profile=eff_profile if is_cheese else None,
+                )
             src_dir = mothman_cache[ckey]
         eff_name = alias_name or name
         return BotSpec(
             name=eff_name,
-            race=MOTHMAN_VARIANTS[name]["race"],
+            race=meta["race"],
             bot_type="cpplinux",
             source_dir=src_dir,
             is_mothman=True,
             source_bot_name=name,
             bot_mode=mothman_mode,
+            cheese_mode=is_cheese,
+            cheese_profile=eff_profile,
         )
     if name in roster:
         return roster[name]
@@ -1481,9 +1703,29 @@ def build_match_tasks(
     repo_dir: Path,
     stage_mothman: bool = True,
 ) -> list[MatchTask]:
-    mothman_cache: dict[tuple[str, str], Path] = {}
+    mothman_cache: dict[tuple[str, ...], Path] = {}
     tasks: list[MatchTask] = []
     bench_seed = normalize_bench_seed(getattr(args, "bench_seed", DEFAULT_BENCH_SEED))
+    p1_cheese_profile = (getattr(args, "cheese_profile", None) or "").strip() or None
+    p2_cheese_profile = (getattr(args, "p2_cheese_profile", None) or "").strip() or None
+
+    if bool(getattr(args, "cheese_defense_drill", False)):
+        for idx, (p1_var, p2_var, prof_id) in enumerate(CHEESE_DEFENSE_DRILL_18, start=1):
+            eff_p2_prof = p2_cheese_profile or prof_id
+            b1 = resolve_bot_spec(
+                p1_var, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
+                stage_mothman=stage_mothman,
+                cheese_profile=p1_cheese_profile,
+            )
+            b2 = resolve_bot_spec(
+                p2_var, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
+                stage_mothman=stage_mothman,
+                cheese_profile=eff_p2_prof,
+            )
+            mp, rseed = deterministic_map_and_seed(bench_seed, b1.name, f"{b2.name}:{eff_p2_prof}", 0, maps)
+            slug = f"{idx:03d}_{sanitize_slug(b1.name)}_vs_{sanitize_slug(b2.name)}_{sanitize_slug(eff_p2_prof)}_{sanitize_slug(mp)}"
+            tasks.append(MatchTask(idx, b1, b2, mp, slug, cohort="cheese_drill", random_seed=rseed))
+        return tasks
 
     if args.match_file:
         mf = Path(args.match_file)
@@ -1494,10 +1736,12 @@ def build_match_tasks(
             b1 = resolve_bot_spec(
                 item["bot"], roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
                 stage_mothman=stage_mothman,
+                cheese_profile=item.get("cheese_profile") or p1_cheese_profile,
             )
             b2 = resolve_bot_spec(
                 item["opponent"], roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
                 stage_mothman=stage_mothman,
+                cheese_profile=item.get("p2_cheese_profile") or p2_cheese_profile,
             )
             rep_k = (b1.name, b2.name)
             rep_i = pair_reps.get(rep_k, 0)
@@ -1511,12 +1755,15 @@ def build_match_tasks(
             tasks.append(MatchTask(idx, b1, b2, mp, slug, cohort=coh, random_seed=rseed))
         return tasks
 
-    if args.bots.strip().lower() == "all":
-        bot_names = ["Mothman-P", "Mothman-T", "Mothman-Z", "Mothman-X"]
+    if bool(getattr(args, "cheese_radar", False)):
+        bot_names = ["Mothman-PC", "Mothman-TC", "Mothman-ZC"]
+        opp_arg = "all"
     else:
-        bot_names = [x.strip() for x in args.bots.split(",") if x.strip()]
-
-    opp_arg = args.opponents.strip()
+        if args.bots.strip().lower() == "all":
+            bot_names = ["Mothman-P", "Mothman-T", "Mothman-Z", "Mothman-X"]
+        else:
+            bot_names = [x.strip() for x in args.bots.split(",") if x.strip()]
+        opp_arg = args.opponents.strip()
     opp_low = opp_arg.lower()
     want_selfplay = bool(getattr(args, "include_selfplay", False)) or (opp_low in ("self_6", "selfplay", "self"))
     if opp_low in ("self_6", "selfplay", "self", "none", ""):
@@ -1554,6 +1801,7 @@ def build_match_tasks(
                 resolve_bot_spec(
                     bname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
                     stage_mothman=stage_mothman,
+                    cheese_profile=p1_cheese_profile,
                 )
                 for bname in bot_names
             ]
@@ -1561,6 +1809,7 @@ def build_match_tasks(
                 resolve_bot_spec(
                     oname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
                     stage_mothman=stage_mothman,
+                    cheese_profile=p2_cheese_profile,
                 )
                 for oname in opp_names
             ]
@@ -1583,6 +1832,7 @@ def build_match_tasks(
                 b1 = resolve_bot_spec(
                     p1_var, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
                     stage_mothman=stage_mothman,
+                    cheese_profile=p1_cheese_profile,
                 )
                 b2 = resolve_bot_spec(
                     p2_var,
@@ -1593,6 +1843,7 @@ def build_match_tasks(
                     mothman_cache,
                     alias_name=f"{p2_var}{p2_suffix}",
                     stage_mothman=stage_mothman,
+                    cheese_profile=p2_cheese_profile,
                 )
                 est = estimate_match_wall_sec(b1.name, b2.name, pair_est, opp_est)
                 mp, rseed = deterministic_map_and_seed(bench_seed, b1.name, b2.name, sp_i, maps)
@@ -1620,6 +1871,7 @@ def build_match_tasks(
             resolve_bot_spec(
                 bname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
                 stage_mothman=stage_mothman,
+                cheese_profile=p1_cheese_profile,
             )
             for bname in bot_names
         ]
@@ -1627,6 +1879,7 @@ def build_match_tasks(
             resolve_bot_spec(
                 oname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
                 stage_mothman=stage_mothman,
+                cheese_profile=p2_cheese_profile,
             )
             for oname in opp_names
         ]
@@ -1668,6 +1921,7 @@ def build_match_tasks(
             b1 = resolve_bot_spec(
                 p1_var, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
                 stage_mothman=stage_mothman,
+                cheese_profile=p1_cheese_profile,
             )
             b2 = resolve_bot_spec(
                 p2_var,
@@ -1678,6 +1932,7 @@ def build_match_tasks(
                 mothman_cache,
                 alias_name=f"{p2_var}{p2_suffix}",
                 stage_mothman=stage_mothman,
+                cheese_profile=p2_cheese_profile,
             )
             mp, rseed = deterministic_map_and_seed(bench_seed, b1.name, b2.name, sp_i, maps)
             slug = f"{idx:03d}_{sanitize_slug(b1.name)}_vs_{sanitize_slug(b2.name)}_{sanitize_slug(mp)}"
@@ -1700,6 +1955,14 @@ def main() -> int:
                         help="Optional cap on Self-Play matches appended (e.g. 1 for quick smoke verification)")
     parser.add_argument("--selfplay-baseline", action="store_true",
                         help="Pit live P1 Mothman (--mothman-mode) against committed ladder/Mothman-{P,T,Z}.zip as P2 (Mothman-*-Base)")
+    parser.add_argument("--cheese-profile", default=None,
+                        help="Explicit Version C cheese profile ID (or 'auto') for P1 (enables cheese_mode on P1)")
+    parser.add_argument("--p2-cheese-profile", default=None,
+                        help="Explicit Version C cheese profile ID (or 'auto') for P2 (enables cheese_mode on P2)")
+    parser.add_argument("--cheese-defense-drill", action="store_true",
+                        help="Preset: 18 deterministic matches (9 matchups x 2 pro cheeses) pitting P1 Main Macro Mothman-{P,T,Z} vs P2 Version C Mothman-{PC,TC,ZC} on season maps (default max-game-time=16128 / 12m)")
+    parser.add_argument("--cheese-radar", action="store_true",
+                        help="Preset: 78 deterministic matches (Mothman-{PC,TC,ZC} vs all 26 local AI Arena bots) with per-opponent Cheese Vulnerability table (default max-game-time=16128 / 12m)")
     parser.add_argument("--maps", default="season",
                         help="Comma-separated map names, 'season' (maps_manifest.json), or 'all'")
     parser.add_argument("--matches-per-pair", type=int, default=1,
@@ -1717,10 +1980,9 @@ def main() -> int:
     parser.add_argument("--timeout-sec", type=int, default=480,
                         help="Per-match wall-clock timeout in seconds (default: 480)")
     # Temporary local-loop 25m cap (33600 = 25 * 60 * 22.4 loops) paired with end-of-game
-    # state scoring for faster iteration; revisit & raise to 40320 (30m) / 60480 (45m) once
-    # >15% of external matches reach 25m or late-game Tier-3 endgames dominate.
+    # state scoring for faster iteration; cheese presets default to 16128 (12m).
     parser.add_argument("--max-game-time", type=int, default=33600,
-                        help="SC2 MAX_GAME_TIME in loops (default: 33600=25m temporary local-loop cap, revisit once >15%% of matches reach 25m or Tier-3 endgames dominate; 40320=30m, 60480=45m AI Arena std)")
+                        help="SC2 MAX_GAME_TIME in loops (default: 33600=25m, or 16128=12m for --cheese-defense-drill / --cheese-radar; 40320=30m, 60480=45m AI Arena std)")
     parser.add_argument("--max-frame-time", type=int, default=1000,
                         help="AI Arena MAX_FRAME_TIME in ms (default: 1000)")
     parser.add_argument("--strikes", type=int, default=10,
@@ -1752,6 +2014,11 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true",
                         help="Print match plan and exit without running matches")
     args = parser.parse_args()
+    if args.cheese_defense_drill and args.cheese_radar:
+        parser.error("--cheese-defense-drill and --cheese-radar are mutually exclusive")
+    explicit_max_game_time = any(a == "--max-game-time" or a.startswith("--max-game-time=") for a in sys.argv[1:])
+    if (args.cheese_defense_drill or args.cheese_radar) and not explicit_max_game_time:
+        args.max_game_time = CHEESE_DEFAULT_MAX_GAME_TIME
 
     arena_dir = args.arena_dir.resolve()
     repo_dir = args.repo_dir.resolve()
@@ -1777,8 +2044,10 @@ def main() -> int:
         print(f"Planned matches ({len(tasks)}): schedule_order={args.schedule_order} | bench_seed={bench_seed_norm} | bots={args.bots} | opponents={args.opponents}")
         for t in tasks:
             est_s = f" | est={t.est_wall_sec:.0f}s" if t.est_wall_sec is not None else ""
-            print(f"  [{t.index:03d}] [{t.cohort:<8}] {t.bot1.name}({t.bot1.race},{t.bot1.bot_mode or t.bot1.bot_type}) vs "
-                  f"{t.bot2.name}({t.bot2.race},{t.bot2.bot_mode or t.bot2.bot_type}) on {t.map_name} | seed={t.random_seed}{est_s}")
+            p1_ch = f",cheese={t.bot1.cheese_profile}" if t.bot1.cheese_mode else ""
+            p2_ch = f",cheese={t.bot2.cheese_profile}" if t.bot2.cheese_mode else ""
+            print(f"  [{t.index:03d}] [{t.cohort:<12}] {t.bot1.name}({t.bot1.race},{t.bot1.bot_mode or t.bot1.bot_type}{p1_ch}) vs "
+                  f"{t.bot2.name}({t.bot2.race},{t.bot2.bot_mode or t.bot2.bot_type}{p2_ch}) on {t.map_name} | seed={t.random_seed}{est_s}")
         return 0
 
     if args.dry_run:
@@ -1791,8 +2060,10 @@ def main() -> int:
         print(f"Dry run: {len(tasks)} matches | mode={args.mothman_mode} | schedule_order={args.schedule_order} | bench_seed={bench_seed_norm} | j={args.concurrency} | max_game_time={args.max_game_time} | runtime={runtime}")
         for t in tasks:
             est_s = f" | est={t.est_wall_sec:.0f}s" if t.est_wall_sec is not None else ""
-            print(f"  [{t.index:03d}] [{t.cohort:<8}] {t.bot1.name}({t.bot1.race},{t.bot1.bot_mode or t.bot1.bot_type}) vs "
-                  f"{t.bot2.name}({t.bot2.race},{t.bot2.bot_mode or t.bot2.bot_type}) on {t.map_name} | seed={t.random_seed}{est_s}")
+            p1_ch = f",cheese={t.bot1.cheese_profile}" if t.bot1.cheese_mode else ""
+            p2_ch = f",cheese={t.bot2.cheese_profile}" if t.bot2.cheese_mode else ""
+            print(f"  [{t.index:03d}] [{t.cohort:<12}] {t.bot1.name}({t.bot1.race},{t.bot1.bot_mode or t.bot1.bot_type}{p1_ch}) vs "
+                  f"{t.bot2.name}({t.bot2.race},{t.bot2.bot_mode or t.bot2.bot_type}{p2_ch}) on {t.map_name} | seed={t.random_seed}{est_s}")
         return 0
 
     runtime = detect_container_runtime(args.container_runtime)
@@ -1908,12 +2179,23 @@ def main() -> int:
         by_cohort[c] = aggregate_records([r for r in results if str(r.get("cohort") or "unknown") == c])
 
     ext_results = [r for r in results if r.get("cohort") != "selfplay"]
+    all_p1_cheese = bool(results) and all(bool(r.get("bot1_cheese_mode")) for r in results)
+    cheese_vuln = (
+        aggregate_cheese_vulnerability(results)
+        if (args.cheese_radar or all_p1_cheese)
+        else None
+    )
+    preset_name = (
+        "cheese_defense_drill" if args.cheese_defense_drill
+        else ("cheese_radar" if args.cheese_radar else None)
+    )
     summary = {
         "run_id": run_id,
         "run_dir": str(run_dir),
         "timestamp_utc": now_utc.isoformat(),
         "repo_commit": commit,
         "mothman_mode": args.mothman_mode,
+        "preset": preset_name,
         "schedule_order": args.schedule_order,
         "bench_seed": bench_seed_norm,
         "image": args.image,
@@ -1930,6 +2212,7 @@ def main() -> int:
         "by_bot": by_bot,
         "by_opponent": by_opponent,
         "by_matchup": by_matchup,
+        "cheese_vulnerability": cheese_vuln,
         "matches": results,
     }
 

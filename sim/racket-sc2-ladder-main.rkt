@@ -32,10 +32,13 @@
          "../lib/sc2-common.rkt"
          "../lib/bot-runtime.rkt"
          "../lib/sc2-protobuf-ws.rkt"
+         (only-in "../lib/build-orders/cheese.rkt"
+                  cheese-build-spec-id)
          (only-in "../lib/engine/arbiter.rkt"
                   arbiter-telemetry-summary))
 
 (provide
+ bot-name-implies-cheese?
  infer-bot-race-and-posture
  load-bot-config
  compute-ladder-port-config
@@ -105,6 +108,42 @@
          ",")))
   (format "[SCBOT_ARBITER] total=~a by_reason=~a top=~a" total by-r-str top-str))
 
+(define (bot-name-implies-cheese? bot-name)
+  (and (string? bot-name)
+       (let ([up (string-upcase (string-trim bot-name))])
+         (or (string-suffix? up "-ZC")
+             (string-suffix? up "-TC")
+             (string-suffix? up "-PC")
+             (string-suffix? up "-XC")))))
+
+(define (cheese-variant-base-info bot-name)
+  (and (string? bot-name)
+       (let ([up (string-upcase (string-trim bot-name))])
+         (cond
+           [(string-suffix? up "-ZC") (values "Mothman-Z" "Zerg" "bots/Mothman-Z.rkt")]
+           [(string-suffix? up "-TC") (values "Mothman-T" "Terran" "bots/Mothman-T.rkt")]
+           [(string-suffix? up "-PC") (values "Mothman-P" "Protoss" "bots/Mothman-P.rkt")]
+           [(string-suffix? up "-XC") (values "Mothman-X" "Random" "bots/Mothman.rkt")]
+           [else (values #f #f #f)]))))
+
+(define (json-bool-true? v)
+  (cond
+    [(boolean? v) v]
+    [(string? v)
+     (and (member (string-downcase (string-trim v)) '("1" "true" "yes" "on")) #t)]
+    [(number? v) (not (= v 0))]
+    [else #f]))
+
+(define (normalize-cheese-profile-str v)
+  (cond
+    [(symbol? v)
+     (let ([s (string-downcase (string-trim (symbol->string v)))])
+       (if (or (string=? s "") (string=? s "none") (string=? s "false")) #f s))]
+    [(string? v)
+     (let ([s (string-downcase (string-trim v))])
+       (if (or (string=? s "") (string=? s "none") (string=? s "false")) #f s))]
+    [else #f]))
+
 (define (infer-bot-race-and-posture bot-rkt-path [bot-name-hint #f])
   (define name-up
     (string-upcase
@@ -113,23 +152,28 @@
            (if fn (path->string fn) "Mothman")))))
   (define default-race
     (cond
-      [(or (string-suffix? name-up "-Z")
+      [(or (string-suffix? name-up "-ZC")
+           (string-suffix? name-up "-Z")
            (string-contains? name-up "ZERG")
            (string-contains? name-up "OVERMIND")
            (string-contains? name-up "KERRIGAN"))
        "Zerg"]
-      [(or (string-suffix? name-up "-T")
+      [(or (string-suffix? name-up "-TC")
+           (string-suffix? name-up "-T")
            (string-contains? name-up "TERRAN")
            (string-contains? name-up "DOMINION")
            (string-contains? name-up "SIEGE"))
        "Terran"]
-      [(or (string-suffix? name-up "-P")
+      [(or (string-suffix? name-up "-PC")
+           (string-suffix? name-up "-P")
            (string-contains? name-up "PROTOSS")
            (string-contains? name-up "KHALAI")
            (string-contains? name-up "CARRIER")
            (string-contains? name-up "CREEPY12PROBERUSH"))
        "Protoss"]
-      [(or (string-suffix? name-up "-R")
+      [(or (string-suffix? name-up "-XC")
+           (string-suffix? name-up "-X")
+           (string-suffix? name-up "-R")
            (string-contains? name-up "MOTHMAN"))
        "Random"]
       [else "Zerg"]))
@@ -153,24 +197,54 @@
 
 (define (load-bot-config [variant-name #f] #:root-dir [root-dir (current-directory)])
   (define cfg-path (build-path root-dir "config.json"))
+  (define-values (vc-base-name vc-race vc-path)
+    (if variant-name (cheese-variant-base-info variant-name) (values #f #f #f)))
   (define fallback
-    (if (and variant-name (string-ci=? variant-name "Creepy12ProbeRush"))
-        (hasheq 'BotName "Creepy12ProbeRush"
-                'BotRace "Protoss"
-                'BotPath "bots/Mothman-P.rkt")
-        (hasheq 'BotName (or variant-name "Mothman")
-                'BotRace "Random"
-                'BotPath "bots/Mothman.rkt")))
+    (cond
+      [(and variant-name (string-ci=? variant-name "Creepy12ProbeRush"))
+       (hasheq 'BotName "Creepy12ProbeRush"
+               'BotRace "Protoss"
+               'BotPath "bots/Mothman-P.rkt")]
+      [vc-base-name
+       (hasheq 'BotName variant-name
+               'BotRace vc-race
+               'BotPath vc-path
+               'CheeseMode #t
+               'CheeseProfile "auto")]
+      [else
+       (hasheq 'BotName (or variant-name "Mothman")
+               'BotRace "Random"
+               'BotPath "bots/Mothman.rkt")]))
   (if (and variant-name (string-ci=? variant-name "Creepy12ProbeRush"))
       fallback
       (if (file-exists? cfg-path)
           (with-handlers ([exn:fail? (lambda (_e) fallback)])
             (define raw (call-with-input-file cfg-path read-json))
+            (define raw-bn (hash-ref raw 'BotName #f))
             (define variants (hash-ref raw 'Variants (hasheq)))
             (define var-sym (and variant-name (string->symbol variant-name)))
-            (if (and var-sym (hash? variants) (hash-has-key? variants var-sym))
-                (hash-ref variants var-sym)
-                raw))
+            (cond
+              [(and variant-name (string? raw-bn) (string-ci=? raw-bn variant-name))
+               raw]
+              [(and var-sym (hash? variants) (hash-has-key? variants var-sym))
+               (hash-ref variants var-sym)]
+              [vc-base-name
+               (define base-sym (string->symbol vc-base-name))
+               (define base-cfg
+                 (if (and (hash? variants) (hash-has-key? variants base-sym))
+                     (hash-ref variants base-sym)
+                     (hasheq 'BotRace vc-race 'BotPath vc-path)))
+               (define base-with-name
+                 (hash-set (hash-set (hash-set base-cfg 'BotName variant-name)
+                                     'CheeseMode #t)
+                           'CheeseProfile
+                           (or (normalize-cheese-profile-str
+                                (hash-ref raw 'CheeseProfile (hash-ref raw 'cheese_profile #f)))
+                               "auto")))
+               (if (hash-has-key? base-with-name 'BotRace)
+                   base-with-name
+                   (hash-set base-with-name 'BotRace vc-race))]
+              [else raw]))
           fallback)))
 
 (define (compute-ladder-port-config start-port)
@@ -762,6 +836,8 @@
                               #:realtime? [realtime? #f]
                               #:step-size [step-size 4]
                               #:skip-build-order? [skip-build-order? #f]
+                              #:cheese-mode? [cheese-mode? #f]
+                              #:cheese-profile [cheese-profile 'auto]
                               #:root-dir [root-dir (current-directory)])
   (define auto-launched-handle
     (if (and (not game-port) computer-opponent?)
@@ -848,11 +924,19 @@
         (if (and initial-posture (not (string=? initial-posture "")))
             (string->symbol initial-posture)
             #f))
+      (define effective-cheese-mode?
+        (or cheese-mode? (bot-name-implies-cheese? bot-name)))
+      (define effective-cheese-profile
+        (let ([norm (normalize-cheese-profile-str cheese-profile)])
+          (if norm (string->symbol norm) 'auto)))
       (define runtime
         (make-live-bot-runtime #:bot-name (string->symbol bot-name)
                                #:race configured-race-sym
                                #:initial-posture posture-sym
-                               #:skip-build-order? skip-build-order?))
+                               #:skip-build-order? skip-build-order?
+                               #:cheese-mode? effective-cheese-mode?
+                               #:cheese-profile effective-cheese-profile
+                               #:cheese-seed (or opponent-id bot-name)))
 
       (define total-raw-cmds-sent 0)
       (define total-steps 0)
@@ -1145,10 +1229,15 @@
                         #:watchdog-expand-ring-syms step-watchdog-expand-ring-syms
                         #:arbiter-ledger step-arbiter-ledger
                         #:mineral-override-pressure? step-min-override-pressure?))
+                     (define cheese-excluded-workers
+                       (if (rt-cheese-mode? runtime)
+                           (rt-cheese-proxy-worker-tags runtime)
+                           (seteqv)))
                      (define sat-cmds0
                        (saturate-workers-and-gas-commands
                         obs
                         #:excluded-worker-tags commanded-workers
+                        #:exclude-worker-tags cheese-excluded-workers
                         #:role-leases step-role-leases
                         #:reserved-aabbs step-reserved-aabbs
                         #:game-info game-info
@@ -1329,7 +1418,14 @@
                                                         (simple-form-path save-replay-path))))
                     "")
                 'saved_replay_bytes (or saved-replay-bytes 0)
-                'skip_build_order skip-build-order?))
+                'skip_build_order skip-build-order?
+                'cheese_mode (rt-cheese-mode? runtime)
+                'cheese_profile (if (rt-cheese-mode? runtime)
+                                    (let ([cs (rt-cheese-active-spec runtime)])
+                                      (if cs
+                                          (symbol->string (cheese-build-spec-id cs))
+                                          (symbol->string (rt-cheese-profile runtime))))
+                                    "none")))
       (unless skip-build-order?
         (append-native-telemetry! root-dir summary))
       summary)
@@ -1362,7 +1458,8 @@
            (and fn (path->string fn)))))
   (define argv0-bot-name
     (and run-file-name
-         (member run-file-name '("Mothman" "Mothman-X" "Mothman-Z" "Mothman-T" "Mothman-P" "Mothman-R"))
+         (member run-file-name '("Mothman" "Mothman-X" "Mothman-Z" "Mothman-T" "Mothman-P" "Mothman-R"
+                                 "Mothman-XC" "Mothman-ZC" "Mothman-TC" "Mothman-PC"))
          run-file-name))
 
   (define game-port #f)
@@ -1383,6 +1480,8 @@
   (define realtime? #f)
   (define step-size 4)
   (define skip-build-order? (env-flag-enabled? "MOTHMAN_SKIP_BUILD_ORDER"))
+  (define cheese-mode-cli? #f)
+  (define cheese-profile-cli #f)
   (define dry-run? #f)
   (define ipc-sexp? #f)
 
@@ -1426,6 +1525,10 @@
                     (set! step-size (max 1 (or (string->number ss) 4)))]
    [("--no-macro" "--skip-build-order") "Disable build-order/macro phases while preserving full combat & worker micro"
                                         (set! skip-build-order? #t)]
+   [("--cheese-mode") "Enable Version C pro <6:00 cheese/all-in mode"
+                      (set! cheese-mode-cli? #t)]
+   [("--cheese-profile") cp "Cheese playbook profile ID or 'auto'"
+                         (set! cheese-profile-cli cp)]
    [("--ipc-sexp") "Run line-oriented stdin/stdout S-expression IPC loop"
                    (set! ipc-sexp? #t)]
    [("--dry-run") "Verify configuration and runtime without connecting to SC2"
@@ -1448,6 +1551,23 @@
     (or race-override (hash-ref cfg 'BotRace #f) inferred-race))
   (define resolved-posture
     (or posture-override inferred-posture))
+  (define cfg-cheese-mode?
+    (or (json-bool-true? (hash-ref cfg 'CheeseMode #f))
+        (json-bool-true? (hash-ref cfg 'cheese_mode #f))))
+  (define resolved-cheese-mode?
+    (and (or cheese-mode-cli?
+             (env-flag-enabled? "MOTHMAN_CHEESE_MODE")
+             cfg-cheese-mode?
+             (bot-name-implies-cheese? resolved-bot-name))
+         #t))
+  (define resolved-cheese-profile-str
+    (or (normalize-cheese-profile-str cheese-profile-cli)
+        (normalize-cheese-profile-str (getenv "MOTHMAN_CHEESE_PROFILE"))
+        (normalize-cheese-profile-str (hash-ref cfg 'CheeseProfile #f))
+        (normalize-cheese-profile-str (hash-ref cfg 'cheese_profile #f))
+        "auto"))
+  (define resolved-cheese-profile-sym
+    (string->symbol resolved-cheese-profile-str))
 
   (cond
     [ipc-sexp?
@@ -1455,7 +1575,9 @@
        (make-live-bot-runtime #:bot-name (string->symbol resolved-bot-name)
                               #:race (string->symbol resolved-race)
                               #:initial-posture (string->symbol resolved-posture)
-                              #:skip-build-order? skip-build-order?))
+                              #:skip-build-order? skip-build-order?
+                              #:cheese-mode? resolved-cheese-mode?
+                              #:cheese-profile resolved-cheese-profile-sym))
      (let loop ()
        (define line (read-line (current-input-port) 'any))
        (unless (eof-object? line)
@@ -1479,7 +1601,9 @@
       (make-live-bot-runtime #:bot-name (string->symbol resolved-bot-name)
                              #:race (string->symbol resolved-race)
                              #:initial-posture (string->symbol resolved-posture)
-                             #:skip-build-order? skip-build-order?))
+                             #:skip-build-order? skip-build-order?
+                             #:cheese-mode? resolved-cheese-mode?
+                             #:cheese-profile resolved-cheese-profile-sym))
      (define out-hash
        (hasheq 'status "DRY_RUN_OK"
                'engine "racket_native_protobuf_ws"
@@ -1488,6 +1612,10 @@
                'resolved_race resolved-race
                'resolved_posture (symbol->string (live-bot-runtime-posture rt))
                'skip_build_order (rt-skip-build-order? rt)
+               'cheese_mode (rt-cheese-mode? rt)
+               'cheese_profile (if (rt-cheese-mode? rt)
+                                   (symbol->string (rt-cheese-profile rt))
+                                   "none")
                'map (resolve-sc2-map-path map-name)))
      (displayln (jsexpr->string out-hash))
      out-hash]
@@ -1510,7 +1638,9 @@
                              #:max-loops effective-max-loops
                              #:realtime? realtime?
                              #:step-size step-size
-                             #:skip-build-order? skip-build-order?))
+                             #:skip-build-order? skip-build-order?
+                             #:cheese-mode? resolved-cheese-mode?
+                             #:cheese-profile resolved-cheese-profile-sym))
      (displayln (jsexpr->string res))
      res]
     [else
