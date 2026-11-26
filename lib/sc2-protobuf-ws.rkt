@@ -7956,13 +7956,18 @@
   ;; MUST NEVER match or claim a front `'wall-slot` AABB — wall strictly with sturdy Gateway/CyberCore/Forge!
   (define matched-wall-slot
     (and (not (memq canon-bldg SC2-PROTOSS-FRAGILE-TECH-SYMS))
-         (for/first ([b (in-list reserved-aabbs)]
-                     #:when (and (reserved-aabb? b)
-                                 (eq? (reserved-aabb-kind b) 'wall-slot)
-                                 (<= (pt-dist anchor-x anchor-y (reserved-aabb-cx b) (reserved-aabb-cy b)) 3.0)
-                                 (<= (abs (- (reserved-aabb-half-w b) cand-hw)) 0.35)
-                                 (<= (abs (- (reserved-aabb-half-h b) cand-hh)) 0.35)))
-           b)))
+         (let ([cands
+                (filter (lambda (b)
+                          (and (reserved-aabb? b)
+                               (eq? (reserved-aabb-kind b) 'wall-slot)
+                               (<= (pt-dist anchor-x anchor-y (reserved-aabb-cx b) (reserved-aabb-cy b)) 3.0)
+                               (<= (abs (- (reserved-aabb-half-w b) cand-hw)) 0.35)
+                               (<= (abs (- (reserved-aabb-half-h b) cand-hh)) 0.35)))
+                        reserved-aabbs)])
+           (and (pair? cands)
+                (argmin (lambda (b)
+                          (pt-dist anchor-x anchor-y (reserved-aabb-cx b) (reserved-aabb-cy b)))
+                        cands)))))
   (define doorway-corridor-aabbs
     (filter (lambda (b)
               (and (reserved-aabb? b)
@@ -15261,20 +15266,34 @@
                                                         (sc2-point2d-y pt)
                                                         power-sources
                                                         completed-pylons))))
+            (define req-targets-wall-slot?
+              (and req-powered?
+                   (not is-fragile-protoss-tech?)
+                   (let-values ([(rhw rhh) (sc2-structure-half-dims norm)])
+                     (ormap (lambda (b)
+                              (and (reserved-aabb? b)
+                                   (eq? (reserved-aabb-kind b) 'wall-slot)
+                                   (<= (pt-dist req-x req-y (reserved-aabb-cx b) (reserved-aabb-cy b)) 1.5)
+                                   (<= (abs (- (reserved-aabb-half-w b) rhw)) 0.35)
+                                   (<= (abs (- (reserved-aabb-half-h b) rhh)) 0.35)))
+                            reserved-aabbs))))
             (define primary-x
-              (if (and req-powered? (not req-contested?) (not emerg-cloak-cannon?)
-                       (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?)
-                       (not fragile-tech-main-protect?))
+              (if (or req-targets-wall-slot?
+                      (and req-powered? (not req-contested?) (not emerg-cloak-cannon?)
+                           (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?)
+                           (not fragile-tech-main-protect?)))
                   req-x px))
             (define primary-y
-              (if (and req-powered? (not req-contested?) (not emerg-cloak-cannon?)
-                       (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?)
-                       (not fragile-tech-main-protect?))
+              (if (or req-targets-wall-slot?
+                      (and req-powered? (not req-contested?) (not emerg-cloak-cannon?)
+                           (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?)
+                           (not fragile-tech-main-protect?)))
                   req-y py))
             (define eff-anchors
-              (if (and req-powered? (not req-contested?) (not emerg-cloak-cannon?)
-                       (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?)
-                       (not fragile-tech-main-protect?))
+              (if (or req-targets-wall-slot?
+                      (and req-powered? (not req-contested?) (not emerg-cloak-cannon?)
+                           (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?)
+                           (not fragile-tech-main-protect?)))
                   (remove-duplicates (cons (cons req-x req-y) search-anchors))
                   (remove-duplicates
                    (append search-anchors

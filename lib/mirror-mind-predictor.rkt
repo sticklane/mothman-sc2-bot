@@ -2784,6 +2784,8 @@
 (define (compute-opponent-shadow-ledger mstate raw-frame raw-enemy-units raw-enemy-bldgs
                                         #:base-x [raw-base-x 32]
                                         #:base-y [raw-base-y 32]
+                                        #:nat-x [raw-nat-x #f]
+                                        #:nat-y [raw-nat-y #f]
                                         #:observed-effects [observed-effects '()]
                                         #:enemy-workers-killed [raw-enemy-workers-killed 0]
                                         #:our-upgrade-tier [raw-our-upgrade-tier 0]
@@ -2792,6 +2794,9 @@
   (define frame (safe-frame raw-frame))
   (define base-x (safe-coord raw-base-x 32))
   (define base-y (safe-coord raw-base-y 32))
+  (define has-nat? (and (real? raw-nat-x) (real? raw-nat-y)))
+  (define nat-x (if has-nat? (safe-coord raw-nat-x 50) 50))
+  (define nat-y (if has-nat? (safe-coord raw-nat-y 56) 56))
   (define enemy-workers-killed (max 0 (safe-int raw-enemy-workers-killed 0)))
   (define our-upgrade-tier (max 0 (safe-int raw-our-upgrade-tier 0)))
   (define enemy-units (if (list? raw-enemy-units) raw-enemy-units '()))
@@ -2898,7 +2903,8 @@
   ;;    plus 2nd geyser after frame 2400 @ 0.085 G/frame only when >= 2 gas buildings are seen).
   (define enemy-townhalls '())
   (define seen-gas-bldgs 0)
-  (define near-enemy-bldg? #f)
+  (define near-non-natblock-bldg-cnt 0)
+  (define near-natblock-bldg-cnt 0)
   (define bldg-static-def? #f)
   (for ([b (in-list enemy-bldgs)])
     (define bt (unit-type-sym b))
@@ -2911,12 +2917,29 @@
                (memq bt '(bunker photon-cannon shield-battery spine-crawler
                           planetary-fortress siege-tank siege-tank-sieged)))
       (set! bldg-static-def? #t))
-    (when (and (not near-enemy-bldg?)
-               (not (or (hash-ref b 'canceled? #f) (hash-ref b 'canceled #f))))
-      (define dx (- base-x (safe-real (hash-ref b 'x 160) 160)))
-      (define dy (- base-y (safe-real (hash-ref b 'y 160) 160)))
-      (when (<= (+ (* dx dx) (* dy dy)) 1024.0)
-        (set! near-enemy-bldg? #t))))
+    (when (not (or (hash-ref b 'canceled? #f) (hash-ref b 'canceled #f)))
+      (define bx (safe-real (hash-ref b 'x 160) 160))
+      (define by (safe-real (hash-ref b 'y 160) 160))
+      (define dx (- base-x bx))
+      (define dy (- base-y by))
+      (define d2-main (+ (* dx dx) (* dy dy)))
+      (when (<= d2-main 1024.0)
+        ;; L85C: Exclude a lone natural-pad `pylon`/`engineering-bay` expansion block (`dNat <= 7.5t`
+        ;; and `dMain > 16.0t`) from flagging `near-enemy-bldg?` -> `'proxy-production-or-all-in`;
+        ;; escalate immediately on >= 2 such structures (cannon rush) or any other proxy structure!
+        (define is-nat-exp-block?
+          (and has-nat?
+               (memq bt '(pylon engineering-bay))
+               (> d2-main 256.0)
+               (let ([dnx (- nat-x bx)]
+                     [dny (- nat-y by)])
+                 (<= (+ (* dnx dnx) (* dny dny)) 56.25))))
+        (if is-nat-exp-block?
+            (set! near-natblock-bldg-cnt (add1 near-natblock-bldg-cnt))
+            (set! near-non-natblock-bldg-cnt (add1 near-non-natblock-bldg-cnt))))))
+  (define near-enemy-bldg?
+    (or (> near-non-natblock-bldg-cnt 0)
+        (>= near-natblock-bldg-cnt 2)))
   (define ground-combat-count 0)
   (define enemy-combat-count 0)
   (define near-enemy-combat-count 0)
@@ -3179,14 +3202,34 @@
          (<= frame 6048)
          (<= enemy-townhalls 1)
          (<= pred-enemy-bases 1)))
+  ;; L85C: Exclude a lone natural-pad `pylon`/`engineering-bay` expansion block (`dNat <= 7.5t`
+  ;; and `dMain > 16.0t`, matching `bot-runtime.rkt:50389-50406`) so natural expansion blocks never
+  ;; falsely trigger `action-lens-reading-proxy-or-rush-detected?` (`rush = 0.91`), while any 2nd
+  ;; Pylon (cannon rush) or combat/production proxy structure still triggers immediately!
+  (define-values (non-natblock-proxy-cnt natblock-bldg-cnt)
+    (for/fold ([non-nb 0] [nb 0])
+              ([b (in-list enemy-bldgs)]
+               #:when (and (hash? b)
+                           (not (or (hash-ref b 'canceled? #f) (hash-ref b 'canceled #f)))))
+      (define bx (exact->inexact (safe-real (hash-ref b 'x 160.0) 160.0)))
+      (define by (exact->inexact (safe-real (hash-ref b 'y 160.0) 160.0)))
+      (define dmx (fl- fbx bx))
+      (define dmy (fl- fby by))
+      (define d2-main (fl+ (fl* dmx dmx) (fl* dmy dmy)))
+      (if (fl<= d2-main 1444.0) ; <= 38.0t from our main
+          (let* ([bt (unit-type-sym b)]
+                 [dnx (fl- fnx bx)]
+                 [dny (fl- fny by)]
+                 [d2-nat (fl+ (fl* dnx dnx) (fl* dny dny))])
+            (if (and (memq bt '(pylon engineering-bay))
+                     (fl> d2-main 256.0) ; > 16.0t from our main
+                     (fl<= d2-nat 56.25)) ; <= 7.5t from our natural pad
+                (values non-nb (add1 nb))
+                (values (add1 non-nb) nb)))
+          (values non-nb nb))))
   (define proxy-or-rush?
-    (or (ormap (lambda (b)
-                 (and (not (or (hash-ref b 'canceled? #f) (hash-ref b 'canceled #f)))
-                      (<= (dist2d base-x base-y
-                                  (hash-ref b 'x 160)
-                                  (hash-ref b 'y 160))
-                          38.0)))
-               enemy-bldgs)
+    (or (> non-natblock-proxy-cnt 0)
+        (>= natblock-bldg-cnt 2)
         (and (< frame 2688)
              (or (>= near-nat-combat 3)
                  (>= near-nat-workers 3)))))
@@ -6506,6 +6549,7 @@
   (define ledger
     (compute-opponent-shadow-ledger mstate frame enemy-units enemy-bldgs
                                     #:base-x base-x #:base-y base-y
+                                    #:nat-x nat-x #:nat-y nat-y
                                     #:observed-effects effects
                                     #:our-upgrade-tier our-upgrade-tier
                                     #:enemy-workers-killed enemy-workers-killed))

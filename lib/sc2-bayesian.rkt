@@ -363,6 +363,7 @@
          #:feint-or-poke-detected? Boolean
          #:proxy-or-rush-detected? Boolean
          #:branch-posteriors (HashTable Symbol Float))
+        (#:proxy-all-in-posterior (Option Real))
         bayesian-strategic-priors))
 (define (evaluate-strategic-posteriors-from-signals
          #:bluff-prior raw-bluff-prior
@@ -375,9 +376,12 @@
          #:predicted-enemy-bases pred-bases
          #:feint-or-poke-detected? feint-detected?
          #:proxy-or-rush-detected? proxy-rush?
-         #:branch-posteriors branch-posteriors)
+         #:branch-posteriors branch-posteriors
+         #:proxy-all-in-posterior [raw-proxy-post #f])
   (define bluff-prior (clamp-real raw-bluff-prior 0.01 0.45))
   (define bluff-post (clamp-real raw-bluff-post 0.01 0.99))
+  (define proxy-post-val : (Option Float)
+    (and (real? raw-proxy-post) (clamp-real raw-proxy-post 0.0 0.99)))
   (define feint-post
     (bayesian-posterior-from-likelihoods
      0.10
@@ -386,7 +390,7 @@
       (cons feint-detected? 8.5)
       (cons (and (>= combat-cnt 1) (<= combat-cnt 3) (>= rem-gas 180.0)) 3.2)
       (cons (>= bluff-post 0.55) 2.5))))
-  (define rush-post
+  (define rush-post-base
     (bayesian-posterior-from-likelihoods
      0.12
      #:any-evidence? #t
@@ -394,7 +398,13 @@
       (cons proxy-rush? 12.0)
       (cons (eq? dm-hyp 'proxy-production-or-all-in) 6.0)
       (cons (and (<= frame 2688) (>= combat-cnt 4)) 4.0)
+      (cons (and proxy-post-val (>= proxy-post-val 0.55)) 6.5)
+      (cons (and proxy-post-val (>= proxy-post-val 0.75)) 2.5)
       (cons (>= pred-bases 3) 0.15))))
+  (define rush-post : Float
+    (if (and proxy-post-val (>= proxy-post-val 0.50) (<= frame 7392))
+        (max rush-post-base (min 0.95 proxy-post-val))
+        rush-post-base))
   (define hidden-expand-post
     (bayesian-posterior-from-likelihoods
      0.14
@@ -460,7 +470,7 @@
     (cons (and (>= wall-cnt 2) (= lowered-cnt 0) (= gap-units 0)) 0.06)
     (cons (>= static-cnt 1) 0.35))))
 
-;; Computes P(enemy is executing an off-path proxy all-in | E) in [0.01, 0.99].
+;; Computes P(enemy is executing an off-path proxy all-in or 1-base tech rush | E) in [0.01, 0.99].
 (: compute-bayesian-proxy-all-in-posterior
    (->* ()
         (#:prior Any
@@ -472,7 +482,10 @@
          #:frame Any
          #:proxy-bldg-spotted? Any
          #:early-enemy-combat-count Any
-         #:enemy-worker-deficit? Any)
+         #:enemy-worker-deficit? Any
+         #:home-tech-count Any
+         #:early-pool-spotted? Any
+         #:enemy-race Any)
         Float))
 (define (compute-bayesian-proxy-all-in-posterior
          #:prior [raw-prior 0.10]
@@ -484,7 +497,11 @@
          #:frame [raw-frame 2400]
          #:proxy-bldg-spotted? [proxy-spotted? #f]
          #:early-enemy-combat-count [raw-early-combat 0]
-         #:enemy-worker-deficit? [worker-deficit? #f])
+         #:enemy-worker-deficit? [worker-deficit? #f]
+         #:home-tech-count [raw-home-tech #f]
+         #:early-pool-spotted? [early-pool-spotted? #f]
+         #:enemy-race [raw-enemy-race 'Unknown])
+  (void raw-enemy-race)
   (define home-prod (max 0 (safe-exact-int raw-home-prod 1)))
   (define exp-prod (max 0 (safe-exact-int raw-exp-prod 1)))
   (define gas-cnt (max 0 (safe-exact-int raw-gas-cnt 1)))
@@ -492,17 +509,66 @@
   (define early-combat (max 0 (safe-exact-int raw-early-combat 0)))
   (define scouted? (and scouted-main? #t))
   (define nat? (and nat-taken? #t))
+  (define has-home-tech? (real? raw-home-tech))
+  (define home-tech (if has-home-tech? (max 0 (safe-exact-int raw-home-tech 0)) 0))
+  (define early-pool? (and early-pool-spotted? #t))
+  (define enemy-is-terran? (not (not (memq raw-enemy-race '(Terran terran TERRAN)))))
+  (define enemy-is-protoss? (not (not (memq raw-enemy-race '(Protoss protoss PROTOSS)))))
+  (define enemy-is-zerg? (not (not (memq raw-enemy-race '(Zerg zerg ZERG)))))
+  ;; L85C: Tightened 1-base double-gas & missing-main-prod gates:
+  ;; - Terran: `>= 145s` (`3248f`) for 1-base 2-gas so normal 1-Rax FE never false-fires `< 145s`.
+  ;; - Protoss: `>= 2:40` (`3584f`), OR `>= 2:00` (`2688f`) ONLY when `scouted-enemy-main?` AND
+  ;;   `home-tech-count == 0` AND `home-prod-count <= 1` (catches Proxy Stargate @ 2:15 while
+  ;;   normal 2-Gate 2-Gas PvP macro openings never false-fire!).
+  ;; - Missing main production (`home-prod == 0`, non-Zerg): `>= 100s` (`2240f`).
+  (define one-base-double-gas?
+    (and (not nat?)
+         (>= gas-cnt 2)
+         (<= frame 6384)
+         (cond
+           [enemy-is-terran? (>= frame 3248)]
+           [enemy-is-protoss?
+            (or (>= frame 3584)
+                (and (>= frame 2688)
+                     scouted?
+                     has-home-tech?
+                     (= home-tech 0)
+                     (<= home-prod 1)))]
+           [else (>= frame 2688)])))
+  (define missing-all-main-prod?
+    (and scouted?
+         (= home-prod 0)
+         (not nat?)
+         (not enemy-is-zerg?)
+         (>= frame 2240)
+         (<= frame 6384)))
   (bayesian-posterior-from-likelihoods
    raw-prior
    (list
     (cons (and proxy-spotted? #t) 25.0)
-    (cons (and scouted? (< home-prod exp-prod) (not nat?) (>= frame 1800)) 9.5)
-    (cons (and scouted? (= home-prod 0) (not nat?) (>= frame 2000)) 6.5)
-    (cons (and scouted? (>= gas-cnt 2) (= home-prod 0)) 3.2)
+    ;; L85C: Missing main production ONLY when literally 0 main prod at >= 100s (`2240f`)
+    ;; (never fires `9.5x` on normal 1-Rax FE / 1-Gate FE with `home-prod = 1` & `gas <= 1`!).
+    (cons missing-all-main-prod? 9.5)
+    (cons (and missing-all-main-prod? (>= frame 2240)) 6.5)
+    (cons (and scouted? (< home-prod exp-prod) (not nat?) (not enemy-is-zerg?)
+               (or (= home-prod 0) one-base-double-gas?) (>= frame 2240))
+          2.2)
+    (cons (and scouted? (>= gas-cnt 2) (= home-prod 0) (>= frame 2240)) 3.2)
+    ;; L85 Gap B: 1-base 2-gas missing main tech (off-path Proxy Stargate/Robo/Factory)
+    (cons (and scouted? one-base-double-gas? has-home-tech? (= home-tech 0)) 8.5)
+    ;; L85 Gap B/C: 1-base 2-gas heavy tech push (e.g., 1-base Cyclone / 2-gas all-in)
+    (cons (and scouted? one-base-double-gas?) 6.5)
+    (cons (and scouted? one-base-double-gas?) 2.4)
+    ;; L85B Gap A/B: Early Spawning Pool (12-pool / 13-12 / 19d / 26d bust) stays elevated
+    ;; through `<= 4500f` even after Zerg drops a late `91s` follow-up natural Hatchery!
+    (cons (and early-pool? (<= frame 4500)) 8.0)
+    (cons (and early-pool? (not nat?) (<= frame 3600)) 2.2)
+    (cons (and early-pool? nat? (<= frame 4500)) 1.8)
     (cons (and worker-deficit? #t) 2.4)
     (cons (and (>= early-combat 2) (<= frame 3600)) 3.5)
-    (cons nat? 0.15)
-    (cons (and scouted? (>= home-prod (+ exp-prod 1))) 0.18))))
+    (cons (and nat? (not (and early-pool? (<= frame 4500)))) 0.15)
+    ;; L85 Gap B: Disable `0.18x` multi-production macro discount when enemy is 1-base 2-gas
+    (cons (and scouted? (not one-base-double-gas?) (>= home-prod (+ exp-prod 1))) 0.18))))
 
 ;; Computes P(multi-prong harass / runby / drop window is favorable | E) in [0.01, 0.99].
 (: compute-bayesian-multi-prong-window-posterior

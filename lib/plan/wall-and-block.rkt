@@ -870,8 +870,24 @@
              (emit! (list 'cancel-building bid))))))
 
      ;; 2. Natural expansion block (`frame 850..2100`) & 3. Main gas-steal (`<= 2800`)
+     ;; Loop 85 (Gap A): Suppress natural-block spend when an enemy expansion Town Hall already
+     ;; exists (within <= 12t of natural OR >= 2 enemy Town Halls) or early-pool / rush is active!
+     (define enemy-th-count : Nonnegative-Integer
+       (for/sum : Nonnegative-Integer ([b (in-list enemy-bldgs)])
+         (if (and (hash? b)
+                  (not (not (memq (dyn-symbol (dyn-hash-ref b 'type 'unknown) 'unknown)
+                                  '(hatchery lair hive nexus command-center orbital-command planetary-fortress)))))
+             1
+             0)))
+     (define rush-or-early-pool? : Boolean
+       (or (eq? (dyn-hash-ref sanitized-obs 'under-attack? #f) #t)
+           (eq? (dyn-hash-ref sanitized-obs 'enemy-early-pool? #f) #t)
+           (>= (safe-real (dyn-hash-ref sanitized-obs 'rush-prob 0.0) 0.0) 0.55)
+           (>= (safe-exact-int (dyn-hash-ref sanitized-obs 'enemy-confirmed-bases 0) 0) 2)))
      (define nat-already-taken-or-blocked? : Boolean
        (or (not in-nat-window?)
+           rush-or-early-pool?
+           (>= enemy-th-count 2)
            (for/or : Boolean ([b (in-list ally-bldgs)])
              (and (hash? b)
                   (<= (dist2d enemy-nat-x enemy-nat-y
@@ -880,10 +896,12 @@
                       5.5)))
            (for/or : Boolean ([b (in-list enemy-bldgs)])
              (and (hash? b)
-                  (<= (dist2d enemy-nat-x enemy-nat-y
-                              (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0)
-                              (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0))
-                      5.5)))))
+                  (let ([is-th? (not (not (memq (dyn-symbol (dyn-hash-ref b 'type 'unknown) 'unknown)
+                                                '(hatchery lair hive nexus command-center orbital-command planetary-fortress))))])
+                    (<= (dist2d enemy-nat-x enemy-nat-y
+                                (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0)
+                                (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0))
+                        (if is-th? 12.0 5.5)))))))
      (define own-steal-exists? : Boolean
        (or (not in-gas-window?)
            (for/or : Boolean ([b (in-list ally-bldgs)])
@@ -1427,13 +1445,23 @@
                           (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0))
                   1.9))))
 
-     ;; Check all in-progress emergency doorway Pylons / Shield Batteries for auto-cancel (`314`)
+     ;; Check all in-progress emergency doorway Pylons / Shield Batteries for auto-cancel (`314`).
+     ;; Loop 85B: Never self-cancel opening supply Pylon #1 (`<= 1` Pylon or `< 60s`) or a planned
+     ;; natural-choke wall Pylon (`wall-pylon-pos`) that sits behind a tight doorway (`<= 2.2t`)!
      (define threat-cleared? : Boolean
        (and (= shades-near-cnt 0)
             (< lings-near-cnt 2)
             (< adepts-near-cnt 2)))
      (define keep-all-finish? : Boolean
        (eq? (dyn-hash-ref sanitized-obs 'keep-emergency-finish? #f) #t))
+     (define ally-pylon-cnt : Integer
+       (for/sum : Integer ([b (in-list ally-bldgs)])
+         (if (and (hash? b) (is-pylon-bldg? b)) 1 0)))
+     (define raw-wp : Any (dyn-hash-ref sanitized-obs 'wall-pylon-pos #f))
+     (define has-wp? : Boolean
+       (and (pair? raw-wp) (real? (car raw-wp)) (real? (cdr raw-wp))))
+     (define wp-x : Flonum (if (and (pair? raw-wp) (real? (car raw-wp))) (safe-real (car raw-wp) -9999.0) -9999.0))
+     (define wp-y : Flonum (if (and (pair? raw-wp) (real? (cdr raw-wp))) (safe-real (cdr raw-wp) -9999.0) -9999.0))
      (define cancel-ids : (Listof Integer)
        (reverse
         (for/fold ([acc : (Listof Integer) '()])
@@ -1443,10 +1471,21 @@
           (define prog (max 0.0 (min 1.0 (safe-real (dyn-hash-ref b 'build-progress 1.0) 1.0))))
           (define bx (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0))
           (define by (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0))
-          (define is-plug-type? (or (is-pylon-bldg? b) (is-shield-battery-bldg? b)))
-          (define on-door-or-tagged?
-            (or (<= (dist2d bx by door-x door-y) 2.2)
-                (and (> bid 0) (not (not (memv bid tagged-plug-ids))))))
+          (define is-pylon? : Boolean (is-pylon-bldg? b))
+          (define is-plug-type? : Boolean (or is-pylon? (is-shield-battery-bldg? b)))
+          (define explicitly-tagged? : Boolean
+            (and (> bid 0) (not (not (memv bid tagged-plug-ids)))))
+          (define protected-wall-or-opening-pylon? : Boolean
+            (and is-pylon?
+                 (not explicitly-tagged?)
+                 (or (<= ally-pylon-cnt 1)
+                     (< frame 1344)
+                     (and has-wp? (<= (dist2d bx by wp-x wp-y) 2.6)))))
+          (define door-cancel-r : Flonum (if is-pylon? 1.6 2.2))
+          (define on-door-or-tagged? : Boolean
+            (or explicitly-tagged?
+                (and (not protected-wall-or-opening-pylon?)
+                     (<= (dist2d bx by door-x door-y) door-cancel-r))))
           (cond
             [(and is-plug-type?
                   on-door-or-tagged?
@@ -1620,9 +1659,23 @@
        (safe-real (dyn-hash-ref sanitized-obs 'min-block-minerals default-min-mins)
                   default-min-mins))
      (define under-attack? (eq? (dyn-hash-ref sanitized-obs 'under-attack? #f) #t))
+     ;; Loop 85 (Gap A): Suppress enemy-natural block Pylon/EBay whenever an enemy Hatchery/TH
+     ;; already exists at the natural (or >= 2 confirmed bases) OR early-pool/rush pressure is active!
+     (define early-pool-or-rush? : Boolean
+       (or (eq? (dyn-hash-ref sanitized-obs 'enemy-early-pool? #f) #t)
+           (>= (safe-real (dyn-hash-ref sanitized-obs 'rush-prob 0.0) 0.0) 0.55)
+           (>= (safe-exact-int (dyn-hash-ref sanitized-obs 'enemy-confirmed-bases 0) 0) 2)))
+     (define pro-enemy-th-cnt : Nonnegative-Integer
+       (for/sum : Nonnegative-Integer ([b (in-list enemy-bldgs)])
+         (if (and (hash? b)
+                  (not (not (memq (dyn-symbol (dyn-hash-ref b 'type 'unknown) 'unknown)
+                                  '(hatchery lair hive nexus command-center orbital-command planetary-fortress)))))
+             1
+             0)))
      (define in-window? (and (>= frame 1008) (<= frame 2352)))
      (define enemy-nat-empty? : Boolean
-       (and (not (for/or : Boolean ([b (in-list ally-bldgs)])
+       (and (< pro-enemy-th-cnt 2)
+            (not (for/or : Boolean ([b (in-list ally-bldgs)])
                    (and (hash? b)
                         (<= (dist2d enemy-nat-x enemy-nat-y
                                     (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0)
@@ -1630,10 +1683,12 @@
                             6.5))))
             (not (for/or : Boolean ([b (in-list enemy-bldgs)])
                    (and (hash? b)
-                        (<= (dist2d enemy-nat-x enemy-nat-y
-                                    (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0)
-                                    (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0))
-                            6.5))))))
+                        (let ([is-th? (not (not (memq (dyn-symbol (dyn-hash-ref b 'type 'unknown) 'unknown)
+                                                      '(hatchery lair hive nexus command-center orbital-command planetary-fortress))))])
+                          (<= (dist2d enemy-nat-x enemy-nat-y
+                                      (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0)
+                                      (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0))
+                              (if is-th? 12.0 6.5))))))))
      (define scout-worker-at-nat? : Boolean
        (and (not (eq? scout-sym 'none))
             (for/or : Boolean ([u (in-list ally-units)])
@@ -1652,6 +1707,7 @@
        [(and (not (eq? block-sym 'none))
              in-window?
              (not under-attack?)
+             (not early-pool-or-rush?)
              (>= mins min-mins-req)
              enemy-nat-empty?
              scout-worker-at-nat?)

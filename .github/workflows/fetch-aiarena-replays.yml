@@ -8,7 +8,7 @@ on:
         required: false
         default: "40"
       bot_ids:
-        description: "Target bots: 'all' (v1+v2), 'v1', 'v2', or comma-separated IDs/names"
+        description: "Target bots: 'all' (v1+v2+vc), 'v1', 'v2', 'vc', or comma-separated IDs/names"
         required: false
         default: "all"
       since_match:
@@ -71,10 +71,15 @@ jobs:
               1506: "Mothman-T2",
               1507: "Mothman-P2",
               1508: "Mothman-X2",
+              1518: "Mothman-ZC",
+              1519: "Mothman-TC",
+              1520: "Mothman-PC",
+              1521: "Mothman-XC",
           }
           V1_BOT_IDS = [1458, 1459, 1460, 1461]
           V2_BOT_IDS = [1505, 1506, 1507, 1508]
-          ALL_ACTIVE_BOT_IDS = V1_BOT_IDS + V2_BOT_IDS
+          VC_BOT_IDS = [1518, 1519, 1520, 1521]
+          ALL_ACTIVE_BOT_IDS = V1_BOT_IDS + V2_BOT_IDS + VC_BOT_IDS
           USER_ID = 3871
           COMPETITION_ID = 38
           OUT_DIR = "out_replays"
@@ -102,6 +107,8 @@ jobs:
                   return list(V1_BOT_IDS)
               if s == "v2":
                   return list(V2_BOT_IDS)
+              if s == "vc":
+                  return list(VC_BOT_IDS)
               out = []
               by_lower = {v.lower(): k for k, v in BOT_IDS.items()}
               for tok in s.split(","):
@@ -112,6 +119,8 @@ jobs:
                       out.extend(V1_BOT_IDS)
                   elif t == "v2":
                       out.extend(V2_BOT_IDS)
+                  elif t == "vc":
+                      out.extend(VC_BOT_IDS)
                   elif t.isdigit():
                       out.append(int(t))
                   elif t in by_lower:

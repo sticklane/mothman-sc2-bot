@@ -37,6 +37,12 @@
          opponent-world-summary-enemy-workers-near-us
          opponent-world-summary-early-worker-rush-active?
          opponent-world-summary-rush-posterior-floor
+         owm-home-prod-count
+         owm-home-tech-count
+         owm-scouted-enemy-main?
+         owm-early-pool-latched?
+         owm-enemy-1base-double-gas?
+         owm-inferred-proxy-rush-floor
          make-opponent-world-model
          reset-opponent-world-model!
          free-summon-unit-sym?
@@ -134,6 +140,43 @@
 (define owm-summary-worker-rush-table (make-weak-hasheq))
 (define owm-last-worker-rush-frame-table (make-weak-hasheq))
 
+;; L85 Gap B: ABI-preserving weak side-tables for remembered enemy main-scout,
+;; home prod/tech counts, early-pool latch, 1-base double-gas, and inferred proxy rush floor.
+;; Vector layout: #(home-prod-cnt home-tech-cnt scouted-main? early-pool-latched?
+;;                  enemy-1base-double-gas? inferred-proxy-rush-floor)
+(define owm-proxy-state-table (make-weak-hasheq))
+(define owm-summary-proxy-state-table (make-weak-hasheq))
+
+(define (owm-proxy-state-vec x)
+  (cond
+    [(opponent-world-model? x) (hash-ref owm-proxy-state-table x #f)]
+    [(opponent-world-summary? x) (hash-ref owm-summary-proxy-state-table x #f)]
+    [else #f]))
+
+(define (owm-home-prod-count x)
+  (define v (owm-proxy-state-vec x))
+  (if (vector? v) (vector-ref v 0) 0))
+
+(define (owm-home-tech-count x)
+  (define v (owm-proxy-state-vec x))
+  (if (vector? v) (vector-ref v 1) 0))
+
+(define (owm-scouted-enemy-main? x)
+  (define v (owm-proxy-state-vec x))
+  (and (vector? v) (vector-ref v 2) #t))
+
+(define (owm-early-pool-latched? x)
+  (define v (owm-proxy-state-vec x))
+  (and (vector? v) (vector-ref v 3) #t))
+
+(define (owm-enemy-1base-double-gas? x)
+  (define v (owm-proxy-state-vec x))
+  (and (vector? v) (vector-ref v 4) #t))
+
+(define (owm-inferred-proxy-rush-floor x)
+  (define v (owm-proxy-state-vec x))
+  (if (vector? v) (vector-ref v 5) 0.0))
+
 (define (opponent-world-summary-enemy-workers-near-us s)
   (define rec (and (opponent-world-summary? s) (hash-ref owm-summary-worker-rush-table s #f)))
   (if (vector? rec) (vector-ref rec 0) 0))
@@ -190,6 +233,7 @@
      -1
      #f))
   (hash-set! owm-last-worker-rush-frame-table owm -9999)
+  (hash-set! owm-proxy-state-table owm (vector 0 0 #f #f #f 0.0 'none 0.0 -9999))
   owm)
 
 (define (reset-opponent-world-model! owm [enemy-race 'Unknown])
@@ -214,16 +258,25 @@
   (set-opponent-world-model-last-frame! owm -1)
   (set-opponent-world-model-last-summary! owm #f)
   (hash-set! owm-last-worker-rush-frame-table owm -9999)
+  (hash-set! owm-proxy-state-table owm (vector 0 0 #f #f #f 0.0 'none 0.0 -9999))
   owm)
 
 ;; Prevents premature rush-posterior decay (e.g. 0.91 -> 0.45 at 137.5s) while >= 4
-;; enemy workers remain actively attacking/threatening our base during an early worker rush.
+;; enemy workers remain actively attacking/threatening our base during an early worker rush,
+;; AND applies Loop 85 remembered proxy / 1-base double-gas / latched early-pool rush floor.
 (define (apply-worker-rush-posterior-floor raw-rush-prob owm-sum)
   (define base-p (if (real? raw-rush-prob) (exact->inexact raw-rush-prob) 0.0))
-  (if (and (opponent-world-summary? owm-sum)
-           (opponent-world-summary-early-worker-rush-active? owm-sum))
-      (max base-p (opponent-world-summary-rush-posterior-floor owm-sum))
-      base-p))
+  (cond
+    [(opponent-world-summary? owm-sum)
+     (define wr-floor
+       (if (opponent-world-summary-early-worker-rush-active? owm-sum)
+           (opponent-world-summary-rush-posterior-floor owm-sum)
+           0.0))
+     (define proxy-floor (owm-inferred-proxy-rush-floor owm-sum))
+     (max base-p wr-floor proxy-floor)]
+    [(opponent-world-model? owm-sum)
+     (max base-p (owm-inferred-proxy-rush-floor owm-sum))]
+    [else base-p]))
 
 ;; -----------------------------------------------------------------------------
 ;; 2. Domain Constants: Summons, Speeds, Build Times, DAG Prereqs & Happy Path
@@ -267,6 +320,15 @@
 (define PROD-FACILITY-SYM-SET
   (hasheq 'barracks #t 'factory #t 'starport #t
           'gateway #t 'warp-gate #t 'robotics-facility #t 'stargate #t))
+
+;; L85 Gap B: Tech structures beyond Gateway/CyberCore, Barracks, or SpawningPool
+;; used to distinguish normal in-base tech from off-path Proxy Stargate/Robo/Factory.
+(define HOME-TECH-BLDG-SYM-SET
+  (hasheq 'twilight-council #t 'robotics-facility #t 'stargate #t 'forge #t
+          'robotics-bay #t 'templar-archive #t 'dark-shrine #t 'fleet-beacon #t
+          'factory #t 'starport #t 'armory #t 'ghost-academy #t 'engineering-bay #t 'fusion-core #t
+          'roach-warren #t 'baneling-nest #t 'lair #t 'hive #t 'spire #t
+          'hydralisk-den #t 'infestation-pit #t 'nydus-network #t 'lurker-den #t 'ultralisk-cavern #t))
 
 (define RACE-DETECTION-HT
   (hasheq
@@ -621,7 +683,29 @@
                                      (max 0 (sc2-min-cost ctype))
                                      (max 0 (sc2-gas-cost ctype))))))
 
-  ;; Step C: Sight-clear static structures that disappeared while in our vision
+  ;; Step C: Sight-clear static structures that disappeared while in our direct footprint vision.
+  ;; L85B: Ground scouts walking down an enemy ramp (low ground, `6-8.5t` away in 2D) CANNOT see
+  ;; up cliffs into high-ground fog! Require flying sight (`<= 7.0t`, geysers `<= 5.0t`) or direct
+  ;; ground footprint overlap (`<= 4.0t`, geysers `<= 3.5t`) so high-ground Refineries/Factories/
+  ;; Barracks are NEVER falsely deleted into `dead-tags` when a ground scout retreats down the ramp!
+  (define (ally-flying-scout? u)
+    (or (eq? (hash-ref u 'flying #f) #t)
+        (eq? (hash-ref u 'is-flying #f) #t)
+        (not (not (memq (unit-type-sym u)
+                        '(overlord overseer overlord-transport dropperlord observer phoenix
+                          oracle warp-prism warp-prism-phasing void-ray viking-fighter
+                          banshee medivac raven liberator mutalisk corruptor))))))
+  (define (ally-can-sight-clear-bldg? rec)
+    (define bx (tracked-enemy-bldg-x rec))
+    (define by (tracked-enemy-bldg-y rec))
+    (define is-geyser? (hash-has-key? GEYSER-BLDG-SYM-SET (tracked-enemy-bldg-canon-type rec)))
+    (define fly-r2 (if is-geyser? 25.0 49.0))
+    (define gnd-r2 (if is-geyser? 12.25 16.0))
+    (for/or ([u (in-list ally-units)] #:when (hash? u))
+      (define ux (hash-ref u 'x -999.0))
+      (define uy (hash-ref u 'y -999.0))
+      (define r2 (if (ally-flying-scout? u) fly-r2 gnd-r2))
+      (<= (dist2 ux uy bx by) r2)))
   (for ([kv (in-list (hash->list known-bldgs))])
     (define tag (car kv))
     (define rec (cdr kv))
@@ -630,7 +714,7 @@
                           '(barracks-flying factory-flying starport-flying
                             command-center-flying orbital-command-flying
                             spine-crawler-uprooted spore-crawler-uprooted)))
-               (ally-sees-point? ally-units (tracked-enemy-bldg-x rec) (tracked-enemy-bldg-y rec) 72.25))
+               (ally-can-sight-clear-bldg? rec))
       (hash-remove! known-bldgs tag)
       (set-add! dead-tags tag)
       (set-add! destroyed-tech (tracked-enemy-bldg-canon-type rec))
@@ -832,22 +916,202 @@
   (define prod-bldg-cnt
     (for/sum ([rec (in-hash-values known-bldgs)])
       (if (hash-has-key? PROD-FACILITY-SYM-SET (tracked-enemy-bldg-canon-type rec)) 1 0)))
+
+  ;; L85/85B Gap B: Remembered enemy main scout, home production/tech counts, latched early pool,
+  ;; 1-base double-gas, and latched proxy/1-base rush posterior floor (persisted across fog!).
+  (define prev-proxy-vec (hash-ref owm-proxy-state-table owm #f))
+  (define prev-scouted-main? (and (vector? prev-proxy-vec) (vector-ref prev-proxy-vec 2) #t))
+  (define prev-early-pool? (and (vector? prev-proxy-vec) (vector-ref prev-proxy-vec 3) #t))
+  (define prev-latched-kind
+    (if (and (vector? prev-proxy-vec) (>= (vector-length prev-proxy-vec) 9))
+        (vector-ref prev-proxy-vec 6)
+        'none))
+  (define prev-latched-floor
+    (if (and (vector? prev-proxy-vec) (>= (vector-length prev-proxy-vec) 9))
+        (vector-ref prev-proxy-vec 7)
+        0.0))
+  (define prev-latched-frame
+    (if (and (vector? prev-proxy-vec) (>= (vector-length prev-proxy-vec) 9))
+        (vector-ref prev-proxy-vec 8)
+        -9999))
+
+  ;; Main scout latch: ally ACTUALLY enters enemy main interior (`<= 11.0t` of `enemy-x,y`),
+  ;; OR explicit `'scouted-enemy-main? #t`, OR we observed a main-interior production/tech
+  ;; structure (`<= 14.0t` of `enemy-x,y` and `> 10.0t` from natural).
+  ;; L85C: Excludes `GEYSER-BLDG-SYM-SET` (spotting main Assimilators/Refineries alone from
+  ;; edge vision MUST NOT prematurely latch `scouted-enemy-main?` with `home-prod-cnt = 0`!).
+  (define (main-interior-confirm-sym? ctype)
+    (or (hash-has-key? PROD-FACILITY-SYM-SET ctype)
+        (hash-has-key? HOME-TECH-BLDG-SYM-SET ctype)
+        (eq? ctype 'spawning-pool)))
+  (define saw-main-interior-bldg?
+    (or (for/or ([rec (in-hash-values known-bldgs)])
+          (define ctype (tracked-enemy-bldg-canon-type rec))
+          (and (main-interior-confirm-sym? ctype)
+               (not (tracked-enemy-bldg-is-proxy? rec))
+               (<= (dist2 (tracked-enemy-bldg-x rec) (tracked-enemy-bldg-y rec) enemy-x enemy-y) 196.0)
+               (> (dist2 (tracked-enemy-bldg-x rec) (tracked-enemy-bldg-y rec) enemy-nat-x enemy-nat-y) 100.0)))
+        (for/or ([b (in-list enemy-bldgs)] #:when (hash? b))
+          (define ctype (sc2-canonical-structure-sym (unit-type-sym b)))
+          (define bx (exact->inexact (hash-ref b 'x enemy-x)))
+          (define by (exact->inexact (hash-ref b 'y enemy-y)))
+          (and (main-interior-confirm-sym? ctype)
+               (not (hash-ref b 'is-proxy? #f))
+               (<= (dist2 bx by enemy-x enemy-y) 196.0)
+               (> (dist2 bx by enemy-nat-x enemy-nat-y) 100.0)))))
+  (define scouted-enemy-main?
+    (or prev-scouted-main?
+        (eq? (hash-ref obs 'scouted-enemy-main? #f) #t)
+        (ally-sees-point? ally-units enemy-x enemy-y 121.0)
+        saw-main-interior-bldg?))
+
+  ;; L85C: Remembered home production & home tech structure counts: include buildings within
+  ;; `<= 44.0t` (`1936.0`) of enemy main OR `<= 16.0t` (`256.0`) of enemy natural so natural-choke
+  ;; wall Gateways (`~34.5t` from enemy main) are NEVER miscounted as missing main production!
+  (define (in-enemy-home-area? bx by)
+    (or (<= (dist2 bx by enemy-x enemy-y) 1936.0)
+        (<= (dist2 bx by enemy-nat-x enemy-nat-y) 256.0)))
+  (define known-home-prod-cnt
+    (for/sum ([rec (in-hash-values known-bldgs)])
+      (if (and (not (tracked-enemy-bldg-is-proxy? rec))
+               (hash-has-key? PROD-FACILITY-SYM-SET (tracked-enemy-bldg-canon-type rec))
+               (in-enemy-home-area? (tracked-enemy-bldg-x rec) (tracked-enemy-bldg-y rec)))
+          1 0)))
+  (define known-home-tech-cnt
+    (for/sum ([rec (in-hash-values known-bldgs)])
+      (if (and (not (tracked-enemy-bldg-is-proxy? rec))
+               (hash-has-key? HOME-TECH-BLDG-SYM-SET (tracked-enemy-bldg-canon-type rec))
+               (in-enemy-home-area? (tracked-enemy-bldg-x rec) (tracked-enemy-bldg-y rec)))
+          1 0)))
+  (define untagged-home-prod-cnt
+    (for/sum ([b (in-list enemy-bldgs)] #:when (hash? b))
+      (define tag (hash-ref b 'id 0))
+      (define ctype (sc2-canonical-structure-sym (unit-type-sym b)))
+      (define bx (exact->inexact (hash-ref b 'x enemy-x)))
+      (define by (exact->inexact (hash-ref b 'y enemy-y)))
+      (if (and (or (not (exact-integer? tag)) (<= tag 0))
+               (not (hash-ref b 'is-proxy? #f))
+               (hash-has-key? PROD-FACILITY-SYM-SET ctype)
+               (in-enemy-home-area? bx by))
+          1 0)))
+  (define untagged-home-tech-cnt
+    (for/sum ([b (in-list enemy-bldgs)] #:when (hash? b))
+      (define tag (hash-ref b 'id 0))
+      (define ctype (sc2-canonical-structure-sym (unit-type-sym b)))
+      (define bx (exact->inexact (hash-ref b 'x enemy-x)))
+      (define by (exact->inexact (hash-ref b 'y enemy-y)))
+      (if (and (or (not (exact-integer? tag)) (<= tag 0))
+               (not (hash-ref b 'is-proxy? #f))
+               (hash-has-key? HOME-TECH-BLDG-SYM-SET ctype)
+               (in-enemy-home-area? bx by))
+          1 0)))
+  (define home-prod-cnt (+ known-home-prod-cnt untagged-home-prod-cnt))
+  (define home-tech-cnt (+ known-home-tech-cnt untagged-home-tech-cnt))
+
+  ;; L85C: True cheese Spawning Pool latch ONLY (`12-pool` / `13-12` / `14-pool`, NEVER normal
+  ;; `16-pool` / `16-hatch`!): `est-start <= 950` (`42.5s`), `bp >= 0.99` at `<= 1950` (`87s`),
+  ;; `bp >= 0.50` at `<= 1450` (`65s`), or `>= 6` Zerglings at `<= 2700` (`2:00`, not 4 anti-scout Lings!).
+  (define recent-zergling-cnt
+    (+ (for/sum ([rec (in-hash-values known-units)])
+         (if (and (eq? (tracked-enemy-unit-type rec) 'zergling)
+                  (<= (- frame (tracked-enemy-unit-last-seen-frame rec)) 224))
+             1 0))
+       (for/sum ([u (in-list enemy-units)] #:when (hash? u))
+         (define tag (hash-ref u 'id 0))
+         (if (and (or (not (exact-integer? tag)) (<= tag 0))
+                  (eq? (sc2-canonical-unit-sym (unit-type-sym u)) 'zergling))
+             1 0))))
+  (define early-zergling-cnt
+    (if (> frame 2700) 0 recent-zergling-cnt))
+  (define early-pool-now?
+    (or (for/or ([rec (in-hash-values known-bldgs)])
+          (and (eq? (tracked-enemy-bldg-canon-type rec) 'spawning-pool)
+               (or (<= (tracked-enemy-bldg-start-frame rec) 950)
+                   (and (>= (tracked-enemy-bldg-build-progress rec) 0.99)
+                        (<= (tracked-enemy-bldg-last-seen-frame rec) 1950))
+                   (and (>= (tracked-enemy-bldg-build-progress rec) 0.50)
+                        (<= (tracked-enemy-bldg-last-seen-frame rec) 1450)))))
+        (for/or ([b (in-list enemy-bldgs)] #:when (hash? b))
+          (define ctype (sc2-canonical-structure-sym (unit-type-sym b)))
+          (define bp (max 0.0 (min 1.0 (exact->inexact (hash-ref b 'build-progress 1.0)))))
+          (define est-start (max 0 (- frame (exact-round (* bp (structure-build-frames 'spawning-pool))))))
+          (and (eq? ctype 'spawning-pool)
+               (or (<= est-start 950)
+                   (and (>= bp 0.99) (<= frame 1950))
+                   (and (>= bp 0.50) (<= frame 1450)))))
+        (and (<= frame 2700) (>= early-zergling-cnt 6))))
+  ;; Clear early-pool latch cleanly once opponent has `>= 2` bases and no active Ling wave past `3:15` (`4368f`)
+  (define early-pool-cleared-peaceful?
+    (and (>= confirmed-bases 2)
+         (> frame 4368)
+         (< recent-zergling-cnt 6)))
+  (define early-pool-latched?
+    (and (not early-pool-cleared-peaceful?)
+         (or prev-early-pool? early-pool-now?)))
+
+  ;; L85B: Direct proxy combat/production structure remembered across fog!
+  ;; Catches BOTH near-base proxies AND mid-map proxies (`> 42t` from enemy main and closer to us
+  ;; than enemy main, OR `> 48t` from enemy main before `4:45`), while EXCLUDING expansion-block
+  ;; `engineering-bay` / lone natural-pad `pylon` so normal macro expansion blocks never false-fire!
+  (define (proxy-combat-bldg-sym? ctype)
+    (or (hash-has-key? PROD-FACILITY-SYM-SET ctype)
+        (not (not (memq ctype '(photon-cannon bunker spine-crawler))))))
+  (define proxy-bldg-remembered?
+    (for/or ([rec (in-hash-values known-bldgs)])
+      (define ctype (tracked-enemy-bldg-canon-type rec))
+      (define bx (tracked-enemy-bldg-x rec))
+      (define by (tracked-enemy-bldg-y rec))
+      (define d2-en (dist2 bx by enemy-x enemy-y))
+      (define d2-us (min (dist2 bx by base-x base-y) (dist2 bx by nat-x nat-y)))
+      (and (proxy-combat-bldg-sym? ctype)
+           (or (tracked-enemy-bldg-is-proxy? rec)
+               (and (> d2-en 1764.0)
+                    (or (< d2-us d2-en)
+                        (> d2-en 2304.0)))))))
+
   (define known-geysers
     (for/list ([rec (in-hash-values known-bldgs)]
                #:when (hash-has-key? GEYSER-BLDG-SYM-SET (tracked-enemy-bldg-canon-type rec)))
       (list (tracked-enemy-bldg-ready-frame rec)
             (tracked-enemy-bldg-last-seen-frame rec)
             (tracked-enemy-bldg-vespene-contents rec))))
+  (define untagged-geyser-cnt
+    (for/sum ([b (in-list enemy-bldgs)] #:when (hash? b))
+      (define tag (hash-ref b 'id 0))
+      (if (and (or (not (exact-integer? tag)) (<= tag 0))
+               (hash-has-key? GEYSER-BLDG-SYM-SET (sc2-canonical-structure-sym (unit-type-sym b))))
+          1 0)))
   ;; If gas tech/units were implied (`extractor`/`refinery`/`assimilator` in `implied-set`) and 0 geysers directly seen,
   ;; infer at least 1 geyser ready by `min(frame - 448, 1200)`!
   (define eff-geysers
     (if (and (null? known-geysers)
+             (= untagged-geyser-cnt 0)
              (or (set-member? implied-set 'extractor)
                  (set-member? implied-set 'refinery)
                  (set-member? implied-set 'assimilator)))
         (list (list (min (max 400 (- frame 448)) 1200) frame 0))
         known-geysers))
-  (define confirmed-geyser-cnt (length eff-geysers))
+  (define confirmed-geyser-cnt (+ (length eff-geysers) untagged-geyser-cnt))
+
+  ;; L85C Gap B/C: 1-base double-gas (`<= 1` confirmed base, `>= 2` remembered geysers):
+  ;; - Terran: `>= 145s` (`3248f`) so normal 1-Rax FE never false-fires `< 145s`.
+  ;; - Protoss: `>= 2:40` (`3584f`), OR `>= 2:00` (`2688f`) ONLY if `scouted-enemy-main?` AND
+  ;;   `home-tech-cnt == 0` AND `home-prod-cnt <= 1` (catches Proxy Stargate @ 2:15 while
+  ;;   normal 2-Gate 2-Gas PvP macro openings NEVER false-fire!).
+  ;; - Zerg/Unknown: `>= 2:00` (`2688f`).
+  (define enemy-1base-double-gas?
+    (and (<= confirmed-bases 1)
+         (>= confirmed-geyser-cnt 2)
+         (<= frame 6384)
+         (cond
+           [(eq? erace 'Terran) (>= frame 3248)]
+           [(eq? erace 'Protoss)
+            (or (>= frame 3584)
+                (and (>= frame 2688)
+                     scouted-enemy-main?
+                     (= home-tech-cnt 0)
+                     (<= home-prod-cnt 1)))]
+           [else (>= frame 2688)])))
 
   (define next-overdue-pad
     (cond
@@ -1281,10 +1545,79 @@
      (+ siege-turtle-cnt unit-siege-cnt)
      (for/hasheq ([(k v) (in-hash known-unit-counts-mut)]) (values k v))
      (for/hasheq ([(k v) (in-hash known-bldg-counts-mut)]) (values k v))))
+  ;; L85B: Compute & latch confirmed early proxy / 1-base 2-gas / early-pool rush posterior floor
+  ;; across fog through `~285s` (`6384f`), clearing cleanly if enemy takes a 2nd base + normal
+  ;; main production (or past `~260s` [`5824f`] once we hold with safe army parity so held
+  ;; cheeses immediately expand instead of stalling CC #2 / Nexus #2 past `300s`).
+  (define-values (fresh-proxy-kind fresh-proxy-floor)
+    (cond
+      [(and proxy-bldg-remembered? (<= frame 6384))
+       (values 'proxy-bldg 0.85)]
+      [(and scouted-enemy-main?
+            (= home-prod-cnt 0)
+            (not (eq? erace 'Zerg))
+            (<= confirmed-bases 1)
+            (>= frame 2240)
+            (<= frame 6384))
+       (values 'missing-main-prod 0.82)]
+      [(and enemy-1base-double-gas?
+            scouted-enemy-main?
+            (= home-tech-cnt 0))
+       (values 'one-base-double-gas 0.80)]
+      [enemy-1base-double-gas?
+       (values 'one-base-double-gas 0.68)]
+      [(and early-pool-latched? (<= frame 5824) (< confirmed-bases 3))
+       (values 'early-pool 0.72)]
+      [else
+       (values 'none 0.0)]))
+  (define post-hold-safe-parity?
+    (and (>= frame 5824)
+         (= enemy-workers-near-us 0)
+         (>= ally-combat-sup-now (max 8.0 (* 1.15 (max 4.0 (exact->inexact known-army-sup)))))))
+  (define normal-macro-clears-latch?
+    (case prev-latched-kind
+      [(early-pool) (or (>= confirmed-bases 3) early-pool-cleared-peaceful?)]
+      [(proxy-bldg) (and (>= confirmed-bases 2) (>= home-prod-cnt 1) (not proxy-bldg-remembered?))]
+      [(missing-main-prod one-base-double-gas) (and (>= confirmed-bases 2) (>= home-prod-cnt 1))]
+      [else #f]))
+  (define-values (latched-kind latched-floor latched-frame)
+    (cond
+      [(> frame 6384)
+       (values 'none 0.0 -9999)]
+      [post-hold-safe-parity?
+       (values 'none 0.0 -9999)]
+      [(> fresh-proxy-floor 0.0)
+       (if (and (not normal-macro-clears-latch?)
+                (> prev-latched-floor fresh-proxy-floor)
+                (or (not (eq? prev-latched-kind 'early-pool)) (<= frame 5824)))
+           (values prev-latched-kind prev-latched-floor prev-latched-frame)
+           (values fresh-proxy-kind fresh-proxy-floor frame))]
+      [(and (> prev-latched-floor 0.0)
+            (not normal-macro-clears-latch?)
+            (<= frame (if (eq? prev-latched-kind 'early-pool) 5824 6384)))
+       (values prev-latched-kind prev-latched-floor prev-latched-frame)]
+      [else
+       (values 'none 0.0 -9999)]))
+  (define inferred-proxy-rush-floor
+    (max (if early-worker-rush-active? 0.91 0.0)
+         latched-floor))
+
   (hash-set! owm-summary-worker-rush-table
              summary
              (vector enemy-workers-near-us
                      (not (not early-worker-rush-active?))
                      rush-posterior-floor))
+  (define proxy-state-vec
+    (vector home-prod-cnt
+            home-tech-cnt
+            (not (not scouted-enemy-main?))
+            (not (not early-pool-latched?))
+            (not (not enemy-1base-double-gas?))
+            inferred-proxy-rush-floor
+            latched-kind
+            latched-floor
+            latched-frame))
+  (hash-set! owm-proxy-state-table owm proxy-state-vec)
+  (hash-set! owm-summary-proxy-state-table summary proxy-state-vec)
   (set-opponent-world-model-last-summary! owm summary)
   summary)

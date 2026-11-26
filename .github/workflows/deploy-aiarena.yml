@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       bots:
-        description: "Targets: 'all' (v1+v2), 'v1', 'v2', or comma-separated bot names/IDs/races"
+        description: "Targets: 'all' (v1+v2+vc), 'v1', 'v2', 'vc', or comma-separated bot names/IDs/races"
         required: false
         default: "all"
       request_matches:
@@ -44,7 +44,7 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Upload v1 + v2 BotZips, Activate Competition #38, and Request Matches
+      - name: Upload v1 + v2 + vc BotZips, Activate Competition #38, and Request Matches
         env:
           AIARENA_API_TOKEN: ${{ secrets.AIARENA_API_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
@@ -76,6 +76,10 @@ jobs:
               (1506, "Mothman-T2", "v2", "ladder/Mothman-T.zip", "Mothman-T"),
               (1507, "Mothman-P2", "v2", "ladder/Mothman-P.zip", "Mothman-P"),
               (1508, "Mothman-X2", "v2", "ladder/Mothman-X.zip", "Mothman-X"),
+              (1518, "Mothman-ZC", "vc", "ladder/Mothman-Z.zip", "Mothman-Z"),
+              (1519, "Mothman-TC", "vc", "ladder/Mothman-T.zip", "Mothman-T"),
+              (1520, "Mothman-PC", "vc", "ladder/Mothman-P.zip", "Mothman-P"),
+              (1521, "Mothman-XC", "vc", "ladder/Mothman-X.zip", "Mothman-X"),
           ]
           ALL_MANAGED_IDS = {b[0] for b in BOT_SPECS}
           COMPETITION_ID = 38
@@ -220,7 +224,7 @@ jobs:
                   resolved = list(OPPONENT_PRESETS["div1"])
               return resolved
 
-          def repack_named_zip(src_zip: str, base_name: str, target_name: str, out_zip: str):
+          def repack_named_zip(src_zip: str, base_name: str, target_name: str, out_zip: str, cheese_mode: bool = False, cheese_profile: str = "auto"):
               with zipfile.ZipFile(src_zip, "r") as zin, zipfile.ZipFile(out_zip, "w", compression=zipfile.ZIP_DEFLATED) as zout:
                   for info in zin.infolist():
                       data = zin.read(info.filename)
@@ -228,6 +232,9 @@ jobs:
                       if new_name in ("config.json", "bot_config.json"):
                           cfg = json.loads(data.decode("utf-8"))
                           cfg["BotName"] = target_name
+                          if cheese_mode:
+                              cfg["CheeseMode"] = True
+                              cfg["CheeseProfile"] = cheese_profile
                           data = (json.dumps(cfg, indent=2) + "\n").encode("utf-8")
                       elif new_name == "run.py":
                           txt = data.decode("utf-8")
@@ -257,6 +264,20 @@ jobs:
                       raise RuntimeError(
                           f"Dry-run failed for {target_name}: rc={res.returncode} out={res.stdout[:300]} err={res.stderr[:300]}"
                       )
+                  if cheese_mode:
+                      parsed = None
+                      for line in res.stdout.splitlines():
+                          s = line.strip()
+                          if s.startswith("{") and s.endswith("}"):
+                              try:
+                                  parsed = json.loads(s)
+                                  break
+                              except Exception:
+                                  pass
+                      if not isinstance(parsed, dict) or parsed.get("cheese_mode") is not True:
+                          raise RuntimeError(f"Dry-run missing cheese_mode=true for {target_name}: {res.stdout[:300]}")
+                      if base_name == "Mothman-X" and parsed.get("started_as_random") is not True:
+                          raise RuntimeError(f"Dry-run missing started_as_random=true for {target_name}: {res.stdout[:300]}")
                   print(f"DRY_RUN_OK {target_name}: {res.stdout.strip()}")
 
           event_name = os.environ["EVENT_NAME"]
@@ -292,7 +313,14 @@ jobs:
                   upload_zip = src_zip
                   if bot_name != base_name:
                       upload_zip = f"/tmp/deploy_repacked_zips/{bot_name}.zip"
-                      repack_named_zip(src_zip, base_name, bot_name, upload_zip)
+                      repack_named_zip(
+                          src_zip,
+                          base_name,
+                          bot_name,
+                          upload_zip,
+                          cheese_mode=(cohort == "vc"),
+                          cheese_profile="auto",
+                      )
 
                   with open(upload_zip, "rb") as fh:
                       local_md5 = hashlib.md5(fh.read()).hexdigest()
