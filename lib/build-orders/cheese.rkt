@@ -424,7 +424,7 @@
    286.0
    0
    '(nydus-worm)
-   (make-hit-trigger 30 310.0 'zergling 'metabolic-boost)
+   (make-hit-trigger 22 310.0 'zergling 'metabolic-boost)
    0
    405.0
    '(queen zergling)

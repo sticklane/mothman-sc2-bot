@@ -354,6 +354,12 @@
                    (> (cheese-build-spec-pull-workers-at-hit tvz1) 0)
                    (= (cheese-build-spec-pull-workers-at-hit pvz1) 0)))
 
+  ;; Loop 84C: `zvt-42d-queen-ling-nydus` commits cleanly at 22 combat supply
+  ;; when the 5:30 Nydus pops instead of stalling until `fallback@405s`.
+  (check-test "l84c-zvt-nydus-hit-trigger-min-combat-supply-is-22"
+              (= (hash-ref (cheese-build-spec-hit-trigger zvt2) 'min-combat-supply) 22)
+              (format "got=~a" (hash-ref (cheese-build-spec-hit-trigger zvt2) 'min-combat-supply)))
+
   ;; Loop 84B: High-value tech/key units MUST precede mineral-dump filler
   ;; (`zealot`, `zergling`, `marine`) in `army-comp` so Stage 7 production
   ;; never starves Warp Prism, Immortal, Void Ray, Siege Tank, Banshee,

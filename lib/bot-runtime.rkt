@@ -408,27 +408,47 @@
            ;; Failsafe: never stall forever if research structure was sniped past hit-time + 50s
            (fl>= elapsed-sec (fl+ min-sec 50.0)))))
 
-(define (cheese-infer-enemy-race-from-obs rt obs)
-  (define box-er (unbox (rt-enemy-race-box rt)))
-  (define obs-er (hash-ref obs 'enemy-race 'Unknown))
+(define (cheese-normalize-known-race v)
   (cond
-    [(memq box-er '(Zerg Terran Protoss)) box-er]
-    [(memq obs-er '(Zerg Terran Protoss)) obs-er]
-    [else
-     (or (for/or ([e (in-list (append (hash-ref obs 'enemy-units '())
-                                      (hash-ref obs 'enemy-buildings '())))])
-           (and (hash? e)
-                (let ([t (unit-type-sym e)])
-                  (cond
-                    [(memq t '(drone zergling roach ravager baneling hydralisk queen overlord hatchery spawning-pool extractor)) 'Zerg]
-                    [(memq t '(scv marine marauder reaper hellion siege-tank command-center orbital-command barracks supply-depot refinery)) 'Terran]
-                    [(memq t '(probe zealot stalker adept sentry immortal warp-prism nexus pylon gateway assimilator cybernetics-core forge)) 'Protoss]
-                    [else #f]))))
-         'Unknown)]))
+    [(symbol? v)
+     (case v
+       [(Zerg zerg) 'Zerg]
+       [(Terran terran) 'Terran]
+       [(Protoss protoss) 'Protoss]
+       [else #f])]
+    [(string? v)
+     (let ([s (string-downcase (string-trim v))])
+       (cond
+         [(string=? s "zerg") 'Zerg]
+         [(string=? s "terran") 'Terran]
+         [(string=? s "protoss") 'Protoss]
+         [else #f]))]
+    [else #f]))
+
+(define (cheese-infer-enemy-race-from-obs rt obs [ctx-eff-er #f])
+  (or (cheese-normalize-known-race (unbox (rt-enemy-race-box rt)))
+      (cheese-normalize-known-race ctx-eff-er)
+      (cheese-normalize-known-race (hash-ref obs 'enemy-race #f))
+      (cheese-normalize-known-race (hash-ref obs 'opponent-requested-race #f))
+      (cheese-normalize-known-race (unbox (rt-initial-enemy-race-box rt)))
+      (for/or ([e (in-list (append (hash-ref obs 'enemy-units '())
+                                   (hash-ref obs 'enemy-buildings '())))])
+        (and (hash? e)
+             (not (eq? (hash-ref e 'is-hallucination #f) #t))
+             (not (eq? (hash-ref e 'hallucination #f) #t))
+             (not (eq? (hash-ref e 'hallucination? #f) #t))
+             (not (eq? (hash-ref e 'changeling? #f) #t))
+             (let ([t (unit-type-sym e)])
+               (cond
+                 [(memq t '(drone zergling roach ravager baneling hydralisk queen overlord hatchery spawning-pool extractor)) 'Zerg]
+                 [(memq t '(scv marine marauder reaper hellion siege-tank command-center orbital-command barracks supply-depot refinery)) 'Terran]
+                 [(memq t '(probe zealot stalker adept sentry immortal warp-prism nexus pylon gateway assimilator cybernetics-core forge)) 'Protoss]
+                 [else #f]))))
+      'Unknown))
 
 ;; Synchronize Version C cheese state for the current step.
 ;; Fast `#f` path when `(not (rt-cheese-mode? rt))` (ZERO overhead on normal macro).
-(define (cheese-sync-state! rt obs)
+(define (cheese-sync-state! rt obs [ctx-eff-er #f])
   (cond
     [(or (not (rt-cheese-mode? rt)) (rt-skip-build-order? rt)) #f]
     [else
@@ -445,7 +465,7 @@
              ar
              (let ([obs-r (hash-ref obs 'race #f)])
                (if (memq obs-r '(Zerg Terran Protoss)) obs-r 'Zerg)))))
-     (define eff-er (cheese-infer-enemy-race-from-obs rt obs))
+     (define eff-er (cheese-infer-enemy-race-from-obs rt obs ctx-eff-er))
      (define req-prof (hash-ref cst 'requested-profile 'auto))
      (define seed (hash-ref cst 'seed 0))
      (define cur-spec (hash-ref cst 'active-spec #f))
@@ -29823,7 +29843,8 @@
 (define (step-layer2-economy! rt raw-obs #:raw-obs [orig-raw-obs #f] #:sanitized? [sanitized? #f])
   (define ctx (rt-l2-ctx rt))
   (l2-phase1-setup! ctx rt raw-obs orig-raw-obs sanitized?)
-  (define active-cheese-spec (cheese-sync-state! rt (l2-ctx-obs ctx)))
+  (define active-cheese-spec
+    (cheese-sync-state! rt (l2-ctx-obs ctx) (l2-ctx-effective-enemy-race ctx)))
   (l2-phase2-worker-rush! ctx)
   (l2-phase3-recall-cancel-scout! ctx)
   (cond

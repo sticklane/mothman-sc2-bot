@@ -1031,6 +1031,73 @@
                    (> d-mid-proxy 20.0))
               (format "bunk-bp=~s d-enemy=~a d-mid=~a pxy=~s" bunk-bp d-enemy d-mid-proxy pxy)))
 
+;; ===========================================================================
+;; Group 10: Loop 84C — `--cheese-profile auto` Lobby `opponent-requested-race`
+;; ===========================================================================
+(let ()
+  (define (make-f0-lobby-obs our-race opp-req-race #:enemy-units [enemy-units '()] #:frame [frame 0])
+    (define th-type (case our-race [(Zerg) 'hatchery] [(Terran) 'command-center] [else 'nexus]))
+    (define w-type (case our-race [(Zerg) 'drone] [(Terran) 'scv] [else 'probe]))
+    ;; Intentionally omit `'enemy-race` (just like live `sc2-observation->runtime-obs-hash`!)
+    ;; and pass ONLY `'opponent-requested-race` so `auto` MUST read it at f=0!
+    (hash 'frame frame
+          'race our-race
+          'opponent-requested-race opp-req-race
+          'minerals 50 'gas 0 'supply-used 12 'supply-cap 15
+          'mineral-harvesters 12 'gas-harvesters 0
+          'base-x 28.0 'base-y 28.0
+          'natural-x 48.0 'natural-y 32.0
+          'third-x 68.0 'third-y 36.0
+          'enemy-x 160.0 'enemy-y 160.0
+          'enemy-base '(160.0 160.0)
+          'map-width 200.0 'map-height 200.0
+          'ally-buildings (list (hash 'id 10 'type th-type 'x 28.0 'y 28.0 'build-progress 1.0 'busy? #f))
+          'ally-units (make-workers w-type 12 200 28.0 28.0)
+          'enemy-units enemy-units
+          'enemy-buildings '()
+          'mineral-patches (list (hash 'id 9001 'x 22.0 'y 28.0 'minerals 900))))
+
+  ;; 10a. Symbol & string `'opponent-requested-race` across Z/P/T selects exact true matchup at f=0!
+  (for ([tc (in-list '((Zerg    Protoss  "zvp-" "l84c-10a-auto-ZvP-sym")
+                       (Zerg    "Zerg"   "zvz-" "l84c-10a-auto-ZvZ-str")
+                       (Protoss Zerg     "pvz-" "l84c-10a-auto-PvZ-sym")
+                       (Protoss "Protoss" "pvp-" "l84c-10a-auto-PvP-str")
+                       (Terran  Protoss  "tvp-" "l84c-10a-auto-TvP-sym")
+                       (Terran  "Terran" "tvt-" "l84c-10a-auto-TvT-str")))])
+    (define our-r (first tc))
+    (define opp-req (second tc))
+    (define exp-prefix (third tc))
+    (define label (fourth tc))
+    (define rt (make-live-bot-runtime #:bot-name 'Mothman-XC #:race our-r
+                                      #:cheese-mode? #t #:cheese-profile 'auto #:cheese-seed "opp-seed-1"))
+    (step-live-bot-runtime! rt (make-f0-lobby-obs our-r opp-req))
+    (define cspec (rt-cheese-active-spec rt))
+    (define cid-str (if cspec (symbol->string (cheese-build-spec-id cspec)) "none"))
+    (check-test label
+                (and (cheese-build-spec? cspec)
+                     (string-prefix? cid-str exp-prefix))
+                (format "picked=~a expected-prefix=~a" cid-str exp-prefix)))
+
+  ;; 10b. Random lobby opponent picks safe default at f=0 AND updates to exact matchup once scouted < 45s!
+  (define rt-rnd (make-live-bot-runtime #:bot-name 'Mothman-ZC #:race 'Zerg
+                                        #:cheese-mode? #t #:cheese-profile 'auto #:cheese-seed "rnd-opp"))
+  (step-live-bot-runtime! rt-rnd (make-f0-lobby-obs 'Zerg 'Random #:frame 0))
+  (define cspec-f0 (rt-cheese-active-spec rt-rnd))
+  ;; Scout sees a Protoss Probe at frame 672 (30s < 45s) -> updates immediately to ZvP!
+  (step-live-bot-runtime!
+   rt-rnd
+   (make-f0-lobby-obs 'Zerg 'Random #:frame 672
+                      #:enemy-units (list (hash 'id 901 'type 'probe 'x 110.0 'y 110.0 'hp 20 'shields 20))))
+  (define cspec-scouted (rt-cheese-active-spec rt-rnd))
+  (define cid-scouted (if cspec-scouted (symbol->string (cheese-build-spec-id cspec-scouted)) "none"))
+  (check-test "l84c-10b-auto-vs-random-safe-f0-and-updates-on-early-scout"
+              (and (cheese-build-spec? cspec-f0)
+                   (cheese-build-spec? cspec-scouted)
+                   (string-prefix? cid-scouted "zvp-"))
+              (format "f0=~a scouted=~a"
+                      (and cspec-f0 (cheese-build-spec-id cspec-f0))
+                      cid-scouted)))
+
 (printf "=== Results: ~a/~a passed (~a failed) ===\n"
         pass-count (+ pass-count fail-count) fail-count)
 (unless (= fail-count 0)
