@@ -405,6 +405,7 @@ def load_rich_report_telemetry(
             or (it_n == 82 and suf.lower() == "b" and sh_n == 24)
             or (it_n == 85 and suf.lower() == "c" and sh_n == 25)
             or (it_n == 86 and suf.lower() == "e" and sh_n == 26)
+            or (it_n == 87 and suf.lower() == "g" and sh_n == 27)
         )
 
     # A2. Load Combat Positioning (Section 5) & Army-Group Positioning (Section 6) vs. Pro
@@ -1344,7 +1345,7 @@ def load_rich_report_telemetry(
                  OR m.run_id LIKE '%iter67b_ship19_full%' OR m.run_id LIKE '%iter68c_ship20_full%'
                  OR m.run_id LIKE '%iter73_ship21_full%' OR m.run_id LIKE '%iter81c_ship23_full%'
                  OR m.run_id LIKE '%iter82b_ship24_full%' OR m.run_id LIKE '%iter85c_ship25_full%'
-                 OR m.run_id LIKE '%iter86e_ship26_full%')
+                 OR m.run_id LIKE '%iter86e_ship26_full%' OR m.run_id LIKE '%iter87g_ship27_full%')
         """
 
         # Per-matchup Local stats (All 26 external opponents)
@@ -3378,7 +3379,7 @@ def render_matchup_evaluation_section(
         elif (co.get("selfplay") or {}).get("n"):
             sp = co["selfplay"]
             rid_low = str(cb.get("run_id") or "").lower()
-            if "iter81c_" in rid_low or "iter82b_" in rid_low or "iter85c_" in rid_low or "iter86e_" in rid_low:
+            if "iter81c_" in rid_low or "iter82b_" in rid_low or "iter85c_" in rid_low or "iter86e_" in rid_low or "iter87g_" in rid_low:
                 chips.append(
                     (f"Head-to-Head ({sp['n']}g)", f"{_fmt_wlt(sp)}", f"{sp['wr']:.1f}% vs. prev live · {sp['tr']:.2f}×")
                 )
@@ -4090,7 +4091,27 @@ def render_matchup_evaluation_section(
         run_id_low = str(pro_curves.get("run_id") or "").lower()
         live_ship_n = int(cb.get("live_ship_num") or cb.get("ship_num") or 0)
         live_loop_n = int(cb.get("live_loop_num") or cb.get("loop_num") or 0)
-        if live_ship_n >= 26 or "iter86e_" in run_id_low:
+        if live_ship_n >= 27 or "iter87g_" in run_id_low:
+            r_mech_para = f"""
+    <div class="release-highlights">
+      <div class="rh-kicker">What Changed in Release #{live_ship_n} ({html.escape(build_lbl)})</div>
+      <ul class="rh-list">
+        <li><strong>7-dimension fog-of-war enemy belief tracking:</strong> Calibrated live estimation of enemy bases, gas geysers, workers, income, army value, production buildings, and upgrades across all 84 matches (upgrade F1 rose from 0.51 to 0.86 at 89.3% precision and 83.5% recall; worker error dropped to 7.0 workers, base error to 0.60, and gas error to 1.08), paired with early gas-sweep scouting for Terran SCVs and Zerg Overlords.</li>
+        <li><strong>Tiered APM-500 fairness governor &amp; uninterrupted worker training:</strong> Enforced strict rolling ceilings under 500 APM (reserving full headroom for urgent spells and core macro while capping routine micro at 78%) so urgent macro drops fell 66% across external games (84% for Zerg) and burst-bucket drops fell 94%; decoupled idle Nexus and Command Center worker slots from combat savings, removed a non-cloak ZvT Overseer deadlock, and cut external gas-rich mineral starvation to 9 of 78 games.</li>
+        <li><strong>All-time external highs, Pro-tuned Version C &amp; walling showcase:</strong> Set external records at 31–42–5 (39.7% wins), 13–21–2 against the 12 held-out bots (36.1% wins), and 14–10–2 for Zerg (53.8% wins, 1.01× trade) at exact 50.0% North/South spawn balance; added 18 follow-up transitions and a pathing-aware Protoss Cannon Rush wall solver across Version C; and published three tile-grid wall blueprints plus six winning wall and wall-punish clips below.</li>
+      </ul>
+      <details style="margin-top:0.65rem;">
+        <summary>Release #{live_ship_n} benchmark, enemy-belief &amp; Version C audit</summary>
+        <ul class="compact-list" style="margin-top:0.5rem;">
+          <li><strong>Full 84-match benchmark, external records &amp; trade-offs:</strong> Finished 32–47–5 overall (38.1% wins, 0.73× trade, 2.36% supply-blocked, 19.22 ms average step time, 42 North / 42 South spawns, zero crashes or wire rejects) and set all-time highs across the 78 external games (31–42–5, 39.7% wins, 0.74× trade, 2.30% supply-blocked; 30–42–5 across 77 contested games after one early opponent crash against Chance in PvT, which matches the 77-game Pro comparison charts below), the 12 held-out bots (13–21–2, 36.1% wins, 0.69× trade), and Zerg external play (14–10–2, 53.8% wins, 1.01× trade). Core-14 finished 18–21–3 (42.9% wins, 0.79× trade) and Protoss reached 8–16–2 (1.87% supply-blocked). Trade-offs to fix next: Terran dipped to 9–16–1 (0.79× trade, down from 10–13–3 and 1.04×) and head-to-head finished 1–5 against Release #26 (300-APM baseline), with both tracing to SCV repair command floods colliding with the fixed 390-APM routine-micro ceiling plus early macro stalls (Terran still won 3.31× in TvT).</li>
+          <li><strong>7-dimension enemy belief accuracy (84 matches, 653 checkpoints):</strong> Base error 0.60, gas geyser error 1.08, worker error 7.0, mineral income error 351/min, gas income error 150/min, army value error 471, production building L1 error 1.48, and upgrade precision/recall/F1 at 89.3%/83.5%/86.3% (Zerg 87%, Protoss 86%, Terran 85%). Early main-gas scouting recall at 2:00 and 3:00 reached 55.6%/63.0% for Protoss, 30.8%/44.4% for Terran, and 17.4%/79.2% for Zerg.</li>
+          <li><strong>Version C early-pressure playbooks (18 openings &amp; follow-ups):</strong> Across 78-match early-pressure tests, Mothman-TC hit a high of 10–9–7 (0.83× trade), Mothman-ZC reached 8–11–7 (0.35% supply-blocked), and Protoss Cannon Rush moved to a ground-pathing 3-Pylon wall solver with zero deadlocks and clean Gateway follow-ups (lifting Cannon Rush test trade from 0.72× to 1.16×).</li>
+          <li><strong>Standalone 5-bot package smoke:</strong> All five compiled standalone binaries (Mothman-Z, Mothman-T, Mothman-P, Mothman-X, and Mothman-XC) booted and stepped cleanly in 29.42 s at 7.14 ms average step time with zero crashes, zero wire rejects, full enemy belief logging across all five games, and Random Version C cheese active from frame 0.</li>
+          <li><strong>Next up (Loop 88 preview):</strong> Next work informed by Grandmaster replay comparisons replaces fixed APM percentage tiers with single-cap priority-driven allocation and SCV repair deduplication, moves hardcoded macro rules into a declarative Pro-backed goal and escrow engine driven by live income and all seven calibrated enemy-belief dimensions, unifies army regroup and push control with in-combat concave and defensive pre-arc formations, and separates multi-prong harass from main-army retreats.</li>
+        </ul>
+      </details>
+    </div>"""
+        elif live_ship_n >= 26 or "iter86e_" in run_id_low:
             r_mech_para = f"""
     <div class="release-highlights">
       <div class="rh-kicker">What Changed in Release #{live_ship_n} ({html.escape(build_lbl)})</div>
