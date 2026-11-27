@@ -4415,8 +4415,8 @@ def _render_standings_tables(
         note_html = (
             '<p class="table-note">'
             f"AI Arena ratings start at 1600. All {acct_word} active ladder accounts run "
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45889518683" target="_blank" rel="noopener noreferrer"><strong>Release #25 (Build 85C)</strong></a>, '
-            "which ships 82.8% Protoss and 100.0% Terran live walling, zero-false-positive proxy and one-base rush detection, Protoss mid-game recovery, and four early-pressure cheese accounts. "
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45922047643" target="_blank" rel="noopener noreferrer"><strong>Release #26 (Build 86E)</strong></a>, '
+            "which ships fog-of-war enemy base and gas tracking, anti-greed expansion and gas-balance valves, outer-base targeting with rear detector escorts, and our strongest overall local trade ratio (0.89×). "
             f"Current-season accounts hold {html.escape(crash_phrase)}{html.escape(vc_note_tail)}. "
             "Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
@@ -4854,8 +4854,8 @@ def build_history_page(
         f"The first deployed build went 0–10 on AI Arena. Recent v1 builds win roughly 55–61% of their games: "
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
         f"and Release #9 (Build 51) climbed to 19–9–3 (61.3% wins). Release #21 (Build 73) went 40–19–1 (66.7%, 31–7–1 in Division 9) "
-        f"and promoted both Mothman-P and Mothman-T, followed by Releases #22 through #24 and "
-        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45889518683" target="_blank" rel="noopener noreferrer">Release #25 (Build 85C)</a> '
+        f"and promoted both Mothman-P and Mothman-T, followed by Releases #22 through #25 and "
+        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45922047643" target="_blank" rel="noopener noreferrer">Release #26 (Build 86E)</a> '
         f"across all 12 active ladder bots (8 macro accounts plus 4 early-pressure Version C accounts)."
     )
 
@@ -4931,6 +4931,7 @@ def build_history_page(
         "iter81c_ship23_full": 23,
         "iter82b_ship24_full": 24,
         "iter85c_ship25_full": 25,
+        "iter86e_ship26_full": 26,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:
@@ -5011,7 +5012,7 @@ def build_history_page(
                     f'<td style="text-align:right">{sb_s}</td>'
                     f"</tr>"
                 )
-            recent = list(reversed(iters[-38:]))
+            recent = list(reversed(iters[-43:]))
             already_has_cur = bool(
                 cur_tag
                 and any(
@@ -5178,8 +5179,9 @@ def build_history_page(
     </p>
   </div>
   <div class="release-highlights" style="margin-bottom:1.15rem;">
-    <div class="rh-kicker">Recent Campaign &amp; Release Arc (Loops 69–85)</div>
+    <div class="rh-kicker">Recent Campaign &amp; Release Arc (Loops 69–86)</div>
     <ul class="rh-list">
+      <li><strong>Loops 86–86E (Shipped as Release #26):</strong> Added fog-of-war enemy base and gas deduplication with live enemy-economy tracking (0.15-base error at 2:00 and 0.75 at 6:00 across 84 games; scout Overlord losses held to 3.7%), anti-greed 4th-to-6th base scaling with gas-balance worker pullbacks (cutting external gas-rich mineral starvation 68%, 22 to 7, and halving zero-kill and economic efficiency collapses), and anti-turtle outer-base targeting with rear mobile detector escorts while holding Protoss live walling at 82.8% (zero self-traps) and Terran at 96.4%. Set overall highs at 34–43–7 (40.5% wins, 0.89× trade) and 30–41–7 external (0.83× trade), lifted 12 Held-Out Bots from 16.7% to 30.6% wins (0.68× trade), pushed Zerg to 13–11–2 (50.0% wins, 0.84× trade) and Terran to 1.04× external trade, beat Release #25 4–2 (1.49×) head-to-head, and went 3–0–2 unbeaten in standalone 5-bot smoke (10.05 ms step time).</li>
       <li><strong>Loops 83–85C (Shipped as Release #25):</strong> Upgraded the combat drill harness to real Fog-of-War with macro actions disabled (zero macro leaks across 133 checks, 55–54–6 core pass at 1.11× trade, 9–0 creep Transfusion checks, 12–2–1 self-play at 1.76× and 97.0% active firing share); built and deployed four Version C early-pressure bots (Mothman-PC, Mothman-TC, Mothman-ZC, Mothman-XC) with 18 pre-6:00 playbooks across all 9 matchups (Mothman-TC went 12–11–3 locally, combined coverage reached 19 of 26 opponents, and the four accounts opened 6–2 on AI Arena); and overhauled main macro walling and rush defense so Protoss reached 82.8% live walls (PvZ 77.8%, PvT 90.0%, zero self-traps), Terran sealed 100.0% at 4:30 with zero Barracks lifts, rush detection hit 100% true-positive precision (13 of 13), and Terran plus Zerg went 8–0–4 unbeaten against all 12 pro cheeses. Lifted overall trade to 0.78× (30–45–9, 2.4% supply-blocked), held-out trade from 0.37× to 0.55×, beat Release #24 4–2 (1.20×) head-to-head, and swept 5–0 in standalone smoke (9.77× trade).</li>
       <li><strong>Loops 82–82B (Shipped as Release #24):</strong> Shipped live binary-grid walling upgrades (Terran 100.0% walled at 3:00 across all 28 games with Barracks lifts down from 29.0% to 3.6%; Protoss up 16× from 3.4% to 55.2% with zero self-traps), emergency doorway cancels, expansion-block recovery (-71.5 s blocked Terran natural), upgraded Adept Shade micro, and scout-verified open-wall punishes (35 Drones killed in PvZ, zero fogged Terran false-fires). Improved overall local play to 32–49–3 (0.73× trade), lifted 14 Core Bots to 22–19–1 (52.4% wins, 1.12× trade), split 3–3 (1.19× trade) head-to-head against Release #23, and swept 4–0 in standalone smoke (6.59× trade, 10.08 ms step time).</li>
       <li><strong>Loops 80–81C (Shipped as Release #23):</strong> Merged late-game +2/+3 upgrade chaining, Protoss Phoenix caps, Terran MULE and Scan policy, Viper Consume, Hydralisk Transfuse, and Stalker forward-blink arcs while dropping mid-fight attack-position scatter, then shipped Division 8 replay-audit fixes across all three races plus a deterministic map-and-seed local harness. Beat the Release #22 package 4–1–1 head-to-head (1.38× trade, Protoss 3–0, Terran 1–0–1), went 9–6–3 on the 18-match canary, pulled Terran's 3rd Command Center 54 s earlier (+0.27× same-race trade), and swept 4–0 in standalone package smoke (4.56× trade, 11.68 ms step time).</li>
@@ -5192,7 +5194,7 @@ def build_history_page(
   </div>
   {shipped_table_html}
   <p class="table-note" style="margin:-0.65rem 0 1.05rem;">
-    Release #25 (Build 85C) cleared 30–45–9 across all 84 deterministic local matches (0.78× overall trade, 2.4% supply-blocked, 26–43–9 external at 0.74× trade, 20–20–2 at 0.99× against the 14 Core bots, 0.55× trade against the 12 held-out bots, 4–2 at 1.20× head-to-head vs. Release #24, zero crashes or wire rejects) alongside a 5–0 standalone smoke (9.77× trade) across all macro and Version C builds. Release #22 (Build 79B) kept Release #21's macro code untouched and cleared deployment via 12–1 live drill verification against Carriers, Swarm Hosts, and Liberators rarely fielded by the local bot pool.
+    Release #26 (Build 86E) cleared 34–43–7 across all 84 deterministic local matches (40.5% wins, 0.89× overall trade, 30–41–7 external at 0.83× trade, 11–21–4 at 0.68× against the 12 held-out bots, 4–2 at 1.49× head-to-head vs. Release #25, zero crashes or wire rejects) alongside a 3–0–2 unbeaten standalone smoke across all macro and Version C builds. Release #22 (Build 79B) kept Release #21's macro code untouched and cleared deployment via 12–1 live drill verification against Carriers, Swarm Hosts, and Liberators rarely fielded by the local bot pool.
   </p>
   {ledger_section}
   {hist_faults}
@@ -5225,8 +5227,90 @@ def build_history_page(
     )
 
 
-def _sanitize_flywheel_retro_md(md: str) -> str:
+def _sanitize_flywheel_retro_md(md: str, repo_dir: Optional[Path] = None) -> str:
     """Turn auto-generated loop_flywheel_retro.md into clean cold-reader prose without touching the generator."""
+    # 0. Recompute Section 1 phase table from loop_trajectory_log.jsonl clamping bogus cross-session spans (> total_wall_sec)
+    if repo_dir is not None:
+        traj_p = repo_dir / "tools/iteration-loop/loop_trajectory_log.jsonl"
+        if traj_p.is_file():
+            try:
+                t_recs = [json.loads(ln) for ln in traj_p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+                ship_era = [r for r in t_recs if int(r.get("loop_id") or 0) >= 34]
+                if ship_era:
+                    ships_era = [r for r in ship_era if r.get("ship_verdict") == "SHIP-ZIP"]
+                    holds_era = [r for r in ship_era if r.get("ship_verdict") == "HOLD-ZIP"]
+                    total_wall = sum(float(r.get("total_wall_sec") or 0.0) for r in ship_era)
+
+                    def _clamped_ph(r: Dict[str, Any], ph_k: str) -> float:
+                        fv = float((r.get("phase_durations_sec") or {}).get(ph_k) or 0.0)
+                        wv = float(r.get("total_wall_sec") or 0.0)
+                        if wv > 0.0 and fv > max(wv * 1.1, wv + 60.0):
+                            return 0.0
+                        return fv
+
+                    def _mean_s(vs: List[float]) -> float:
+                        return round(sum(vs) / len(vs), 1) if vs else 0.0
+
+                    def _med_s(vs: List[float]) -> float:
+                        if not vs:
+                            return 0.0
+                        s_v = sorted(vs)
+                        mid_i = len(s_v) // 2
+                        med = s_v[mid_i] if (len(s_v) % 2 == 1) else 0.5 * (s_v[mid_i - 1] + s_v[mid_i])
+                        return round(float(med), 1)
+
+                    def _p90_s(vs: List[float]) -> float:
+                        if not vs:
+                            return 0.0
+                        s_v = sorted(vs)
+                        return round(float(s_v[min(len(s_v) - 1, int(0.9 * (len(s_v) - 1)))]), 1)
+
+                    ph_keys = (
+                        "coding",
+                        "gate1_verify",
+                        "tactics_arena",
+                        "baseline_h2h",
+                        "benchmark_84",
+                        "forensics",
+                        "archival_render",
+                        "publish",
+                        "idle_gaps_sec",
+                    )
+                    ph_rows = []
+                    for ph_k in ph_keys:
+                        vs = [_clamped_ph(r, ph_k) for r in ship_era]
+                        svs = [_clamped_ph(r, ph_k) for r in ships_era]
+                        hvs = [_clamped_ph(r, ph_k) for r in holds_era]
+                        tot_s = sum(vs)
+                        ph_rows.append(
+                            (
+                                ph_k,
+                                round(tot_s / 60.0, 1),
+                                round(_mean_s(vs) / 60.0, 1),
+                                round(_med_s(vs) / 60.0, 1),
+                                round(_p90_s(vs) / 60.0, 1),
+                                round(100.0 * tot_s / max(1.0, total_wall), 1),
+                                round(_mean_s(svs) / 60.0, 1),
+                                round(_mean_s(hvs) / 60.0, 1),
+                            )
+                        )
+                    ph_rows.sort(key=lambda x: x[1], reverse=True)
+                    new_tbl_lines = [
+                        f"| Phase | Total Min (`n={len(ship_era)}`) | Mean Min | Median Min | P90 Min | Share of Wall | Shipped Mean | Held Mean |",
+                        "|---|---:|---:|---:|---:|---:|---:|---:|",
+                    ] + [
+                        f"| `{rk}` | {tot_m:.1f} | {mn_m:.1f} | {md_m:.1f} | {p90_m:.1f} | {sh_p:.1f}% | {sm_m:.1f} | {hm_m:.1f} |"
+                        for rk, tot_m, mn_m, md_m, p90_m, sh_p, sm_m, hm_m in ph_rows
+                    ]
+                    new_tbl = "\n".join(new_tbl_lines)
+                    md = re.sub(
+                        r"\| Phase \| Total Min \(`n=\d+`\) \| Mean Min \| Median Min \| P90 Min \| Share of Wall \| Shipped Mean \| Held Mean \|\n\|---\|---:\|---:\|---:\|---:\|---:\|---:\|---:\|\n(?:\| `[^`]+` \|[^\n]*\n?)+",
+                        new_tbl + "\n",
+                        md,
+                        count=1,
+                    )
+            except Exception:
+                pass
     # 1. Strip internal '- **Files:** ...' lines (removes file paths and extra sub-bullets in Section 5)
     lines = [
         ln for ln in md.splitlines()
@@ -5398,6 +5482,10 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
                 "L82": ("1–5", "YES", "Wall wire & fog guards", "Doorway wire check rejected Protoss walls and fogged Terran ramps triggered false open-wall punishes (fixed in L82B)"),
                 "L85": ("Canary-18", "YES", "Pre-check cheese gate", "Stopped at the 18-match cheese-defense pre-check (3–7–8) before full-roster testing (tightened in L85B)"),
                 "L85B": ("3–3", "YES", "Rush false alarms & PvT", "Loose proxy and early-pool thresholds inflated rush alerts 9.7× and starved Protoss Stargate and 3rd Nexus (fixed in L85C)"),
+                "L86A": ("Canary-18", "YES", "Stage 1 canary gate", "Stopped at the 18-match anti-greed canary gate (2–9–1 external) before full-roster testing (refined in L86B)"),
+                "L86B": ("Canary-18", "YES", "Stage 1 canary gate", "Stopped at the 18-match canary gate (3–8–1 external) while tuning expansion and targeting thresholds (refined in L86C)"),
+                "L86C": ("Canary-18", "YES", "Fog base dedup gate", "Stopped at the 18-match canary gate (2–8–2 external) before adding fog-of-war enemy base spatial deduplication in L86D"),
+                "L86D": ("Canary-18", "YES", "Stage 1 canary gate", "Stopped at the 18-match canary gate (4–6–2 external) for final gas-valve and escort polish before shipping L86E"),
             }
 
             def _disambig_3a_row(m: re.Match[str]) -> str:
@@ -5567,9 +5655,10 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
             out6.append(f"{idx_f}. {f_txt}")
         text = head_part + "\n" + "\n".join(out6) + "\n"
 
-    # Normalize lowercase 'x' multipliers like 1.30x -> 1.30× and W-L records in Table 3a
+    # Normalize lowercase 'x' multipliers like 1.30x -> 1.30× and W-L records in Table 3a / Section 5
     text = re.sub(r"(\d+\.\d+)x\b", r"\1×", text)
     text = re.sub(r"\b(\d+)W-(\d+)L\b", r"\1–\2", text)
+    text = re.sub(r"\bgoes (\d+)-(\d+)\b", r"goes \1–\2", text)
     text = re.sub(r"\bL(\d+)[–-]L(\d+)\b", r"Loops \1–\2", text)
     text = re.sub(
         r"Across (Loops \d+–\d+), Engineering changes \(([^)]+)\) and 84-match benchmark \(([^)]+)\) account for most wall time, while Head-to-head gate averages \*\*([^*]+)\*\* and catches most held regressions early\.",
@@ -5831,7 +5920,7 @@ def build_static_site(
     page_stats: Dict[str, Dict[str, object]] = {}
     for sp, rewritten_md in rewritten_reports:
         if sp.slug == "loop-flywheel-retro":
-            rewritten_md = _sanitize_flywheel_retro_md(rewritten_md)
+            rewritten_md = _sanitize_flywheel_retro_md(rewritten_md, repo_dir=repo_dir)
         renderer = MarkdownRenderer(
             poster_lookup=poster_lookup,
             staged_mp4_map=staged_mp4_map,

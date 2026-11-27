@@ -404,6 +404,7 @@ def load_rich_report_telemetry(
             or (it_n == 81 and suf.lower() == "c" and sh_n == 23)
             or (it_n == 82 and suf.lower() == "b" and sh_n == 24)
             or (it_n == 85 and suf.lower() == "c" and sh_n == 25)
+            or (it_n == 86 and suf.lower() == "e" and sh_n == 26)
         )
 
     # A2. Load Combat Positioning (Section 5) & Army-Group Positioning (Section 6) vs. Pro
@@ -1342,7 +1343,8 @@ def load_rich_report_telemetry(
                  OR m.run_id LIKE '%iter65h_ship17_full%' OR m.run_id LIKE '%iter66_ship18_full%'
                  OR m.run_id LIKE '%iter67b_ship19_full%' OR m.run_id LIKE '%iter68c_ship20_full%'
                  OR m.run_id LIKE '%iter73_ship21_full%' OR m.run_id LIKE '%iter81c_ship23_full%'
-                 OR m.run_id LIKE '%iter82b_ship24_full%' OR m.run_id LIKE '%iter85c_ship25_full%')
+                 OR m.run_id LIKE '%iter82b_ship24_full%' OR m.run_id LIKE '%iter85c_ship25_full%'
+                 OR m.run_id LIKE '%iter86e_ship26_full%')
         """
 
         # Per-matchup Local stats (All 26 external opponents)
@@ -3049,7 +3051,7 @@ def render_matchup_evaluation_section(
         elif (co.get("selfplay") or {}).get("n"):
             sp = co["selfplay"]
             rid_low = str(cb.get("run_id") or "").lower()
-            if "iter81c_" in rid_low or "iter82b_" in rid_low or "iter85c_" in rid_low:
+            if "iter81c_" in rid_low or "iter82b_" in rid_low or "iter85c_" in rid_low or "iter86e_" in rid_low:
                 chips.append(
                     (f"Head-to-Head ({sp['n']}g)", f"{_fmt_wlt(sp)}", f"{sp['wr']:.1f}% vs. prev live · {sp['tr']:.2f}×")
                 )
@@ -3256,11 +3258,11 @@ def render_matchup_evaluation_section(
       <div class="base-control-stack">
         <div class="base-control-card">
           <div class="bc-kicker">Protoss · 82.8% Live Ramp &amp; Choke Walls (0 Self-Traps)</div>
-          <p>Up from 55.2% in Release #24 with zero self-traps across 29 live games (PvT 90.0%, PvP 80.0%, PvZ 77.8% up from 30.0%), 0.0% Pylon clumping, and emergency doorway cancels.</p>
+          <p>Matched our live walling high at 24 of 29 games with zero self-traps, 0.0% Pylon clumping, and emergency doorway Battery or Pylon cancels.</p>
         </div>
         <div class="base-control-card">
-          <div class="bc-kicker">Terran · 100.0% Live Wall at 4:30 (0% Barracks Lifts)</div>
-          <p>26 of 26 live games sealed at 4:30 (92.9% by 3:00 across every spawn), and Barracks add-on auto-lifts dropped to 0 of 28 (down from 29.0%).</p>
+          <div class="bc-kicker">Terran · 96.4% Live Main-Ramp Walling</div>
+          <p>27 of 28 live games sealed across spawns (the sole open ramp was a 4.25× win against PolyMorph), alongside 2 late Barracks add-on lifts.</p>
         </div>
       </div>
       <div class="base-control-card base-control-card-media">
@@ -3757,7 +3759,26 @@ def render_matchup_evaluation_section(
         run_id_low = str(pro_curves.get("run_id") or "").lower()
         live_ship_n = int(cb.get("live_ship_num") or cb.get("ship_num") or 0)
         live_loop_n = int(cb.get("live_loop_num") or cb.get("loop_num") or 0)
-        if live_ship_n >= 25 or "iter85c_" in run_id_low:
+        if live_ship_n >= 26 or "iter86e_" in run_id_low:
+            r_mech_para = f"""
+    <div class="release-highlights">
+      <div class="rh-kicker">What Changed in Release #{live_ship_n} ({html.escape(build_lbl)})</div>
+      <ul class="rh-list">
+        <li><strong>Opponent base &amp; gas tracking in fog of war:</strong> Deduplicated remembered enemy bases and gas geysers across the map and added live enemy-economy tracking (within 0.15 bases at 2:00 and 0.75 bases at 6:00 across all 84 games), and kept early Zerg scout Overlord losses to 1 of 27 (3.7%).</li>
+        <li><strong>Expansion pacing &amp; gas-balance valves:</strong> Balanced 4th-to-6th base scaling with automatic gas-worker pullbacks when minerals lag gas, and cut external gas-rich mineral-starved matches by 68% (22 to 7) while halving both zero-kill collapses (6 to 3) and economic efficiency collapses (8 to 4).</li>
+        <li><strong>Outer-base targeting, choke breakers &amp; rear detector escorts:</strong> Shifted armies toward softest outer bases instead of grinding into entrenched chokes, added rear mobile detector escorts, and lifted overall trade to 0.89× (34–43–7, with Zerg at 50.0% external wins and Terran at 1.04× external trade).</li>
+      </ul>
+      <details style="margin-top:0.65rem;">
+        <summary>Release #{live_ship_n} benchmark, walling &amp; economy audit</summary>
+        <ul class="compact-list" style="margin-top:0.5rem;">
+          <li><strong>Full 84-match benchmark &amp; head-to-head:</strong> Finished 34–43–7 overall (40.5% wins, 0.89× trade up from 0.78×, 2.6% supply-blocked, 18.64 ms average step time, zero crashes or wire rejects), 30–41–7 external (38.5% wins, 0.83× trade), 19–20–3 (0.98×) against the 14 Core bots, 11–21–4 (30.6% wins and 0.68× trade, up from 16.7% and 0.55×) against the 12 held-out bots, and 4–2 (66.7% wins, 1.49× trade) head-to-head against Release #25.</li>
+          <li><strong>External race &amp; timing gains (78 games):</strong> Zerg climbed to 13–11–2 (50.0% wins, 0.84× trade up from 0.52×) and cut Roach Speed timing to 5:57 (down from 6:41); Terran climbed to 10–13–3 at 1.04× trade (up from 0.90×) and pulled its third Command Center 41 s earlier to 7:03; Protoss cut external gas-rich mineral starvation from 11 games to 4 and pulled its third Nexus to 6:14 (down from 8:05), though PvT Siege Tank and Banshee defense remains our top Loop 87 priority.</li>
+          <li><strong>Live walling &amp; fault reductions:</strong> Held Protoss live walling at 82.8% (24 of 29, zero self-traps) and Terran at 96.4% (27 of 28); eliminated early-rush idle-bank faults (3 to 0) and anti-air starvation (1 to 0), and cut overall escrow lockouts in half across all 84 games (12 to 6).</li>
+          <li><strong>Standalone 5-bot package smoke:</strong> Finished 3–0–2 unbeaten across Mothman-Z, Mothman-T, Mothman-P, Mothman-X, and Mothman-XC against Creepy_strategies at 10.05 ms average step time with zero crashes, zero wire rejects, and 100% live enemy base and gas telemetry across all five compiled binaries.</li>
+        </ul>
+      </details>
+    </div>"""
+        elif live_ship_n >= 25 or "iter85c_" in run_id_low:
             r_mech_para = f"""
     <div class="release-highlights">
       <div class="rh-kicker">What Changed in Release #{live_ship_n} ({html.escape(build_lbl)})</div>
