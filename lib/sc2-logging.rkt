@@ -9,10 +9,16 @@
          "sc2-types.rkt")
 
 (module exp-meta-ops racket/base
+  (require racket/math
+           racket/string
+           racket/set)
   (provide record-exp-meta!
            lookup-exp-meta
            record-econ-belief-meta!
-           lookup-econ-belief-meta)
+           lookup-econ-belief-meta
+           owm-sanitize-token
+           owm-extract-kv-pairs
+           owm-extract-upg-tokens)
   (define exp-meta-table (make-weak-hasheq))
   (define econ-belief-meta-table (make-weak-hasheq))
   (define (record-exp-meta! rec meta)
@@ -26,13 +32,52 @@
       (hash-set! econ-belief-meta-table rec meta))
     rec)
   (define (lookup-econ-belief-meta rec)
-    (hash-ref econ-belief-meta-table rec #f)))
+    (hash-ref econ-belief-meta-table rec #f))
+  (define (owm-sanitize-token v)
+    (define raw
+      (cond
+        [(symbol? v) (symbol->string v)]
+        [(string? v) v]
+        [else ""]))
+    (define cleaned
+      (regexp-replace* #px"[\\s,():\u2013\u2014]+" (string-trim raw) "-"))
+    (string-trim cleaned "-"))
+  (define (owm-extract-kv-pairs raw)
+    (define acc (make-hash))
+    (when (hash? raw)
+      (for ([(k v) (in-hash raw)])
+        (define ks (owm-sanitize-token k))
+        (define cnt
+          (cond
+            [(exact-integer? v) v]
+            [(and (real? v) (not (nan? v)) (not (infinite? v))) (inexact->exact (round v))]
+            [else 0]))
+        (when (and (> (string-length ks) 0) (> cnt 0))
+          (hash-update! acc ks (lambda (prev) (+ prev cnt)) 0))))
+    (sort (for/list ([(k v) (in-hash acc)]) (cons k v))
+          string<?
+          #:key car))
+  (define (owm-extract-upg-tokens raw)
+    (define acc (mutable-set))
+    (define (add-elem! elem)
+      (define tok (owm-sanitize-token elem))
+      (when (and (> (string-length tok) 0)
+                 (not (string=? tok "unknown"))
+                 (not (string=? tok "none")))
+        (set-add! acc tok)))
+    (cond
+      [(list? raw) (for ([e (in-list raw)]) (add-elem! e))]
+      [(generic-set? raw) (for ([e (in-set raw)]) (add-elem! e))]
+      [else (void)])
+    (sort (set->list acc) string<?)))
 
 (unsafe-require/typed 'exp-meta-ops
                       [record-exp-meta! (-> Any (Option (Immutable-HashTable Symbol Any)) Any)]
                       [lookup-exp-meta (-> Any (Option (Immutable-HashTable Symbol Any)))]
                       [record-econ-belief-meta! (-> Any (Option (Immutable-HashTable Symbol Any)) Any)]
-                      [lookup-econ-belief-meta (-> Any (Option (Immutable-HashTable Symbol Any)))])
+                      [lookup-econ-belief-meta (-> Any (Option (Immutable-HashTable Symbol Any)))]
+                      [owm-extract-kv-pairs (-> Any (Listof (Pairof String Positive-Integer)))]
+                      [owm-extract-upg-tokens (-> Any (Listof String))])
 
 (provide
  (struct-out bot-mind-log-snapshot)
@@ -43,6 +88,7 @@
  extract-experiment-log-tag
  extract-bot-step-log-record
  format-bot-step-log-line
+ format-owm-belief-log-line
  bot-step-log-record->hash)
 
 ;; -----------------------------------------------------------------------------
@@ -437,6 +483,45 @@
           (bot-tactics-log-snapshot-issued-orders t)
           exp-tag
           econ-tag))
+
+;; Loop 87 Track 5: Compact, deterministic single-line full OWM belief telemetry tag.
+;; Format:
+;;   [SCBOT_OWM] f=<frame> b=<conf>/<est> g=<conf>/<est> w=<est>/<seen> inc=<mrate>M/<grate>G prod=(k:v,...) upg=(u1,u2,...) units=(k:v,...) unseen=<um>M/<ug>G arm=<val>
+(: format-owm-kv-csv (-> (Listof (Pairof String Positive-Integer)) String))
+(define (format-owm-kv-csv pairs)
+  (string-join
+   (for/list : (Listof String) ([p : (Pairof String Positive-Integer) (in-list pairs)])
+     (format "~a:~a" (car p) (cdr p)))
+   ","))
+
+(: format-owm-belief-log-line (-> Any String))
+(define (format-owm-belief-log-line snap)
+  (define frame (safe-nonneg-int (hget* snap '(frame) 0) 0))
+  (define conf-b (safe-nonneg-int (hget* snap '(confirmed-bases) 0) 0))
+  (define est-b (safe-nonneg-int (hget* snap '(estimated-bases) conf-b) conf-b))
+  (define conf-g (safe-nonneg-int (hget* snap '(confirmed-gases) 0) 0))
+  (define est-g (safe-nonneg-int (hget* snap '(estimated-gases) conf-g) conf-g))
+  (define est-w (safe-nonneg-int (hget* snap '(est-workers) 0) 0))
+  (define seen-w (safe-nonneg-int (hget* snap '(seen-workers) 0) 0))
+  (define mrate (safe-nonneg-int (hget* snap '(est-min-rate) 0) 0))
+  (define grate (safe-nonneg-int (hget* snap '(est-gas-rate) 0) 0))
+  (define prod-str (format-owm-kv-csv (owm-extract-kv-pairs (hget* snap '(prod) #f))))
+  (define upg-str (string-join (owm-extract-upg-tokens (hget* snap '(upgrades) '())) ","))
+  (define units-str (format-owm-kv-csv (owm-extract-kv-pairs (hget* snap '(units) #f))))
+  (define unseen-m (safe-nonneg-int (hget* snap '(unseen-min) 0) 0))
+  (define unseen-g (safe-nonneg-int (hget* snap '(unseen-gas) 0) 0))
+  (define arm-val (safe-nonneg-int (hget* snap '(believed-army-val) 0) 0))
+  (format "[SCBOT_OWM] f=~a b=~a/~a g=~a/~a w=~a/~a inc=~aM/~aG prod=(~a) upg=(~a) units=(~a) unseen=~aM/~aG arm=~a"
+          frame
+          conf-b est-b
+          conf-g est-g
+          est-w seen-w
+          mrate grate
+          prod-str
+          upg-str
+          units-str
+          unseen-m unseen-g
+          arm-val))
 
 (: bot-step-log-record->hash (-> bot-step-log-record (HashTable Symbol Any)))
 (define (bot-step-log-record->hash rec)

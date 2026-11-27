@@ -4679,7 +4679,12 @@ def build_index_page(
             )
 
     standings_html = _render_standings_tables(ai_live, dash["bots"], recent_note_builds)
-    sec_matchups = render_matchup_evaluation_section(rich, section_num="Section 2")
+    sec_matchups = render_matchup_evaluation_section(
+        rich,
+        section_num="Section 2",
+        staged_mp4_map=staged_mp4_map,
+        staged_poster_map=staged_poster_map,
+    )
     sec_tactics = render_tactics_explorer_section(rich, clips_by_cat, section_num="Section 3")
     sec_arch = render_architecture_section(rich, section_num="Section 4", include_history_details=False)
 
@@ -5755,13 +5760,20 @@ def build_static_site(
         sname = it.get("_safe_name") or lp.name
         priority_entries.append((key, lp, sname))
 
-    # Tier 2: Featured full-match replays
+    # Tier 2: Featured full-match replays + Walling & Wall-Punish showcase clips
     loop_root = brain_dir / "scratch" / "loop"
+    wall_root = brain_dir / "scratch" / "walling_clips"
     flagship_specs = [
         ("showcase:h2h003", loop_root / "visuals_iter45/full_matches/full_h2h003_Mothman-P_vs_Mothman-P-Base.mp4", "feat_l45_h2h003_pvp.mp4"),
         ("showcase:h2h006", loop_root / "visuals_iter45/full_matches/full_h2h006_Mothman-T_vs_Mothman-Z-Base.mp4", "feat_l45_h2h006_tvz.mp4"),
         ("showcase:m074", loop_root / "visuals_iter45/full_matches/full_m074_Mothman-T_vs_who.mp4", "feat_l45_m074_tvt_who.mp4"),
         ("showcase:h2h002", loop_root / "visuals_iter45/full_matches/full_h2h002_Mothman-T_vs_Mothman-T-Base.mp4", "feat_l45_h2h002_tvt.mp4"),
+        ("wall:terran_main_ramp", wall_root / "wall_terran_main_ramp.mp4", "wall_terran_main_ramp.mp4"),
+        ("wall:protoss_main_ramp", wall_root / "wall_protoss_main_ramp.mp4", "wall_protoss_main_ramp.mp4"),
+        ("wall:protoss_nat_choke", wall_root / "wall_protoss_nat_choke.mp4", "wall_protoss_nat_choke.mp4"),
+        ("punish:zerg_open_wall", wall_root / "punish_zerg_open_wall.mp4", "punish_zerg_open_wall.mp4"),
+        ("punish:protoss_adept_shade", wall_root / "punish_protoss_adept_shade.mp4", "punish_protoss_adept_shade.mp4"),
+        ("punish:terran_wall_break", wall_root / "punish_terran_wall_break.mp4", "punish_terran_wall_break.mp4"),
     ]
     for fkey, fp, fname in flagship_specs:
         if fp.is_file() and not _is_placeholder_arena_clip(fp):

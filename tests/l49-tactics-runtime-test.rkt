@@ -5113,7 +5113,7 @@
      (mk-live-obs 'Terran 'Zerg 6120 #:minerals 300 #:gas 20 #:supply-used 90 #:supply-cap 110
                   #:mineral-harvesters 20 #:vespene-harvesters 0 #:vesp-rate 0
                   #:ally-units scvs-gv #:ally-buildings (list cc-gv ref-gv-empty) #:mineral-patches mps-gv)))
-  ;; Loop 61B (`#1641`): backup `wd-gas-valve` triggers at `215G / 90M` (`> 3` gas harvesters), NOT at `195G / 90M`!
+  ;; Loop 61B (`#1641`, restored in Loop 87G): backup `wd-gas-valve` triggers at `215G / 90M` (`> 3` gas harvesters), NOT at `195G / 90M`!
   (define ref-gv2 (mk-u 92303 'refinery 36.5 36.5 #:hp 500.0 #:assigned-harvesters 2 #:ideal-harvesters 3 #:vespene-contents 1800))
   (define scvs-gv5
     (append (for/list ([i (in-range 3)]) (mk-u (+ 92310 i) 'scv 29.0 (+ 35.5 (* 0.3 i)) #:hp 45.0 #:order-ability-id 3666 #:order-target-id 92302))

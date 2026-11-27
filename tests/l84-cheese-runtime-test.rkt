@@ -234,15 +234,15 @@
                           acts-cap))
               (format "acts=~s" acts-cap)))
 
-;; 2c. Protoss `pvt-proxy-4gate-zealot-stalker`: worker-cap = 16, max-bases = 1
+;; 2c. Protoss `pvt-proxy-4gate-zealot-stalker`: worker-cap = 20, max-bases = 1
 (let ()
   (define rt (make-live-bot-runtime #:bot-name 'Mothman-PC #:race 'Protoss
                                     #:cheese-mode? #t #:cheese-profile 'pvt-proxy-4gate-zealot-stalker))
   (define obs-at-cap
     (make-base-obs
      #:race 'Protoss #:enemy-race 'Terran #:frame 3200 ;; ~143s
-     #:minerals 900 #:gas 300 #:supply-used 22 #:supply-cap 46
-     #:mineral-harvesters 13 #:gas-harvesters 3
+     #:minerals 900 #:gas 300 #:supply-used 26 #:supply-cap 46
+     #:mineral-harvesters 14 #:gas-harvesters 6
      #:ally-buildings
      (list (hash 'id 30 'type 'nexus 'x 28.0 'y 28.0 'hp 1000 'shields 1000 'energy 20.0 'build-progress 1.0 'busy? #f)
            (hash 'id 31 'type 'pylon 'x 34.0 'y 28.0 'hp 200 'shields 200 'build-progress 1.0)
@@ -253,9 +253,9 @@
            (hash 'id 36 'type 'gateway 'x 116.0 'y 142.0 'hp 500 'shields 500 'build-progress 1.0 'busy? #f 'order-count 0)
            (hash 'id 37 'type 'gateway 'x 112.0 'y 146.0 'hp 500 'shields 500 'build-progress 1.0 'busy? #f 'order-count 0)
            (hash 'id 38 'type 'gateway 'x 116.0 'y 146.0 'hp 500 'shields 500 'build-progress 1.0 'busy? #f 'order-count 0))
-     #:ally-units (make-workers 'probe 16 400 28.0 28.0 #:gas-count 3)))
+     #:ally-units (make-workers 'probe 20 400 28.0 28.0 #:gas-count 6)))
   (define acts-cap (step-all-actions (step-live-bot-runtime! rt obs-at-cap)))
-  (check-test "l84-2c-protoss-pvt-proxy-4gate-hard-probe-cap-16-and-no-expand"
+  (check-test "l84-2c-protoss-pvt-proxy-4gate-hard-probe-cap-20-and-no-expand"
               (and (not (ormap action-is-worker-train? acts-cap))
                    (not (ormap action-is-expand? acts-cap))
                    (ormap (lambda (a)
@@ -882,7 +882,8 @@
 
 ;; 9c. Timing cheeses: Drone 3x batch + filler gate + Lair 150M/100G reserve + Warp Prism 250M reserve
 (let ()
-  ;; 9c-1: `zvt-42d-queen-ling-nydus` at 25 Drones (< 40), 160s (< 310-45): trains 3 Drones & gates Stage 7 Lings!
+  ;; 9c-1: `zvt-42d-queen-ling-nydus` at 25 Drones (< 40), 160s (< 210s): trains 3 Drones, allows
+  ;; BO safety Lings (`6 @ 22/128s`), and gates Stage 7 filler Lings once those 6 safety Lings exist!
   (define rt-nyd (make-live-bot-runtime #:bot-name 'Mothman-ZC #:race 'Zerg
                                         #:cheese-mode? #t #:cheese-profile 'zvt-42d-queen-ling-nydus))
   (define obs-ramp
@@ -902,9 +903,22 @@
   (define acts-ramp (step-all-actions (step-live-bot-runtime! rt-nyd obs-ramp)))
   (define drone-trains (count (lambda (a) (equal? a '(train drone))) acts-ramp))
   (define ling-trains (count (lambda (a) (equal? a '(train zergling))) acts-ramp))
-  (check-test "l84b-9c1-timing-cheese-3x-drone-ramp-and-stage7-ling-filler-gated"
-              (and (= drone-trains 3) (= ling-trains 0))
-              (format "drones=~a lings=~a acts=~s" drone-trains ling-trains acts-ramp))
+  ;; Once the 6 early BO safety Lings exist, Stage 7 Ling filler stays strictly gated (0 Lings)!
+  (define rt-nyd-gated (make-live-bot-runtime #:bot-name 'Mothman-ZC #:race 'Zerg
+                                              #:cheese-mode? #t #:cheese-profile 'zvt-42d-queen-ling-nydus))
+  (define obs-ramp-with-6lings
+    (hash-set obs-ramp 'ally-units
+              (append (hash-ref obs-ramp 'ally-units)
+                      (for/list ([i (in-range 6)])
+                        (hash 'id (+ 290 i) 'type 'zergling 'x 35.0 'y 30.0 'hp 35 'max-hp 35)))))
+  (define acts-ramp-gated (step-all-actions (step-live-bot-runtime! rt-nyd-gated obs-ramp-with-6lings)))
+  (define drone-trains-gated (count (lambda (a) (equal? a '(train drone))) acts-ramp-gated))
+  (define ling-trains-gated (count (lambda (a) (equal? a '(train zergling))) acts-ramp-gated))
+  (check-test "l84b-9c1-timing-cheese-3x-drone-ramp-safety-lings-and-stage7-filler-gated"
+              (and (= drone-trains 3) (<= ling-trains 2)
+                   (= drone-trains-gated 3) (= ling-trains-gated 0))
+              (format "drones=~a lings=~a gatedDrones=~a gatedLings=~a"
+                      drone-trains ling-trains drone-trains-gated ling-trains-gated))
 
   ;; 9c-2: `zvt-42d-queen-ling-nydus` at 42 Drones, 240s, 145M/132G (Lair 150M/100G due!): reserves 150M so Lings don't eat it!
   (define obs-lair-res

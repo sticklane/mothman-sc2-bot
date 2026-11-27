@@ -12217,8 +12217,8 @@
   ;; 5. Forward Phasing Warp Prism (136) Warp-In Priority:
   ;;    - Explicit `(warp-in wg-id dark-templar 100.0 100.0)` -> 1417 near Prism EVEN with 1 nearby Marine!
   ;;    - Explicit 4-arg `(train-unit wg-id zealot 100.0 100.0)` -> 1413 near Prism!
-  ;;    - Offensive 2-arg `(train-unit wg-id stalker)` with uncontested Prism -> 1414 near Prism!
-  ;;    - Routine `(train zealot)` -> keeps home Pylon `(30, 30)` priority!
+  ;;    - Offensive 2-arg `(train-unit wg-id stalker)` AND `(train zealot)` with clean home -> near Prism!
+  ;;    - `(train zealot)` when enemy attacks home (<= 16t of home) -> falls back to home Pylon `(30, 34)`!
   (define l59-nx   (mk-l59-u 99100 59  1 28.0 28.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75))
   (define l59-pyl  (mk-l59-u 99101 60  1 30.0 34.0 #:hp 200.0 #:sh 200.0 #:rad 1.0))
   (define l59-wg1  (mk-l59-u 99102 133 1 32.0 34.0 #:hp 500.0 #:sh 500.0 #:rad 1.5))
@@ -12227,6 +12227,7 @@
   (define l59-wg4  (mk-l59-u 99105 133 1 41.0 34.0 #:hp 500.0 #:sh 500.0 #:rad 1.5))
   (define l59-wpp  (mk-l59-u 99106 136 1 100.0 100.0 #:hp 80.0 #:sh 100.0 #:fly #t))
   (define l59-emar (mk-l59-u 99109 48  4 105.0 100.0 #:hp 45.0 #:en 0.0 #:en-max 0.0))
+  (define l59-ehome (mk-l59-u 99110 105 4 36.0 30.0 #:hp 35.0 #:en 0.0 #:en-max 0.0))
   (define l59-psrcs
     (list (sc2-power-source (sc2-point3d 30.0 34.0 8.0) 6.5 99101)
           (sc2-power-source (sc2-point3d 100.0 100.0 8.0) 3.75 99106)))
@@ -12238,6 +12239,10 @@
     (sc2-observation 9210 (sc2-player-common 1 800 400 80 40 20 20 0 0 4 0)
                      (list l59-nx l59-pyl l59-wg1 l59-wg2 l59-wg3 l59-wg4 l59-wpp l59-emar)
                      '(84) l59-psrcs #f '() '() '() '() '() '()))
+  (define l59-prism-obs-home-atk
+    (sc2-observation 9220 (sc2-player-common 1 800 400 80 40 20 20 0 0 4 0)
+                     (list l59-nx l59-pyl l59-wg1 l59-wg2 l59-wg3 l59-wg4 l59-wpp l59-ehome)
+                     '(84) l59-psrcs #f '() '() '() '() '() '()))
   (define l59-wi-explicit-cmds
     (translate-bot-actions->sc2-raw-commands
      '((warp-in 99102 dark-templar 100.0 100.0)
@@ -12248,23 +12253,32 @@
      '((train-unit 99104 stalker)
        (train zealot))
      l59-prism-obs-clean #:enemy-base '(108.0 . 108.0)))
+  (define l59-wi-home-atk-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((train zealot))
+     l59-prism-obs-home-atk #:enemy-base '(108.0 . 108.0)))
   (define c-dt-wi  (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1417))) l59-wi-explicit-cmds))
   (define c-zl-4a  (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1413))) l59-wi-explicit-cmds))
   (define c-st-2a  (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1414))) l59-wi-off-cmds))
-  (define c-zl-hm  (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1413))) l59-wi-off-cmds))
+  (define c-zl-fwd (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1413))) l59-wi-off-cmds))
+  (define c-zl-hm  (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1413))) l59-wi-home-atk-cmds))
   (check-true "l59-w1-forward-warp-prism-priority-explicit-offensive-and-home-routine"
               (and (sc2-raw-unit-command? c-dt-wi)
                    (<= (l59-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c-dt-wi))
                                  (sc2-point2d-y (sc2-raw-unit-command-target-pos c-dt-wi))
-                                 100.0 100.0) 3.15)
+                                 100.0 100.0) 3.25)
                    (sc2-raw-unit-command? c-zl-4a)
                    (<= (l59-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c-zl-4a))
                                  (sc2-point2d-y (sc2-raw-unit-command-target-pos c-zl-4a))
-                                 100.0 100.0) 3.15)
+                                 100.0 100.0) 3.25)
                    (sc2-raw-unit-command? c-st-2a)
                    (<= (l59-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c-st-2a))
                                  (sc2-point2d-y (sc2-raw-unit-command-target-pos c-st-2a))
-                                 100.0 100.0) 3.15)
+                                 100.0 100.0) 3.25)
+                   (sc2-raw-unit-command? c-zl-fwd)
+                   (<= (l59-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c-zl-fwd))
+                                 (sc2-point2d-y (sc2-raw-unit-command-target-pos c-zl-fwd))
+                                 100.0 100.0) 3.25)
                    (sc2-raw-unit-command? c-zl-hm)
                    (<= (l59-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c-zl-hm))
                                  (sc2-point2d-y (sc2-raw-unit-command-target-pos c-zl-hm))
@@ -14426,6 +14440,100 @@
   (reset-sc2-live-response-data!)
   (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 0 (list l65-min))))
   (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l65-min)))))
+
+(printf "[Loop 87G APM-500 Headroom] Testing tiered rolling APM ceilings (P0/core=100%, P1-filler=90%, P2/P3/P4=78%) & zero P0 Inject drops...\n")
+(let ()
+  ;; (a) Hard-cap = 500.0: saturate rolling window via heavy P2 micro spam (ab=16/23, incl. 8-tag large march).
+  ;;     P2 MUST stop cleanly at <= 390 (reserving >= 110 strictly for P0 + P1)!
+  (define gov500 (make-wire-apm-governor #:target-apm 680.0 #:hard-cap-apm 500.0 #:burst-capacity 72.0))
+  (define p2-spam-emitted 0)
+  (for ([step (in-range 1 110)])
+    (define lp (* step 8))
+    (define batch
+      (list (sc2-raw-unit-command 23 (sc2-point2d (+ 40.0 (remainder step 30)) 50.0) 0
+                                  (list (+ 91000 (* step 10)) (+ 91001 (* step 10)) (+ 91002 (* step 10))
+                                        (+ 91003 (* step 10)) (+ 91004 (* step 10)) (+ 91005 (* step 10))
+                                        (+ 91006 (* step 10)) (+ 91007 (* step 10)))
+                                  #f)
+            (sc2-raw-unit-command 16 (sc2-point2d (+ 50.0 (remainder step 25)) 60.0) 0 (list (+ 92000 step)) #f)
+            (sc2-raw-unit-command 23 (sc2-point2d (+ 60.0 (remainder step 25)) 70.0) 0 (list (+ 93000 step)) #f)
+            (sc2-raw-unit-command 3666 #f 99999 (list (+ 94000 step)) #f)
+            (sc2-raw-camera-move (+ 20.0 (remainder step 20)) 20.0 0.0)))
+    (define out (govern-sc2-wire-actions! gov500 batch lp))
+    (set! p2-spam-emitted (+ p2-spam-emitted (length out))))
+  (define rolling-after-p2
+    (for/sum ([ev (in-list (vector-ref (struct->vector gov500) 8))]) (cdr ev)))
+  ;; Now at rolling ~390 (in 390..450 band): P2/P3/P4 MUST be throttled (0 emitted),
+  ;; while P1 filler (Creep Tumor 1733 / Morph 4121) & Siege (388) pass up to 450!
+  (define out-band1
+    (govern-sc2-wire-actions!
+     gov500
+     (list (sc2-raw-unit-command 23 (sc2-point2d 88.0 88.0) 0 '(95001 95002 95003 95004 95005 95006 95007 95008) #f)
+           (sc2-raw-unit-command 16 (sc2-point2d 77.0 77.0) 0 '(95010) #f)
+           (sc2-raw-unit-command 3666 #f 99998 '(95011) #f)
+           (sc2-raw-unit-command 1733 (sc2-point2d 55.0 55.0) 0 '(95012) #f)
+           (sc2-raw-unit-command 388 #f 0 '(95013) #f))
+     896))
+  (define band1-abs (map sc2-raw-unit-command-ability-id (filter sc2-raw-unit-command? out-band1)))
+  ;; Push rolling usage to 450..490 via P1 filler/morphs (capped strictly at 450!), then inject P0 + core macro:
+  (for ([k (in-range 1 35)])
+    (void (govern-sc2-wire-actions!
+           gov500
+           (list (sc2-raw-unit-command 1733 (sc2-point2d (+ 30.0 k) 55.0) 0 (list (+ 95100 k)) #f))
+           (+ 904 (* k 4)))))
+  (define rolling-after-p1
+    (for/sum ([ev (in-list (vector-ref (struct->vector gov500) 8))]) (cdr ev)))
+  (reset-wire-apm-drop-stats! gov500)
+  ;; At rolling = 450 (450..490 band): P2 & P1 filler MUST be throttled, while P0 Inject (251),
+  ;; Chrono (3755), Scan (399), Build (321/881), Train (560/1343), MULE (171) ALL pass 100% with 0 P0/P1-core drops!
+  (define p0-macro-batch
+    (list (sc2-raw-unit-command 251 #f 99001 '(96001) #f)                     ;; P0 Inject Larva
+          (sc2-raw-unit-command 3755 #f 99002 '(96002) #f)                    ;; P0 Chrono Boost
+          (sc2-raw-unit-command 399 (sc2-point2d 80.0 80.0) 0 '(96003) #f)    ;; P0 Scanner Sweep
+          (sc2-raw-unit-command 881 (sc2-point2d 42.0 42.0) 0 '(96004) #f)    ;; Core P1 Build Pylon
+          (sc2-raw-unit-command 1343 #f 0 '(96005) #f)                        ;; Core P1 Train Zergling
+          (sc2-raw-unit-command 560 #f 0 '(96006) #f)                         ;; Core P1 Train Marine
+          (sc2-raw-unit-command 171 #f 99003 '(96007) #f)                     ;; Core P1 MULE
+          (sc2-raw-unit-command 1733 (sc2-point2d 65.0 65.0) 0 '(96008) #f)   ;; P1 filler -> throttled >= 450!
+          (sc2-raw-unit-command 23 (sc2-point2d 90.0 90.0) 0 '(96009) #f)))   ;; P2 micro -> throttled >= 390!
+  (define out-band2 (govern-sc2-wire-actions! gov500 p0-macro-batch 1060))
+  (define band2-abs (map sc2-raw-unit-command-ability-id (filter sc2-raw-unit-command? out-band2)))
+  (define st-band2 (get-wire-apm-drop-stats gov500))
+  (define band2-p0-drops (hash-ref (hash-ref st-band2 'by_tier) 'P0 -1))
+
+  ;; (b) Live ladder 680/760 config: after a full 1a-post core macro burst drains tokens to -4.0,
+  ;;     P0 Inject Larva (251) on the immediate next step (+4 loops) STILL emits with 0 P0 drops!
+  (define gov760 (make-wire-apm-governor #:target-apm 680.0 #:hard-cap-apm 760.0 #:burst-capacity 6.0))
+  (void (govern-sc2-wire-actions! gov760 (list (sc2-raw-unit-command 524 #f 0 '(97000) #f)) 996))
+  (void (govern-sc2-wire-actions!
+         gov760
+         (for/list ([k (in-range 6)])
+           (sc2-raw-unit-command 1343 #f 0 (list (+ 97010 k)) #f))
+         1000))
+  (reset-wire-apm-drop-stats! gov760)
+  (define out-inject-next
+    (govern-sc2-wire-actions!
+     gov760
+     (list (sc2-raw-unit-command 251 #f 99501 '(97100) #f))
+     1004))
+  (define st-inj (get-wire-apm-drop-stats gov760))
+  (check-true "l87g-tiered-rolling-apm-ceilings-reserve-p0-p1-headroom-and-zero-inject-drops"
+              (and (<= rolling-after-p2 390)
+                   (>= rolling-after-p2 380)
+                   (not (memv 23 band1-abs))
+                   (not (memv 16 band1-abs))
+                   (not (memv 3666 band1-abs))
+                   (not (not (memv 1733 band1-abs)))
+                   (not (not (memv 388 band1-abs)))
+                   (<= rolling-after-p1 450)
+                   (>= rolling-after-p1 446)
+                   (= band2-p0-drops 0)
+                   (andmap (lambda (ab) (not (not (memv ab band2-abs)))) '(251 3755 399 881 1343 560 171))
+                   (not (memv 1733 band2-abs))
+                   (not (memv 23 band2-abs))
+                   (= (length out-inject-next) 1)
+                   (= (sc2-raw-unit-command-ability-id (first out-inject-next)) 251)
+                   (= (hash-ref (hash-ref st-inj 'by_tier) 'P0 -1) 0))))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

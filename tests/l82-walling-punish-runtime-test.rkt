@@ -789,11 +789,13 @@
   (define aabbs (hash-ref res-p82b 'wall-reserved-aabbs '()))
   (define door-aabbs
     (filter (lambda (r) (and (reserved-aabb? r) (eq? (reserved-aabb-kind r) 'doorway-corridor))) aabbs))
-  (define exact-half-0.5?
+  ;; Loop 87 Track 4 widened doorway-corridor AABBs from 0.5 -> 1.15 (matching sc2-placement.rkt)
+  ;; while keeping exact wall-slot-3 Gateway #2 placement unblocked.
+  (define exact-half-1.15?
     (and (= (length door-aabbs) 2)
          (for/and ([r (in-list door-aabbs)])
-           (and (<= (abs (- (reserved-aabb-half-w r) 0.5)) 0.01)
-                (<= (abs (- (reserved-aabb-half-h r) 0.5)) 0.01)))))
+           (and (<= (abs (- (reserved-aabb-half-w r) 1.15)) 0.01)
+                (<= (abs (- (reserved-aabb-half-h r) 1.15)) 0.01)))))
   (define acts-p82b (hash-ref res-p82b 'actions '()))
   (define gw2-at-slot3?
     (has-act? acts-p82b
@@ -801,10 +803,10 @@
                 (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'gateway)
                      (>= (length a) 4)
                      (<= (dist2 (third a) (fourth a) 57.5 37.5) 1.0)))))
-  (check-true "L82B-1-protoss-doorway-corridor-0.5-and-wall-slot-3-gateway2-at-3m05"
-              (and exact-half-0.5? gw2-at-slot3?)
-              (format "doorCount=~a exact0.5=~a gw2Slot3=~a acts=~a"
-                      (length door-aabbs) exact-half-0.5? gw2-at-slot3? acts-p82b)))
+  (check-true "L82B-1-protoss-doorway-corridor-1.15-and-wall-slot-3-gateway2-at-3m05"
+              (and exact-half-1.15? gw2-at-slot3?)
+              (format "doorCount=~a exact1.15=~a gw2Slot3=~a acts=~a"
+                      (length door-aabbs) exact-half-1.15? gw2-at-slot3? acts-p82b)))
 
 ;; -----------------------------------------------------------------------------
 ;; 82B-2: Fogged Terran / 1-Base Protoss Main Ramp NEVER False-Latches Open +

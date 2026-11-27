@@ -992,32 +992,91 @@
                   #:do [(define-values (px py) (escort-pt->xy p))]
                   #:when (and px py))
          (cons px py)))
-     (define (min-dist-to-home x y)
-       (if (null? th-pts)
+     (define (min-dist-to-pts x y pts)
+       (if (null? pts)
            999.0
-           (for/fold ([md +inf.0]) ([tp (in-list th-pts)])
+           (for/fold ([md +inf.0]) ([tp (in-list pts)])
              (flmin md (dist2d-fl x y (car tp) (cdr tp))))))
+     (define (min-dist-to-home x y)
+       (min-dist-to-pts x y th-pts))
      (define d-army-home (min-dist-to-home acx acy))
      (define army-deployed?
        (or (null? th-pts) (fl> d-army-home 26.0) (fl>= army-supply 12.0)))
+
+     ;; Loop 87 Track 3: Identify threatened home TownHalls (within 28t of visible stealth/burrow/drop
+     ;; enemy units) so `home-det` stays pinned to the threatened home base without oscillating!
+     (define home-stealth-threat-pts
+       (if (and home-stealth? (pair? th-pts) (list? enemy-units))
+           (for/list ([e (in-list enemy-units)]
+                      #:when (and (escort-rec-xy? e)
+                                  (let* ([s1 (escort-rec-sym e)]
+                                         [cloak-st (and (hash? e) (hash-ref e 'cloak 0))]
+                                         [stealth?
+                                          (or (memq s1 '(banshee dark-templar ghost
+                                                         lurker lurker-burrowed lurker-mp-burrowed
+                                                         widow-mine widow-mine-burrowed
+                                                         warp-prism warp-prism-phasing))
+                                              (and (hash? e)
+                                                   (or (eq? (hash-ref e 'cloaked? #f) #t)
+                                                       (eq? (hash-ref e 'burrowed? #f) #t)
+                                                       (and (exact-integer? cloak-st)
+                                                            (or (= cloak-st 1) (= cloak-st 2))))))])
+                                    (and stealth?
+                                         (fl<= (min-dist-to-home (escort-rec-x e 9999.0)
+                                                                 (escort-rec-y e 9999.0))
+                                               28.0)))))
+             (cons (escort-rec-x e 0.0) (escort-rec-y e 0.0)))
+           '()))
+     (define threatened-th-pts
+       (if (null? home-stealth-threat-pts)
+           '()
+           (filter (lambda (tp)
+                     (fl<= (min-dist-to-pts (car tp) (cdr tp) home-stealth-threat-pts) 28.0))
+                   th-pts)))
+     (define home-guard-pts
+       (if (pair? threatened-th-pts) threatened-th-pts th-pts))
+
+     ;; Strict total-order comparator for home detector retention (2.0t bucket + 4.0t in-home
+     ;; guard hysteresis + deterministic ID tie-break so two detectors never oscillate!).
+     (define (home-det-rank-bucket d)
+       (define dh (min-dist-to-pts (escort-rec-x d 0.0) (escort-rec-y d 0.0) home-guard-pts))
+       (define score (if (fl<= dh 16.0) (fl- dh 4.0) dh))
+       (inexact->exact (floor (fl/ score 2.0))))
+     (define (det-better-home? d1 d2)
+       (define b1 (home-det-rank-bucket d1))
+       (define b2 (home-det-rank-bucket d2))
+       (or (< b1 b2)
+           (and (= b1 b2)
+                (< (escort-rec-id d1) (escort-rec-id d2)))))
+     (define (det-better-army? d1 d2)
+       (define da1 (dist2d-fl (escort-rec-x d1 0.0) (escort-rec-y d1 0.0) acx acy))
+       (define da2 (dist2d-fl (escort-rec-x d2 0.0) (escort-rec-y d2 0.0) acx acy))
+       (or (fl< da1 da2)
+           (and (fl= da1 da2)
+                (< (escort-rec-id d1) (escort-rec-id d2)))))
+
+     ;; Total completed detectors (never steal our sole detector under active home stealth!)
+     (define total-completed-dets
+       (for/sum ([d (in-list (if (list? detectors) detectors '()))]
+                 #:when (and (escort-rec-id d)
+                             (escort-rec-xy? d)
+                             (escort-rec-completed? d)
+                             (escort-det-kind d)))
+         1))
 
      ;; Home vs Army detector allocation
      (define chosen-det
        (cond
          [home-stealth?
-          (if (< (length avail-dets) 2)
+          (if (or (< total-completed-dets 2) (< (length avail-dets) 2))
               #f
-              (let* ([home-det
-                      (car (sort avail-dets fl<
-                                 #:key (lambda (d) (min-dist-to-home (escort-rec-x d 0.0) (escort-rec-y d 0.0)))))]
+              (let* ([home-det (car (sort avail-dets det-better-home?))]
                      [home-id (escort-rec-id home-det)]
                      [rem (filter (lambda (d) (not (eqv? (escort-rec-id d) home-id))) avail-dets)])
                 (and (pair? rem)
-                     (car (sort rem fl<
-                                #:key (lambda (d) (dist2d-fl (escort-rec-x d 0.0) (escort-rec-y d 0.0) acx acy)))))))]
+                     (car (sort rem det-better-army?)))))]
          [army-deployed?
-          (car (sort avail-dets fl<
-                     #:key (lambda (d) (dist2d-fl (escort-rec-x d 0.0) (escort-rec-y d 0.0) acx acy))))]
+          (car (sort avail-dets det-better-army?))]
          [else #f]))
 
      (cond

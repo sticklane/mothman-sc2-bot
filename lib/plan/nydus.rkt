@@ -525,7 +525,9 @@
 ;; 2. Symmetric Nydus Worm Tactics <-> Counter Nydus Worm Tactics
 ;; -----------------------------------------------------------------------------
 
-(define (plan-nydus-worm-tactics/idx idx)
+(define (plan-nydus-worm-tactics/idx idx
+                                     #:preferred-worm-pt [pref-worm-pt #f]
+                                     #:preferred-perch-pt [pref-perch-pt #f])
   (define ab-ht (nydus-index-ally-b-by-type idx))
   (define nets (bucket-pos-ids ab-ht '(nydus-network)))
   (define worms (bucket-pos-ids ab-ht '(nydus-canal nydus-worm)))
@@ -561,7 +563,12 @@
           (define ux (u-x u bx))
           (define uy (u-y u by))
           (or (<= (fast-dist2 ux uy ex ey) 1024.0)
-              (<= (fast-dist2 ux uy eex eey) 1024.0)))
+              (<= (fast-dist2 ux uy eex eey) 1024.0)
+              (and (pair? pref-worm-pt) (real? (car pref-worm-pt)) (real? (cdr pref-worm-pt))
+                   (<= (fast-dist2 ux uy
+                                   (exact->inexact (car pref-worm-pt))
+                                   (exact->inexact (cdr pref-worm-pt)))
+                       121.0))))
         (define active-spotters
           (filter spotter-near-enemy? all-spotters))
         (define frame (nydus-index-frame idx))
@@ -670,7 +677,18 @@
         (define (emit-safe-nydus-for-spotter! net-u sp-u)
           (define sx (u-x sp-u ex))
           (define sy (u-y sp-u ey))
-          (define-values (wx0 wy0) (spotter-drop-xy sp-u))
+          (define pref-ok?
+            (and (pair? pref-worm-pt)
+                 (real? (car pref-worm-pt)) (real? (cdr pref-worm-pt))
+                 (<= (fast-dist2 sx sy
+                                 (exact->inexact (car pref-worm-pt))
+                                 (exact->inexact (cdr pref-worm-pt)))
+                     100.0)))
+          (define-values (wx0 wy0)
+            (if pref-ok?
+                (values (clamp-coord (exact->inexact (car pref-worm-pt)))
+                        (clamp-coord (exact->inexact (cdr pref-worm-pt))))
+                (spotter-drop-xy sp-u)))
           (cond
             [(or (null? enemy-main-combat) (point-safe-from-enemy-combat? wx0 wy0))
              (emit! (list 'build-nydus-worm (u-id net-u) wx0 wy0))]
@@ -682,11 +700,13 @@
                  (emit! (list 'move (u-id sp-u) cx cy)))]))
 
         ;; Bypass fortified enemy bunker contain via main-edge Nydus Worm (preferring spotter vision!)
-        (when (and (pair? e-bunkers) (pair? nets))
+        ;; Loop 87C: NEVER emit blind fogged Nydus Worms when allied Overlord/Overseer spotters exist
+        ;; (prevents wire fallback from spawning Worms inside our own main base).
+        (when (and (pair? e-bunkers) (pair? nets) (null? worms))
           (cond
             [(pair? active-spotters)
              (emit-safe-nydus-for-spotter! (first nets) (first active-spotters))]
-            [else
+            [(null? all-spotters)
              (emit! (list 'build-nydus-worm (u-id (first nets))
                           (clamp-coord (- ex 10.0))
                           (clamp-coord (+ ey 8.0))))]))
@@ -707,12 +727,17 @@
                  (emit-safe-nydus-for-spotter! (second nets) sp1)))]
             [(pair? all-spotters)
              ;; Live match with spotters available elsewhere -> send nearest Changeling/Overlord
-             ;; to enemy main back corner to open vision instead of spamming blind fogged Nydus!
-             (define dx (- ex bx))
-             (define dy (- ey by))
-             (define dl (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
-             (define corner-x (clamp-coord (+ ex (* 9.5 (/ dx dl)) (* 6.5 (/ (- dy) dl)))))
-             (define corner-y (clamp-coord (+ ey (* 9.5 (/ dy dl)) (* 6.5 (/ dx dl)))))
+             ;; to solved dead-air perch (or enemy main back corner) to open live vision!
+             (define-values (corner-x corner-y)
+               (if (and (pair? pref-perch-pt)
+                        (real? (car pref-perch-pt)) (real? (cdr pref-perch-pt)))
+                   (values (clamp-coord (exact->inexact (car pref-perch-pt)))
+                           (clamp-coord (exact->inexact (cdr pref-perch-pt))))
+                   (let* ([dx (- ex bx)]
+                          [dy (- ey by)]
+                          [dl (max 1.0 (sqrt (+ (* dx dx) (* dy dy))))])
+                     (values (clamp-coord (+ ex (* 9.5 (/ dx dl)) (* 6.5 (/ (- dy) dl))))
+                             (clamp-coord (+ ey (* 9.5 (/ dy dl)) (* 6.5 (/ dx dl))))))))
              (define lead-sp
                (car (k-nearest-to corner-x corner-y 1 all-spotters)))
              (emit! (list 'move (u-id lead-sp) corner-x corner-y))]
@@ -724,14 +749,18 @@
                (emit! (list 'build-nydus-worm (u-id (second nets))
                             (clamp-coord (- eex 10.0)) (clamp-coord (+ eey 10.0)))))]))
 
-        (when (and (pair? nets) (pair? worms))
+        ;; Loop 87C: Pre-load up to 7 Queens + 24 ground army units once a worm is emerging/active
+        ;; OR once an active spotter is in position at the enemy main with a completed Network!
+        (when (and (pair? nets)
+                   (u-complete? (first nets))
+                   (or (pair? worms) (pair? active-spotters)))
           (define army (bucket-pos-ids au-ht '(zergling baneling roach ravager hydralisk lurker ultralisk)))
           (define net0 (first nets))
           (define nx0 (u-x net0 bx))
           (define ny0 (u-y net0 by))
-          (for ([q (in-list (k-nearest-to nx0 ny0 3 queens 22.0))])
+          (for ([q (in-list (k-nearest-to nx0 ny0 7 queens 22.0))])
             (emit! (list 'nydus-load (u-id net0) (u-id q))))
-          (for ([au (in-list (k-nearest-to nx0 ny0 8 army 24.0))])
+          (for ([au (in-list (k-nearest-to nx0 ny0 24 army 24.0))])
             (emit! (list 'nydus-load (u-id net0) (u-id au)))))
 
         (define completed-worms
@@ -965,8 +994,13 @@
                                (loop-act rest (cons a acc) n v f2)))))])))))))
 
 (define (plan-nydus-actions raw-obs)
-  (define idx (build-nydus-index raw-obs))
+  (define obs (ensure-obs raw-obs))
+  (define idx (build-nydus-index obs))
+  (define pref-worm (obs-ref obs 'nydus-worm-pt #f))
+  (define pref-perch (obs-ref obs 'nydus-perch-pt #f))
   (dedup-action-chunks
    (list
-    (plan-nydus-worm-tactics/idx idx)
+    (plan-nydus-worm-tactics/idx idx
+                                 #:preferred-worm-pt pref-worm
+                                 #:preferred-perch-pt pref-perch)
     (plan-counter-nydus-worm-tactics/idx idx))))

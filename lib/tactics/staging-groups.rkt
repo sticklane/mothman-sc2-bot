@@ -88,6 +88,8 @@
 (define STAGE-REGROUP-HP-RATIO 0.45)
 (define STAGE-HOME-REINFORCE-RADIUS 24.0)
 (define STAGE-FRONTLINE-SEPARATION-RADIUS 30.0)
+(define STAGE-HOME-POCKET-PARITY-RATIO 0.65)
+(define STAGE-FREE-SUMMON-COUNTER-WINDOW-FRAMES 268)
 (define STAGE-REINFORCE-MAX-WAIT-FRAMES 168)
 (define STAGE-NO-PROD-MAX-WAIT-FRAMES 112)
 (define STAGE-ZERG-REINFORCE-MAX-WAIT-FRAMES 96)
@@ -127,6 +129,11 @@
     lurker lurker-mp lurker-burrowed lurker-mp-burrowed liberator liberator-ag
     corruptor phoenix mutalisk oracle banshee viking viking-fighter
     zergling hellion adept reaper colossus))
+
+;; Timed / free summoned enemy units (never bait piecemeal trades into free timed waves!)
+(define FREE-SUMMON-UNIT-SYMS
+  '(locust locust-mp locust-mp-flying locust-mp-precursor
+    broodling broodling-escort interceptor))
 
 (define AIR-DOMAIN-UNIT-SYMS
   '(corruptor phoenix mutalisk oracle banshee viking viking-fighter void-ray voidray
@@ -168,6 +175,13 @@
    anchors)          ;; immutable hasheq: group-id -> (cons sx sy)
   #:transparent)
 
+;; Side-table for per-manager home-pocket release cooldown & free-summon wave tracking
+;; (keeps `staging-group-manager` struct ABI 100% unchanged!).
+(define mgr-pocket-meta (make-weak-hasheq))
+
+(define (mgr-pocket-meta-ht mgr)
+  (hash-ref! mgr-pocket-meta mgr (lambda () (make-hasheq))))
+
 (define (make-staging-group-manager)
   (staging-group-manager (make-hasheq)
                          (make-hasheqv)
@@ -179,6 +193,7 @@
   (hash-clear! (staging-group-manager-unit->group mgr))
   (hash-clear! (staging-group-manager-unit-first-seen mgr))
   (set-box! (staging-group-manager-last-frame mgr) -1)
+  (hash-remove! mgr-pocket-meta mgr)
   (void))
 
 (define (staging-group-handled-tags res)
@@ -463,9 +478,13 @@
        (define vx (fl- aim-x ax))
        (define vy (fl- aim-y ay))
        (define vd (flmax 1.0 (flsqrt (fl+ (fl* vx vx) (fl* vy vy)))))
+       (define near-enemy-anchor?
+         (and (pair? enemy-pts) (fl<= (min-dist-to-pts ax ay enemy-pts) 26.0)))
        (values ax ay (fl/ vx vd) (fl/ vy vd)
                '(7.5 10.0 5.0)
-               '(0.0 0.44 -0.44 0.88 -0.88))]))
+               (if near-enemy-anchor?
+                   '(0.0 0.44 -0.44 0.88 -0.88 1.57 -1.57 2.40 -2.40 3.14)
+                   '(0.0 0.44 -0.44 0.88 -0.88)))]))
 
   ;; Score 5-ray x 3-radius fan
   (define-values (best-x best-y _best-sc)
@@ -1059,6 +1078,14 @@
            (and (>= ally-combat-supply 40)
                 (>= (exact->inexact ally-combat-supply)
                     (fl* 1.50 (flmax 1.0 (exact->inexact enemy-believed-supply)))))))
+     ;; Loop 87 Track 3: Keep `'main-reinforce` wave-batching active during midgame combat leads
+     ;; (do NOT force-dispatch `'main-reinforce` on `ally-combat-supply >= 40` or `supply-used >= 165`
+     ;; alone -- only on endgame hunt, cleared enemy main, decisive victory, or `supply-used >= 180`!).
+     (define reinf-endgame-force-dispatch?
+       (or endgame-hunt-active?
+           enemy-main-cleared?
+           decisive-victory-posture?
+           (>= supply-used 180)))
 
      ;; Prune dead units from tracking maps & record first-seen frame
      ;; (`unit-first-seen`: positive frame = fresh unit; negative frame = graduated from `'main-reinforce`)
@@ -1144,14 +1171,20 @@
             (not (set-member? skip-tags uid))
             (not (and role-leases (unit-leased-above? role-leases uid 'staging-group frame)))))
 
-     ;; Loop 65F (`#1920`/`#1921`): Require substantive non-worker combat threat (`>= 6.0` supply
-     ;; OR `>= 3` combat units within `<= 22.0t` of Main or `<= 20.0t` of Natural) so a lone scout
-     ;; Probe / Tempest / Phoenix / Banshee at `24-28t` NEVER disables `'main-reinforce`!
+     ;; Loop 65F (`#1920`/`#1921`) + Loop 87B Track E: Require substantive non-worker,
+     ;; non-free-summon combat threat (`>= 6.0` supply OR `>= 3` combat units within `<= 22.0t`
+     ;; of Main or `<= 20.0t` of Natural) so lone scouts or free timed Locusts/Broodlings
+     ;; NEVER scramble small staging packs into piecemeal trades!
+     (define (free-summon-rec? e)
+       (or (memq (rec-type-sym e) FREE-SUMMON-UNIT-SYMS)
+           (memq (rec-raw-type-sym e) FREE-SUMMON-UNIT-SYMS)))
+     (define (enemy-home-siege-threat-val e)
+       (if (free-summon-rec? e) 75.0 (choke-unit-res-val e)))
      (define enemy-near-main-or-nat?
        (let-values ([(cnt sup)
                      (for/fold ([c 0] [s 0.0]) ([e (in-list enemy-combat-recs)])
                        (define esym (rec-type-sym e))
-                       (if (memq esym WORKER-SYMS)
+                       (if (or (memq esym WORKER-SYMS) (free-summon-rec? e))
                            (values c s)
                            (let ([ex (rec-x e 9999.0)]
                                  [ey (rec-y e 9999.0)])
@@ -1164,6 +1197,157 @@
                                                      (max 1 (sc2-supply-cost esym 1))))))
                                  (values c s)))))])
          (or (>= cnt 3) (fl>= sup 6.0))))
+
+     ;; Loop 87 Track 3: Extend Natural-area `'main-reinforce` spawn capture to ALL 3 races
+     ;; (Protoss natural warp-ins, Zerg natural Hatchery spawns, and Terran Natural
+     ;; Barracks/Factory/Starport spawns within `<= 18.0t` of Natural!).
+     (define has-nat-combat-prod?
+       (or protoss-race?
+           zerg-race?
+           (ormap (lambda (b)
+                    (and (hash? b)
+                         (rec-xy? b)
+                         (memq (rec-type-sym b) '(barracks factory starport))
+                         (fl<= (dist2d-fl (rec-x b fbx) (rec-y b fby) fnx fny) 18.0)))
+                  (or ally-buildings '()))))
+     ;; Main combat production presence (allows full 24t Main pocket capture for real spawn bases,
+     ;; while tightening to <= 18t when Main has zero combat production structures/queues so
+     ;; peripheral muster units at 18..24t stay owned by defensive muster!).
+     (define has-main-combat-prod?
+       (or zerg-race?
+           (> total-combat-in-prod 0)
+           (ormap (lambda (b)
+                    (and (hash? b)
+                         (rec-xy? b)
+                         (memq (rec-type-sym b) PRODUCTION-BLDG-SYMS)
+                         (fl<= (dist2d-fl (rec-x b fbx) (rec-y b fby) fbx fby) 24.0)))
+                  (or ally-buildings '()))))
+
+     ;; Loop 87C Track 2: Per-manager free-summon wave tracking (zero struct ABI change)
+     (define pmeta (mgr-pocket-meta-ht mgr))
+     (define all-home-base-pts
+       (let ([ths (for/list ([th (in-list ally-townhalls)] #:when (rec-xy? th))
+                    (cons (rec-x th fbx) (rec-y th fby)))])
+         (if (pair? ths) ths (list (cons fbx fby)))))
+     (define-values (free-summon-home-cnt free-summon-total-cnt)
+       (for/fold ([hc 0] [tc 0]) ([e (in-list enemy-combat-recs)]
+                                  #:when (free-summon-rec? e))
+         (define ex (rec-x e 9999.0))
+         (define ey (rec-y e 9999.0))
+         (define near-home?
+           (for/or ([bp (in-list all-home-base-pts)])
+             (fl<= (dist2d-fl ex ey (car bp) (cdr bp)) 34.0)))
+         (values (if near-home? (add1 hc) hc) (add1 tc))))
+     (define free-summon-wave-active?
+       (or (>= free-summon-home-cnt 6) (>= free-summon-total-cnt 10)))
+     (define prev-fsw-frame (hash-ref pmeta 'last-free-summon-wave-frame -99999))
+     (when free-summon-wave-active?
+       (hash-set! pmeta 'last-free-summon-wave-frame frame))
+     (define post-free-summon-counter-window?
+       (and (not free-summon-wave-active?)
+            (>= prev-fsw-frame 0)
+            (> (- frame prev-fsw-frame) 0)
+            (<= (- frame prev-fsw-frame) STAGE-FREE-SUMMON-COUNTER-WINDOW-FRAMES)))
+
+     ;; Loop 87C Track 2 CRITICAL INVARIANT: NEVER withhold reinforcements when our own
+     ;; combat units (`>= 3` units OR `>= 6.0` supply) are ALREADY actively defending/engaged
+     ;; (`<= 18.0t` of enemy combat near our bases)! Only stage fresh spawns in the safe Main
+     ;; pocket during a post-wipe rebuild with ZERO active defense army at the front!
+     (define active-home-defense-engaged?
+       (if (or (null? enemy-combat-recs) (null? combat-units))
+           #f
+           (let ([home-enemies
+                  (filter (lambda (e)
+                            (define ex (rec-x e 9999.0))
+                            (define ey (rec-y e 9999.0))
+                            (for/or ([bp (in-list all-home-base-pts)])
+                              (fl<= (dist2d-fl ex ey (car bp) (cdr bp)) 30.0)))
+                          enemy-combat-recs)])
+             (if (null? home-enemies)
+                 #f
+                 (let-values ([(eng-cnt eng-sup)
+                               (for/fold ([c 0] [s 0.0]) ([u (in-list combat-units)])
+                                 (define sym (rec-type-sym u))
+                                 (if (and (rec-xy? u)
+                                          (or (not protoss-race?) (rec-complete? u))
+                                          (not (memq sym WORKER-SYMS))
+                                          (not (eq? (hash-ref u2g (rec-id u) #f) 'main-reinforce))
+                                          (let ([ux (rec-x u 9999.0)]
+                                                [uy (rec-y u 9999.0)])
+                                            (for/or ([e (in-list home-enemies)])
+                                              (fl<= (dist2d-fl ux uy (rec-x e 9999.0) (rec-y e 9999.0)) 18.0))))
+                                     (values (add1 c)
+                                             (fl+ s (exact->inexact
+                                                     (if (eq? sym 'zergling)
+                                                         0.5
+                                                         (max 1 (sc2-supply-cost sym 1))))))
+                                     (values c s)))])
+                   (or (>= eng-cnt 3) (fl>= eng-sup 6.0)))))))
+
+     ;; Loop 87 Track 3 + Loop 87C Track 2: Home-Defense Anti-Drip-Feed Pocket Detection.
+     ;; Triggers ONLY when `(not enemy-near-main?)`, `(not active-home-defense-engaged?)`,
+     ;; `>= 2` TownHalls, `(not decisive-victory-posture?)`, and enemy combat threat within
+     ;; `24t` of Natural/3rd+ sums to `>= 1100` while local non-pocket friendly combat
+     ;; within `26t` of that base is `< 0.65x`!
+     (define outer-base-pts
+       (let* ([th-outer
+               (for/list ([th (in-list ally-townhalls)]
+                          #:when (and (rec-xy? th)
+                                      (fl> (dist2d-fl (rec-x th fbx) (rec-y th fby) fbx fby) 14.0)))
+                 (cons (rec-x th fbx) (rec-y th fby)))]
+              [has-nat?
+               (ormap (lambda (p) (fl<= (dist2d-fl (car p) (cdr p) fnx fny) 10.0)) th-outer)])
+         (if (and (not has-nat?)
+                  (>= (length ally-townhalls) 2)
+                  (fl> (dist2d-fl fnx fny fbx fby) 14.0))
+             (cons (cons fnx fny) th-outer)
+             th-outer)))
+     (define-values (besieging-nat-or-outer? besiege-enemy-val besiege-local-ally-val besieged-base-pt)
+       (if (or enemy-near-main?
+               (< (length ally-townhalls) 2)
+               decisive-victory-posture?
+               (null? outer-base-pts)
+               (null? enemy-combat-recs))
+           (values #f 0.0 0.0 #f)
+           (for/fold ([hit? #f] [best-ev 0.0] [best-av 0.0] [best-pt #f])
+                     ([bp (in-list outer-base-pts)])
+             (define bpx (car bp))
+             (define bpy (cdr bp))
+             (define ev
+               (for/fold ([s 0.0]) ([e (in-list enemy-combat-recs)])
+                 (if (fl<= (dist2d-fl (rec-x e 9999.0) (rec-y e 9999.0) bpx bpy) 24.0)
+                     (fl+ s (enemy-home-siege-threat-val e))
+                     s)))
+             (if (fl>= ev 1100.0)
+                 (let ([av
+                        (for/fold ([s 0.0]) ([u (in-list combat-units)])
+                          (define uid (rec-id u))
+                          (if (and (rec-xy? u)
+                                   (or (not protoss-race?) (rec-complete? u))
+                                   (not (eq? (hash-ref u2g uid #f) 'main-reinforce))
+                                   (fl<= (dist2d-fl (rec-x u 9999.0) (rec-y u 9999.0) bpx bpy) 26.0))
+                              (fl+ s (choke-unit-res-val u))
+                              s))])
+                   (if (and (fl< av (fl* STAGE-HOME-POCKET-PARITY-RATIO ev)) (fl> ev best-ev))
+                       (values #t ev av bp)
+                       (values hit? best-ev best-av best-pt)))
+                 (values hit? best-ev best-av best-pt)))))
+     (define home-pocket-hold?
+       (and (not enemy-near-main?)
+            (not decisive-victory-posture?)
+            (not active-home-defense-engaged?)
+            (or besieging-nat-or-outer?
+                (>= free-summon-home-cnt 6)
+                (and defensive-muster-active?
+                     (or under-home-attack?
+                         (pair? enemy-combat-recs))))))
+     (define nat-safe-for-pocket?
+       (fl> (for/fold ([md +inf.0]) ([e (in-list enemy-combat-recs)])
+              (flmin md (dist2d-fl fnx fny (rec-x e 9999.0) (rec-y e 9999.0))))
+            16.0))
+     (define (unit-min-enemy-dist ux uy)
+       (for/fold ([md +inf.0]) ([e (in-list enemy-combat-recs)])
+         (flmin md (dist2d-fl ux uy (rec-x e 9999.0) (rec-y e 9999.0)))))
 
      (for ([u (in-list combat-units)]
            #:when (unit-eligible-for-staging? u))
@@ -1210,28 +1394,44 @@
                (or (fl<= (dist2d-fl ux uy fbx fby) 32.0)
                    (eq? (hash-ref u2g uid #f) 'ground-harass-adept)))
           (bucket-add! 'ground-harass-adept u)]
-         ;; Family 4: Main Ground Reinforce Wave (strictly home-spawn wave-batching `<= 24t` from home;
-         ;; Loop 65H `#1948`: for Protoss ONLY, ALSO capture fresh non-graduated units warped near
-         ;; Natural `<= 16.0t` while frontline centroid is `> 28.0t` from Natural!)
-         ;; NEVER capture or recapture units `> 26t` from home (for Terran/Zerg), NEVER recapture
-         ;; already-dispatched units, and NEVER trigger on `combat-suppress-attack?` (only `has-distant-frontline?`)!
+         ;; Family 4: Main Ground Reinforce Wave & Home-Defense Anti-Drip-Feed Pocket
+         ;; Mode A (Normal Offensive Wave-Batching): home spawns (`<= 24t` Main) AND Natural-area
+         ;; spawns (`<= 16t` Nat when `front-far-from-nat?` for ALL 3 races with Natural combat
+         ;; production: Protoss warp-ins, Zerg Hatcheries, Terran Natural Barracks/Factories).
+         ;; Mode B (Loop 87 Track 3 + Loop 87C Track 2 Home-Defense Pocket Staging): ONLY when
+         ;; `home-pocket-hold?` holds (Main unbreached AND ZERO active defense army engaged at
+         ;; the front!), capture fresh non-graduated home spawns (`> 14t` from all enemies,
+         ;; strictly excluding `NON-REINFORCE-STAGING-SYMS`) so post-wipe spawns batch cleanly
+         ;; without EVER splitting an active home fight or recapturing graduated units!
          [(and (not (memq sym NON-REINFORCE-STAGING-SYMS))
                (not (memq raw-sym NON-REINFORCE-STAGING-SYMS))
-               (not under-home-attack?)
-               (not defensive-muster-active?)
-               (not enemy-near-main-or-nat?)
-               has-distant-frontline?
                (not (reinf-graduated? uid))
                (let ([d-home (dist2d-fl ux uy fbx fby)]
-                     [d-nat (dist2d-fl ux uy fnx fny)])
-                 (or (and (fl<= d-home 26.0)
-                          (or (fl<= d-home STAGE-HOME-REINFORCE-RADIUS)
-                              (eq? (hash-ref u2g uid #f) 'main-reinforce)))
-                     (and protoss-race?
-                          front-far-from-nat?
-                          (or (fl<= d-nat 16.0)
-                              (and (fl<= d-nat 18.0)
-                                   (eq? (hash-ref u2g uid #f) 'main-reinforce)))))))
+                     [d-nat (dist2d-fl ux uy fnx fny)]
+                     [in-reinf? (eq? (hash-ref u2g uid #f) 'main-reinforce)])
+                 (if home-pocket-hold?
+                     (and (not enemy-near-main?)
+                          (fl> (unit-min-enemy-dist ux uy) 14.0)
+                          (or (fl<= d-home 18.0)
+                              (and has-main-combat-prod?
+                                   (fl<= d-home STAGE-HOME-REINFORCE-RADIUS))
+                              (and (fl<= d-home 26.0) in-reinf?)
+                              (and nat-safe-for-pocket?
+                                   has-nat-combat-prod?
+                                   (or (fl<= d-nat 16.0)
+                                       (and (fl<= d-nat 18.0) in-reinf?)))))
+                     (and (not under-home-attack?)
+                          (not enemy-near-main?)
+                          (not defensive-muster-active?)
+                          (not enemy-near-main-or-nat?)
+                          has-distant-frontline?
+                          (or (and (fl<= d-home 26.0)
+                                   (or (fl<= d-home STAGE-HOME-REINFORCE-RADIUS)
+                                       in-reinf?))
+                              (and has-nat-combat-prod?
+                                   front-far-from-nat?
+                                   (or (fl<= d-nat 16.0)
+                                       (and (fl<= d-nat 18.0) in-reinf?))))))))
           (bucket-add! 'main-reinforce u)]))
 
      ;; Helper: release any staging/strike lease owned by staging-groups for `uid`
@@ -1342,10 +1542,28 @@
        (define existing (hash-ref groups-ht gid #f))
        (define prev-pt
          (and existing (cons (staging-group-stage-x existing) (staging-group-stage-y existing))))
+       (define reinf-pocket-active?
+         (and (eq? gid 'main-reinforce) home-pocket-hold? (not enemy-near-main?)))
+       (define pocket-safe-ths
+         (if reinf-pocket-active?
+             (let ([safe (filter (lambda (th)
+                                   (and (rec-xy? th)
+                                        (fl> (unit-min-enemy-dist (rec-x th fbx) (rec-y th fby)) 24.0)))
+                                 ally-townhalls)])
+               (if (pair? safe)
+                   safe
+                   (let ([main-th (filter (lambda (th)
+                                            (and (rec-xy? th)
+                                                 (fl<= (dist2d-fl (rec-x th fbx) (rec-y th fby) fbx fby) 10.0)))
+                                          ally-townhalls)])
+                     (if (pair? main-th) main-th ally-townhalls))))
+             ally-townhalls))
+       (define eff-stage-nat-x (if (and reinf-pocket-active? (not nat-safe-for-pocket?)) fbx fnx))
+       (define eff-stage-nat-y (if (and reinf-pocket-active? (not nat-safe-for-pocket?)) fby fny))
        (define stage-pt
          (pick-safe-staging-point
           #:domain domain
-          #:ally-townhalls ally-townhalls
+          #:ally-townhalls pocket-safe-ths
           #:ally-buildings ally-buildings
           #:mineral-patches mineral-patches
           #:enemy-units enemy-combat-recs
@@ -1353,10 +1571,10 @@
           #:enemy-anchor-y fey
           #:base-x fbx
           #:base-y fby
-          #:nat-x fnx
-          #:nat-y fny
-          #:third-x third-x
-          #:third-y third-y
+          #:nat-x eff-stage-nat-x
+          #:nat-y eff-stage-nat-y
+          #:third-x (if reinf-pocket-active? eff-stage-nat-x third-x)
+          #:third-y (if reinf-pocket-active? eff-stage-nat-y third-y)
           #:map-width mw
           #:map-height mh
           #:prev-pt prev-pt
@@ -1390,17 +1608,72 @@
        (define avg-hp (group-avg-hp-ratio members))
        (define min-e-dist (group-max-enemy-proximity members enemy-combat-recs))
 
+       ;; Loop 87 Track 3 + Loop 87C Track 2: Home-defense pocket parity & bounded anti-stall.
+       ;; Active ONLY during post-wipe rebuild (`active-home-defense-engaged? = #f`): releases
+       ;; the entire pocket simultaneously once assembled home defenders reach `>= 0.65x`
+       ;; besiegers OR `>= 18` combat supply, or `224f` (`10s`) expires with `>= 4` units
+       ;; (plus `448f` zero-prod safety backstop). Scrambles immediately on `enemy-near-main?`
+       ;; OR if active home defenders engage (`active-home-defense-engaged? = #t`).
+       (define pocket-enemy-ref-val
+         (cond
+           [(not reinf-pocket-active?) 0.0]
+           [besieging-nat-or-outer? besiege-enemy-val]
+           [else
+            (let ([base-pts (append (list (cons fbx fby) (cons fnx fny)) outer-base-pts)])
+              (for/fold ([best-ev 0.0]) ([bp (in-list base-pts)])
+                (define ev
+                  (for/fold ([s 0.0]) ([e (in-list enemy-combat-recs)])
+                    (if (fl<= (dist2d-fl (rec-x e 9999.0) (rec-y e 9999.0) (car bp) (cdr bp)) 26.0)
+                        (fl+ s (enemy-home-siege-threat-val e))
+                        s)))
+                (flmax best-ev ev)))]))
+       (define pocket-assembled-def-val
+         (if (not reinf-pocket-active?)
+             0.0
+             (let ([seen (make-hasheqv)]
+                   [tot 0.0])
+               (define (add-def! u)
+                 (define uid (rec-id u))
+                 (when (and (> uid 0) (not (hash-has-key? seen uid)))
+                   (hash-set! seen uid #t)
+                   (set! tot (fl+ tot (choke-unit-res-val u)))))
+               (for ([u (in-list members)])
+                 (add-def! u))
+               (for ([u (in-list combat-units)]
+                     #:when (and (rec-xy? u)
+                                 (or (not protoss-race?) (rec-complete? u))))
+                 (define ux (rec-x u 9999.0))
+                 (define uy (rec-y u 9999.0))
+                 (when (or (fl<= (dist2d-fl ux uy fbx fby) 26.0)
+                           (and besieged-base-pt
+                                (fl<= (dist2d-fl ux uy (car besieged-base-pt) (cdr besieged-base-pt)) 26.0)))
+                   (add-def! u)))
+               tot)))
+       (define pocket-parity-ready?
+         (and reinf-pocket-active?
+              (or (and (fl> pocket-enemy-ref-val 0.0)
+                       (fl>= pocket-assembled-def-val
+                             (fl* STAGE-HOME-POCKET-PARITY-RATIO pocket-enemy-ref-val)))
+                  (>= tot-sup 18))))
+       (define pocket-anti-stall-ready?
+         (and reinf-pocket-active?
+              (or (and (>= wait-elapsed 224) (>= n-members 4))
+                  (and (>= wait-elapsed 448) (= total-combat-in-prod 0)))))
+
        ;; Hard Safety Override #1: Emergency Home-Defense Scramble
        ;; Releases all staging groups when home base / workers are under attack (or enemy capital air
        ;; shells ANY base), EXCEPT `< 6` Corruptors vs `>= 3` Tempests so small packs don't feed,
-       ;; AND Loop 64B Bug #1: during `defensive-muster-active?`, suppress outer-base (3rd+)
-       ;; scramble so staging packs consolidate, while ALWAYS scrambling on Main threat OR
-       ;; `<= 2`-base Natural threat (`< 10.0t` of Natural)!
+       ;; Loop 64B Bug #1 (suppresses outer-base scramble during muster while scrambling on Main
+       ;; or `<= 2`-base Natural `< 10t`), AND Loop 87 Track 3 (suppresses `'main-reinforce`
+       ;; scramble while `home-pocket-hold?` holds and Main is unbreached, scrambling instantly
+       ;; if `enemy-near-main?` becomes `#t`!).
        (define home-scramble-override?
-         (or (and (eq? gid 'main-reinforce)
-                  (or under-home-attack?
-                      defensive-muster-active?
-                      enemy-near-main-or-nat?))
+         (if (eq? gid 'main-reinforce)
+             (or enemy-near-main?
+                 (and (not reinf-pocket-active?)
+                      (or under-home-attack?
+                          defensive-muster-active?
+                          enemy-near-main-or-nat?)))
              (and (or (and under-home-attack?
                            (or (not defensive-muster-active?)
                                enemy-near-main?
@@ -1429,12 +1702,15 @@
            [else
             (>= wait-elapsed max-wait)]))
 
-       ;; L59-P2 (`#1500` Corruptor 1-by-1 Tempest feed fix): Endgame `supply >= 165` MUST NOT
-       ;; force-dispatch `< 6` Corruptors 1-by-1 into active enemy Tempests/Carriers/BCs!
+       ;; L59-P2 (`#1500` Corruptor 1-by-1 Tempest feed fix) & Loop 87 Track 3:
+       ;; Endgame `supply >= 165` MUST NOT force-dispatch `< 6` Corruptors into active capital air,
+       ;; and `'main-reinforce` uses `reinf-endgame-force-dispatch?` (`supply >= 180` / endgame hunt).
        (define effective-endgame-dispatch?
-         (and endgame-force-dispatch?
-              (or enemy-main-cleared?
-                  (not (and protect-vs-cap-air? (< n-members 6))))))
+         (if (eq? gid 'main-reinforce)
+             reinf-endgame-force-dispatch?
+             (and endgame-force-dispatch?
+                  (or enemy-main-cleared?
+                      (not (and protect-vs-cap-air? (< n-members 6)))))))
 
        ;; State transitions with hysteresis
        (define cur-state (staging-group-state grp))
@@ -1444,6 +1720,20 @@
             'dispatched]
            [(eq? cur-state 'staging)
             (cond
+              [reinf-pocket-active?
+               (if (or pocket-parity-ready? pocket-anti-stall-ready?)
+                   'dispatched
+                   'staging)]
+              ;; Loop 87B Track E: Counter-push immediately in the 12s window right after a
+              ;; timed Locust/Broodling wave expires, and avoid trickling < 16 sup mid-wave!
+              [(and (eq? gid 'main-reinforce)
+                    post-free-summon-counter-window?
+                    (or (>= n-members 4) (>= tot-sup 8)))
+               'dispatched]
+              [(and (eq? gid 'main-reinforce)
+                    free-summon-wave-active?
+                    (< tot-sup 16))
+               (if anti-stall-release? 'dispatched 'staging)]
               [(and pack-threshold-met? cohesive?) 'dispatched]
               [anti-stall-release? 'dispatched]
               [else 'staging])]
@@ -1621,7 +1911,7 @@
    redirect-target-xy     ;; (or/c #f (cons Flonum Flonum)): soft outer base pivot if available
    blacklisted-zone-key   ;; (or/c #f (cons Integer Integer))
    rolling-loss-val       ;; Flonum
-   release-reason)        ;; symbol: 'none | 'outer-pivot | 'winning-army | 'max-duration | 'max-supply | 'siege-ready | 'th-killed | 'home-defense | 'bypass
+   release-reason)        ;; symbol: 'none | 'outer-pivot | 'winning-army | 'low-attrition | 'max-duration | 'max-supply | 'siege-ready | 'th-killed | 'home-defense | 'bypass
   #:transparent)
 
 (struct choke-attrition-state
@@ -1694,8 +1984,9 @@
        [(503 912) 300.0]             ;; lurker-burrowed ONLY (exclude mobile 502/911)
        [(1910 734) 260.0]            ;; shield-battery / liberator-ag ONLY (exclude mobile 689)
        [(66 98) 220.0]               ;; photon-cannon / spine-crawler
-       [(498 500) 180.0]             ;; widow-mine / widow-mine-burrowed
+       [(498 500 493 494) 180.0]     ;; widow-mine / swarm-host (free-unit attrition siege)
        [(23 99) 90.0]                ;; missile-turret / spore-crawler
+       [(489 693 289 85) 45.0]       ;; locust / broodling / interceptor wave (>= 8 = 360 >= 350)
        [else 0.0])]
     [(symbol? raw)
      (define bsym (sc2-canonical-structure-sym raw))
@@ -1707,8 +1998,9 @@
          [(lurker-burrowed lurker-mp-burrowed) 300.0]
          [(shield-battery liberator-ag) 260.0]
          [(photon-cannon spine-crawler) 220.0]
-         [(widow-mine-burrowed widow-mine) 180.0]
+         [(widow-mine-burrowed widow-mine swarm-host swarm-host-mp swarm-host-burrowed-mp) 180.0]
          [(missile-turret spore-crawler) 90.0]
+         [(locust locust-mp locust-mp-flying locust-mp-precursor broodling broodling-escort interceptor) 45.0]
          [else 0.0]))
      (flmax (w raw) (w bsym))]
     [else 0.0]))
@@ -1979,14 +2271,24 @@
                     (fl>= combat-sup-fl 80.0)))
            (clear-hold!)
            (choke-attrition-verdict #f #f active-bl-key active-loss 'max-supply)]
-          ;; Valve 4: Siege + detection ready release
+          ;; Valve 4 (Loop 87 Track 3 tuned): Siege + detection ready release at >= 1.15x
+          ;; (`max 200.0 known-enemy-val`) when `>= 2` siege breakers are ready (so winning
+          ;; midgame siege leads push and close instead of sitting in passive hold, while
+          ;; narrow `< 1.25x` leads still wait for a detector when `enemy-needs-detection?`).
           [(and (or cur-holding? active-bl-key)
                 (>= siege-cnt 2)
                 (or (not enemy-needs-detection?) has-army-detector?)
-                (or (fl<= known-en-fl 0.0)
-                    (fl>= combat-val-fl (fl* 1.15 known-en-fl))))
+                (fl> combat-val-fl 0.0)
+                (fl>= combat-val-fl (fl* 1.15 (flmax 200.0 known-en-fl))))
            (clear-hold!)
            (choke-attrition-verdict #f #f active-bl-key active-loss 'siege-ready)]
+          ;; Loop 87 Track 3: Release active hold immediately when opponent is NOT a turtle
+          ;; (`turtle-posterior < 0.35`) and rolling choke loss has subsided (`< 800.0`).
+          [(and cur-holding?
+                (fl< turtle-fl 0.35)
+                (fl< active-loss 800.0))
+           (clear-hold!)
+           (choke-attrition-verdict #f #f active-bl-key active-loss 'low-attrition)]
           ;; Valve 5: Active bounded hold timer (`60s` max hold + `60s` refractory cooldown)
           [cur-holding?
            (cond

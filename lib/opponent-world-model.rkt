@@ -27,6 +27,7 @@
          racket/math
          racket/flonum
          racket/set
+         racket/string
          "sc2-game-constants.rkt")
 
 (provide (struct-out tracked-enemy-unit)
@@ -49,6 +50,9 @@
          owm-enemy-turtle-breakdown
          owm-estimated-enemy-bases
          owm-estimated-enemy-gases
+         owm-estimated-min-rate
+         owm-estimated-gas-rate
+         owm-belief-telemetry-snapshot
          make-opponent-world-model
          reset-opponent-world-model!
          free-summon-unit-sym?
@@ -201,6 +205,20 @@
   (hash-set! ht 'raw-unit-types (make-hasheqv))
   (hash-set! ht 'estimated-enemy-bases 1)
   (hash-set! ht 'estimated-enemy-gases 0)
+  (hash-set! ht 'min-rate-per-min 0)
+  (hash-set! ht 'gas-rate-per-min 0)
+  (hash-set! ht 'seen-workers 0)
+  (hash-set! ht 'prod-counts (hasheq))
+  (hash-set! ht 'combat-unit-counts (hasheq))
+  (hash-set! ht 'owm-upgrades '())
+  (hash-set! ht 'believed-army-val-unweighted 0)
+  (hash-set! ht 'worker-kill-events '())
+  (hash-set! ht 'last-recorded-workers-killed 0)
+  (hash-set! ht 'recent-comp-weights (make-hasheq))
+  (hash-set! ht 'kinematic-anchors (make-hasheqv))
+  (hash-set! ht 'kinematic-hits (make-hasheq))
+  (hash-set! ht 'unupg-seen-frame (make-hasheq))
+  (hash-set! ht 'tech-first-seen-frame (make-hasheq))
   ht)
 
 (define owm-l86-ring-state-table (make-weak-hasheq))
@@ -288,6 +306,14 @@
 (define (owm-estimated-enemy-gases owm)
   (define st (owm-l86-ring-state owm))
   (if (hash? st) (hash-ref st 'estimated-enemy-gases 0) 0))
+
+(define (owm-estimated-min-rate owm)
+  (define st (owm-l86-ring-state owm))
+  (if (hash? st) (hash-ref st 'min-rate-per-min 0) 0))
+
+(define (owm-estimated-gas-rate owm)
+  (define st (owm-l86-ring-state owm))
+  (if (hash? st) (hash-ref st 'gas-rate-per-min 0) 0))
 
 (define (opponent-world-summary-enemy-workers-near-us s)
   (define rec (and (opponent-world-summary? s) (hash-ref owm-summary-worker-rush-table s #f)))
@@ -580,29 +606,74 @@
 ;;                          army-value estimation without triggering false hidden-gas-tech-risk!)
 ;;   4. `est-workers`     : estimated alive workers
 ;;   5. `est-workers-born`: estimated cumulative workers produced
-(define (integrate-opponent-economy enemy-race frame base-ready-frames geyser-entries workers-killed)
+;; Internal 7-value integrator returning cumulative totals + instantaneous
+;; final-step `min-rate-per-min` (`M/min`) and `gas-rate-per-min` (`G/min`).
+;; Loop 87B Calibration:
+;;   - Models worker-kill attrition inside the integration loop so active TownHalls
+;;     rebuild killed workers naturally over time (no permanent cumulative subtraction!).
+;;   - Calibrated SC2 Faster gas harvest rate (`0.87 G/worker-sec` = `156.6 G/min/geyser`,
+;;     avg `2.65` effective gas-workers per active geyser) and earlier `baseline-g` ramp
+;;     starting at `55s` (suppressed when main was swept gas-free early).
+;; Public `integrate-opponent-economy` preserves its exact 5-value return arity.
+(define (integrate-opponent-economy/rates enemy-race frame base-ready-frames geyser-entries workers-killed
+                                          [kill-events '()]
+                                          [seen-workers 0]
+                                          [main-gas-free? #f])
   (define f-sec (/ (exact->inexact (max 0 frame)) 22.4))
   (define w-cap-race
     (case enemy-race
-      [(Zerg) 68.0]
-      [(Protoss) 66.0]
-      [else 62.0]))
+      [(Zerg) 70.0]
+      [(Protoss) 68.0]
+      [else 64.0]))
   (define w-rate-mult
     (case enemy-race
       ;; Zerg shares Larva across Drones/Overlords/Army and consumes Drones into structures,
       ;; so net sustained worker growth is lower than parallel Nexus/CC production.
-      [(Zerg) 0.88]
+      [(Zerg) 0.90]
       [(Protoss) 0.96]
-      [else 0.90]))
+      [else 0.92]))
   ;; Separate geysers with exact observed vespene depletion (`2250 - vespene_contents` at `t_seen`)
   ;; from geysers estimated purely by ready-frame integration!
   (define geyser-ready-secs
     (for/list ([ge (in-list geyser-entries)])
       (/ (exact->inexact (car ge)) 22.4)))
-  (let loop ([s 0.0] [w 12.0] [w-born 12.0] [cum-m 50.0] [cum-g-rate 0.0] [cum-g-unobs 0.0])
+  (define kill-sec-events
+    (for/list ([ke (in-list kill-events)]
+               #:when (and (pair? ke) (real? (car ke)) (real? (cdr ke)) (> (cdr ke) 0)))
+      (cons (/ (exact->inexact (max 0 (car ke))) 22.4)
+            (exact->inexact (cdr ke)))))
+  (define has-kill-events? (pair? kill-sec-events))
+  (define recent-kills-90s
+    (if has-kill-events?
+        (for/sum ([ks (in-list kill-sec-events)]
+                  #:when (<= (- f-sec (car ks)) 90.0))
+          (cdr ks))
+        (exact->inexact (max 0 workers-killed))))
+  (let loop ([s 0.0] [w 12.0] [w-born 12.0] [cum-m 50.0] [cum-g-rate 0.0] [cum-g-unobs 0.0]
+             [last-b 1] [last-g 0] [last-eff-g 0.0] [last-sat-cap 18.0]
+             [last-opt-rate 0.0] [last-mule-bonus 0.0])
     (if (>= s f-sec)
-        (let* ([eff-w (max 4 (exact-round (- w (min (- w 4.0) (exact->inexact workers-killed)))))]
+        (let* (;; Apply kills that occurred at exact current frame (`>= f-sec`), or stateless
+               ;; decayed kill debt when caller didn't pass timestamped `kill-events`.
+               [end-kills
+                (if has-kill-events?
+                    (for/sum ([ks (in-list kill-sec-events)]
+                              #:when (>= (car ks) f-sec))
+                      (cdr ks))
+                    (let* ([wk-fl (exact->inexact (max 0 workers-killed))]
+                           ;; Stateless fallback: old kills recover slowly over elapsed time
+                           [max-debt (max 0.0 (- w 4.0))])
+                      (min max-debt wk-fl)))]
+               [w-after-end (max 4.0 (- w end-kills))]
+               [eff-w-raw (max 4 seen-workers (exact-round w-after-end))]
+               ;; Multi-base macro saturation floor when opponent has >= 2 bases past 5:00
+               ;; and suffered < 6 worker kills in the last 90s (old kills have been rebuilt!).
+               [eff-w
+                (if (and (>= last-b 2) (>= f-sec 300.0) (< recent-kills-90s 6.0))
+                    (max eff-w-raw (exact-round (* 0.70 last-sat-cap)))
+                    eff-w-raw)]
                ;; Reconcile gas against exact observed geyser depletion anchors when available!
+               ;; SC2 Faster 3-worker saturated geyser harvests ~2.61 G/sec (~156.6 G/min).
                [anchored-gas
                 (for/sum ([ge (in-list geyser-entries)])
                   (define rdy-s (/ (exact->inexact (car ge)) 22.4))
@@ -613,32 +684,70 @@
                      ;; Exact gas mined up to `seen-s` is `2250 - v-rem`, plus rate after `seen-s`!
                      (define mined-at-seen (max 0 (- 2250 v-rem)))
                      (define post-sec (max 0.0 (- f-sec seen-s)))
-                     (min 2250 (+ mined-at-seen (exact-round (* 1.92 post-sec))))]
+                     (min 2250 (+ mined-at-seen (exact-round (* 2.61 post-sec))))]
                     [(< rdy-s f-sec)
-                     (min 2250 (exact-round (* 1.92 (- f-sec rdy-s))))]
+                     (min 2250 (exact-round (* 2.61 (- f-sec rdy-s))))]
                     [else 0]))]
-               [final-gas (max (exact-round cum-g-rate) anchored-gas)])
+               [final-gas (max (exact-round cum-g-rate) anchored-gas)]
+               [eff-w-fl (exact->inexact eff-w)]
+               [wg-tot-now (max 0.0 (min (* 2.65 last-eff-g) (- eff-w-fl 10.0)))]
+               [wg-conf-now (max 0.0 (min (* 2.85 (exact->inexact last-g)) (- eff-w-fl 8.0)))]
+               [wg-now (max wg-tot-now wg-conf-now)]
+               [wm-now (max 0.0 (- eff-w-fl wg-now))]
+               [wm-opt-now (min wm-now (* 16.0 (exact->inexact last-b)))]
+               [wm-ovr-now (max 0.0 (min (- wm-now wm-opt-now) (* 6.0 (exact->inexact last-b))))]
+               [min-rate-per-min
+                (if (< f-sec 5.0)
+                    0
+                    (max 0 (exact-round (* 60.0 (+ (* last-opt-rate wm-opt-now)
+                                                   (* 0.38 wm-ovr-now)
+                                                   last-mule-bonus)))))]
+               [gas-rate-per-min
+                (if (< f-sec 5.0)
+                    0
+                    (max 0 (exact-round (* 60.0 (* 0.87 wg-now)))))])
           (values (exact-round cum-m)
                   final-gas
                   (exact-round cum-g-unobs)
                   eff-w
-                  (exact-round w-born)))
+                  (exact-round w-born)
+                  min-rate-per-min
+                  gas-rate-per-min))
         (let* ([dt (min 5.0 (- f-sec s))]
+               [s-next (+ s dt)]
                [b (max 1 (count (lambda (rf) (<= (/ (exact->inexact rf) 22.4) s)) base-ready-frames))]
                [g (min (* 2 b) (count (lambda (gs) (<= gs s)) geyser-ready-secs))]
-               ;; Account for realistic baseline gas-worker allocation even before geysers are scouted,
-               ;; conserving their output in `cum-g-unobs` instead of over-crediting mineral income!
-               [baseline-g (if (< s 68.0) 0.0 (min (* 2.0 b) (/ (- s 68.0) 105.0)))]
+               ;; Earlier baseline gas ramp (`s >= 55s`, ~1.1 by 1:50, ~1.5 by 2:15, scaling
+               ;; smoothly to ~1.05..1.65 gases/base midgame; 0 if main was swept gas-free early).
+               [baseline-g
+                (cond
+                  [(and main-gas-free? (< s 180.0)) 0.0]
+                  [(< s 55.0) 0.0]
+                  [(< s 135.0) (min (* 2.0 b) (+ 0.25 (* 1.25 (/ (- s 55.0) 80.0))))]
+                  [else
+                   (define g-per-b (min 1.65 (+ 1.05 (* 0.0014 (max 0.0 (- s 180.0))))))
+                   (min (* 2.0 b) (* g-per-b (exact->inexact b)))])]
                [eff-g (max (exact->inexact g) baseline-g)]
                [sat-cap (min w-cap-race (+ (* 16.0 b) (* 3.0 eff-g) 2.0))]
+               ;; Subtract kills occurring in `[s, s + dt)` BEFORE applying TownHall worker rebuild!
+               [step-kills
+                (if has-kill-events?
+                    (for/sum ([ks (in-list kill-sec-events)]
+                              #:when (and (>= (car ks) s) (< (car ks) s-next)))
+                      (cdr ks))
+                    0.0)]
+               [w-post-kill (max 4.0 (- w step-kills))]
                ;; Opening worker-production efficiency ramp (supply/tech/expand build windows)
                [ramp-eff (cond [(< s 90.0) 0.82] [(< s 180.0) 0.92] [else 1.00])]
-               [dw (max 0.0 (min (- sat-cap w) (* dt ramp-eff w-rate-mult (/ (min 3.0 (exact->inexact b)) 12.0))))]
-               [w-next (+ w dw)]
-               [w-mid (max 4.0 (- (* 0.5 (+ w w-next))
-                                  (if (>= s (* 0.5 f-sec)) (* 0.5 (exact->inexact workers-killed)) 0.0)))]
-               [wg-tot (max 0.0 (min (* 3.0 eff-g) (- w-mid 10.0)))]
-               [wg-conf (max 0.0 (min (* 3.0 g) (- w-mid 8.0)))]
+               [dw (max 0.0 (min (- sat-cap w-post-kill)
+                                 (* dt ramp-eff w-rate-mult (/ (min 3.5 (exact->inexact b)) 12.0))))]
+               [w-next (+ w-post-kill dw)]
+               [w-mid (if has-kill-events?
+                          (max 4.0 (* 0.5 (+ w-post-kill w-next)))
+                          (max 4.0 (- (* 0.5 (+ w-post-kill w-next))
+                                      (if (>= s (* 0.5 f-sec)) (* 0.5 (exact->inexact workers-killed)) 0.0))))]
+               [wg-tot (max 0.0 (min (* 2.65 eff-g) (- w-mid 10.0)))]
+               [wg-conf (max 0.0 (min (* 2.85 g) (- w-mid 8.0)))]
                [wg-unobs (max 0.0 (- wg-tot wg-conf))]
                [wm (max 0.0 (- w-mid wg-tot))]
                [wm-opt (min wm (* 16.0 b))]
@@ -652,18 +761,24 @@
                                   base-ready-frames))
                     0)]
                [mule-bonus (* 1.7 (exact->inexact orbital-cnt))]
-               ;; Empirically calibrated LotV real-time (22.4 loops/sec) mineral rate:
-               ;; 0 for opening 5s walk; 0.84 min/mineral-worker-sec tapering to 0.76 late (patch depletion/transfers),
-               ;; 0.38 oversaturated, 0.64 gas/worker-sec (~1.92/geyser-sec).
+               ;; Empirically calibrated LotV Faster-speed (22.4 loops/sec) harvest rates:
+               ;; 0 for opening 5s walk; 0.84 min/mineral-worker-sec tapering to 0.76 late,
+               ;; 0.38 oversaturated, 0.87 gas/worker-sec (~156.6 G/min/geyser).
                [opt-rate
                 (cond
                   [(< s 5.0) 0.0]
                   [(<= s 420.0) 0.84]
                   [else (max 0.76 (- 0.84 (* 0.08 (/ (- s 420.0) 360.0))))])]
                [dm (* dt (+ (* opt-rate wm-opt) (* 0.38 wm-ovr) mule-bonus))]
-               [dg-conf (* dt 0.64 wg-conf)]
-               [dg-unobs (* dt 0.64 wg-unobs)])
-          (loop (+ s dt) w-next (+ w-born dw) (+ cum-m dm) (+ cum-g-rate dg-conf) (+ cum-g-unobs dg-unobs))))))
+               [dg-conf (* dt 0.87 wg-conf)]
+               [dg-unobs (* dt 0.87 wg-unobs)])
+          (loop s-next w-next (+ w-born dw) (+ cum-m dm) (+ cum-g-rate dg-conf) (+ cum-g-unobs dg-unobs)
+                b g eff-g sat-cap opt-rate mule-bonus)))))
+
+(define (integrate-opponent-economy enemy-race frame base-ready-frames geyser-entries workers-killed)
+  (define-values (cum-m final-gas cum-g-unobs eff-w w-born _min-rate _gas-rate)
+    (integrate-opponent-economy/rates enemy-race frame base-ready-frames geyser-entries workers-killed))
+  (values cum-m final-gas cum-g-unobs eff-w w-born))
 
 ;; -----------------------------------------------------------------------------
 ;; 4. Main Step Update (`step-opponent-world-model!`)
@@ -774,6 +889,7 @@
   (define dead-tags (opponent-world-model-dead-tags owm))
   (define implied-set (opponent-world-model-implied-tech-set owm))
   (define destroyed-tech (opponent-world-model-destroyed-tech-set owm))
+  (define observed-upgs (opponent-world-model-observed-upgrades-set owm))
 
   ;; Step A: Process explicit `dead-unit-tags` from wire
   (define raw-unit-types
@@ -781,12 +897,37 @@
         (let ([ht (make-hasheqv)])
           (hash-set! ring-st 'raw-unit-types ht)
           ht)))
+  (define kinematic-anchors
+    (or (hash-ref ring-st 'kinematic-anchors #f)
+        (let ([ht (make-hasheqv)])
+          (hash-set! ring-st 'kinematic-anchors ht)
+          ht)))
+  (define kinematic-hits
+    (or (hash-ref ring-st 'kinematic-hits #f)
+        (let ([ht (make-hasheq)])
+          (hash-set! ring-st 'kinematic-hits ht)
+          ht)))
+  (define unupg-seen-ht
+    (or (hash-ref ring-st 'unupg-seen-frame #f)
+        (let ([ht (make-hasheq)])
+          (hash-set! ring-st 'unupg-seen-frame ht)
+          ht)))
+  (define tech-first-seen-ht
+    (or (hash-ref ring-st 'tech-first-seen-frame #f)
+        (let ([ht (make-hasheq)])
+          (hash-set! ring-st 'tech-first-seen-frame ht)
+          ht)))
+  (define (record-tech-first-seen! sym f)
+    (define prev (hash-ref tech-first-seen-ht sym #f))
+    (when (or (not (exact-integer? prev)) (< f prev))
+      (hash-set! tech-first-seen-ht sym f)))
   (define dead-tags-this-step (mutable-seteqv))
   (for ([dtag (in-list dead-tags-now)]
         #:when (and (exact-integer? dtag) (> dtag 0)))
     (set-add! dead-tags-this-step dtag)
     (unless (set-member? dead-tags dtag)
       (set-add! dead-tags dtag)
+      (hash-remove! kinematic-anchors dtag)
       (cond
         [(hash-has-key? known-units dtag)
          (define rec (hash-ref known-units dtag))
@@ -875,6 +1016,8 @@
                                         (tracked-enemy-bldg-gas-cost prev-direct)))]
         [else
          (define ctype (sc2-canonical-structure-sym btype))
+         (when (eq? ctype 'warp-gate)
+           (set-add! observed-upgs 'warp-gate-research))
          (when (set-member? dead-tags tag)
            (set-remove! dead-tags tag))
          (set-remove! destroyed-tech ctype)
@@ -938,7 +1081,10 @@
                     (tracked-enemy-bldg tag btype ctype bx by bhp best-bprog start-f ready-f
                                         best-vcont act? prox? frame
                                         (max 0 (sc2-min-cost ctype))
-                                        (max 0 (sc2-gas-cost ctype))))])))
+                                        (max 0 (sc2-gas-cost ctype))))
+         (record-tech-first-seen! ctype ready-f)
+         (when (eq? ctype 'hydralisk-den)
+           (record-tech-first-seen! 'hydralisk-tech ready-f))])))
 
   ;; Step C: Sight-clear static structures that disappeared while in our direct footprint vision.
   ;; L85B: Ground scouts walking down an enemy ramp (low ground, `6-8.5t` away in 2D) CANNOT see
@@ -1007,19 +1153,179 @@
   (define active-summon-cnt 0)
   (define active-locust-cnt 0)
   (define seen-unit-tags-now (mutable-seteqv))
+  (define ally-is-zerg?
+    (for/or ([au (in-list ally-units)] #:when (hash? au))
+      (eq? (hash-ref RACE-DETECTION-HT (unit-type-sym au) #f) 'Zerg)))
+  (define (record-kinematic-hit! upg-sym req-hits)
+    (unless (set-member? observed-upgs upg-sym)
+      (define nxt (add1 (hash-ref kinematic-hits upg-sym 0)))
+      (hash-set! kinematic-hits upg-sym nxt)
+      (when (>= nxt req-hits)
+        (set-add! observed-upgs upg-sym))))
+  (define (near-own-creep-free-main? ux uy)
+    (and (not ally-is-zerg?)
+         (<= frame 13440)
+         (<= (dist2 ux uy base-x base-y) 324.0)
+         (not (for/or ([rec (in-hash-values known-bldgs)])
+                (and (memq (tracked-enemy-bldg-canon-type rec)
+                           '(hatchery lair hive creep-tumor creep-tumor-burrowed creep-tumor-queen))
+                     (<= (dist2 ux uy (tracked-enemy-bldg-x rec) (tracked-enemy-bldg-y rec)) 256.0))))))
 
   (for ([u (in-list enemy-units)] #:when (hash? u))
     (define utype (unit-type-sym u))
     (define halluc? (or (hash-ref u 'is-hallucination #f) (hash-ref u 'hallucination #f)))
-    (define atk-lvl (hash-ref u 'attack-upgrade-level 0))
-    (define arm-lvl (hash-ref u 'armor-upgrade-level 0))
-    (define shd-lvl (hash-ref u 'shield-upgrade-level 0))
-    (when (and (exact-integer? atk-lvl) (> atk-lvl (opponent-world-model-max-atk-upg owm)))
-      (set-opponent-world-model-max-atk-upg! owm atk-lvl))
-    (when (and (exact-integer? arm-lvl) (> arm-lvl (opponent-world-model-max-arm-upg owm)))
-      (set-opponent-world-model-max-arm-upg! owm arm-lvl))
-    (when (and (exact-integer? shd-lvl) (> shd-lvl (opponent-world-model-max-shd-upg owm)))
-      (set-opponent-world-model-max-shd-upg! owm shd-lvl))
+    (define visible-unit? (not (equal? (hash-ref u 'display-type 1) 2)))
+    (define has-atk-key? (or (hash-has-key? u 'attack-upgrade-level) (hash-has-key? u 'atk-upg)))
+    (define has-arm-key? (or (hash-has-key? u 'armor-upgrade-level) (hash-has-key? u 'arm-upg)))
+    (define atk-lvl (or (hash-ref u 'attack-upgrade-level #f) (hash-ref u 'atk-upg 0)))
+    (define arm-lvl (or (hash-ref u 'armor-upgrade-level #f) (hash-ref u 'arm-upg 0)))
+    (define shd-lvl (or (hash-ref u 'shield-upgrade-level #f) (hash-ref u 'shd-upg 0)))
+    (when (and (exact-integer? atk-lvl) (> atk-lvl 0))
+      (when (> atk-lvl (opponent-world-model-max-atk-upg owm))
+        (set-opponent-world-model-max-atk-upg! owm atk-lvl))
+      (when (>= atk-lvl 1) (set-add! observed-upgs 'enemy-weapons-1))
+      (when (>= atk-lvl 2) (set-add! observed-upgs 'enemy-weapons-2))
+      (when (>= atk-lvl 3) (set-add! observed-upgs 'enemy-weapons-3)))
+    (when (and (exact-integer? arm-lvl) (> arm-lvl 0))
+      (when (> arm-lvl (opponent-world-model-max-arm-upg owm))
+        (set-opponent-world-model-max-arm-upg! owm arm-lvl))
+      (when (>= arm-lvl 1) (set-add! observed-upgs 'enemy-armor-1))
+      (when (>= arm-lvl 2) (set-add! observed-upgs 'enemy-armor-2))
+      (when (>= arm-lvl 3) (set-add! observed-upgs 'enemy-armor-3)))
+    (when (and (exact-integer? shd-lvl) (> shd-lvl 0))
+      (when (> shd-lvl (opponent-world-model-max-shd-upg owm))
+        (set-opponent-world-model-max-shd-upg! owm shd-lvl))
+      (when (>= shd-lvl 1) (set-add! observed-upgs 'enemy-shields-1))
+      (when (>= shd-lvl 2) (set-add! observed-upgs 'enemy-shields-2))
+      (when (>= shd-lvl 3) (set-add! observed-upgs 'enemy-shields-3)))
+    (when (and visible-unit? (not halluc?))
+      (record-direct-unit-tier-upgrades! observed-upgs utype atk-lvl arm-lvl shd-lvl)
+      (define mhp-obs (or (hash-ref u 'max-hp #f) (hash-ref u 'hp #f)))
+      (record-unupgraded-evidence! unupg-seen-ht utype frame
+                                   (and has-atk-key? atk-lvl)
+                                   (and has-arm-key? arm-lvl)
+                                   mhp-obs)
+      (when (memq utype '(hydralisk hydralisk-burrowed))
+        (record-tech-first-seen! 'hydralisk-tech frame))
+      (let ([u-buffs (hash-ref u 'buffs '())])
+        (when (pair? u-buffs)
+          (for ([bf (in-list u-buffs)])
+            (case bf
+              [(stimpack stimpack-marauder) (set-add! observed-upgs 'stimpack)]
+              [(neural-parasite) (set-add! observed-upgs 'neural-parasite)]
+              [else (void)])))))
+    (let ([u-upgs (hash-ref u 'upgrades '())])
+      (when (pair? u-upgs)
+        (for ([eu (in-list u-upgs)])
+          (cond
+            [(symbol? eu) (set-add! observed-upgs eu)]
+            [(and (string? eu) (> (string-length (string-trim eu)) 0))
+             (set-add! observed-upgs (string->symbol (string-downcase (string-trim eu))))]))))
+    (when (and (eq? utype 'marine) (not (set-member? observed-upgs 'combat-shield)))
+      (define mhp (or (hash-ref u 'max-hp #f) (hash-ref u 'hp 0)))
+      (when (and (real? mhp) (>= mhp 55.0))
+        (set-add! observed-upgs 'combat-shield)))
+    (when (and (eq? utype 'zergling) (not (set-member? observed-upgs 'zergling-movementspeed)))
+      (define spd (hash-ref u 'speed 0.0))
+      (when (and (real? spd) (> spd 3.5))
+        (set-add! observed-upgs 'zergling-movementspeed)))
+    (when (and (eq? utype 'roach) (not (set-member? observed-upgs 'glial-reconstitution)))
+      (define spd (hash-ref u 'speed 0.0))
+      (when (and (real? spd) (> spd 2.5))
+        (set-add! observed-upgs 'glial-reconstitution)))
+    (when (and (eq? utype 'banshee) (not (set-member? observed-upgs 'cloaking-field)))
+      (define clk-val (hash-ref u 'cloak 0))
+      (when (or (hash-ref u 'cloaked? #f)
+                (hash-ref u 'cloaked #f)
+                (hash-ref u 'is-cloaked #f)
+                (and (exact-integer? clk-val) (>= clk-val 1) (<= clk-val 3)))
+        (set-add! observed-upgs 'cloaking-field)))
+    (when (and (eq? utype 'ghost) (not (set-member? observed-upgs 'personal-cloaking)))
+      (define clk-val (hash-ref u 'cloak 0))
+      (when (or (hash-ref u 'cloaked? #f)
+                (hash-ref u 'cloaked #f)
+                (hash-ref u 'is-cloaked #f)
+                (and (exact-integer? clk-val) (>= clk-val 1) (<= clk-val 3)))
+        (set-add! observed-upgs 'personal-cloaking)))
+    (define u-burrowed?
+      (not (not (or (memq utype '(roach-burrowed zergling-burrowed baneling-burrowed
+                                  hydralisk-burrowed drone-burrowed infestor-burrowed
+                                  swarm-host-burrowed queen-burrowed ultralisk-burrowed))
+                    (hash-ref u 'burrowed? #f)
+                    (hash-ref u 'burrowed #f)
+                    (hash-ref u 'is-burrowed #f)))))
+    (when (and (not (set-member? observed-upgs 'burrow))
+               (or (memq utype '(roach-burrowed zergling-burrowed baneling-burrowed
+                                 hydralisk-burrowed drone-burrowed infestor-burrowed
+                                 swarm-host-burrowed queen-burrowed ultralisk-burrowed))
+                   (and (eq? erace 'Zerg)
+                        (not (memq utype '(lurker lurker-mp lurker-burrowed lurker-mp-burrowed
+                                           creep-tumor creep-tumor-burrowed creep-tumor-queen)))
+                        u-burrowed?)))
+      (set-add! observed-upgs 'burrow))
+
+    ;; L87C Track 1: Zero-FP kinematic speed observation across consecutive visible frames.
+    ;; Measures actual Faster-speed tiles/sec (`dist / ((frame - prev-f) / 22.4)`) against hard
+    ;; SC2 LotV engine speed ceilings (even on creep!) to detect speed upgrades directly without
+    ;; relying on an absent protobuf `speed` field or noisy elapsed-clock priors.
+    (when (and visible-unit?
+               (not halluc?)
+               (real? (hash-ref u 'x #f))
+               (real? (hash-ref u 'y #f)))
+      (define ktag (hash-ref u 'id 0))
+      (when (and (exact-integer? ktag) (> ktag 0) (not (set-member? dead-tags ktag)))
+        (define kux (exact->inexact (hash-ref u 'x)))
+        (define kuy (exact->inexact (hash-ref u 'y)))
+        (define prev-k (hash-ref kinematic-anchors ktag #f))
+        (cond
+          [(or (not prev-k)
+               (not (eq? (vector-ref prev-k 0) utype))
+               (not (eq? (vector-ref prev-k 1) u-burrowed?))
+               (< frame (vector-ref prev-k 4))
+               (> (- frame (vector-ref prev-k 4)) 72))
+           (hash-set! kinematic-anchors ktag (vector utype u-burrowed? kux kuy frame))]
+          [(>= (- frame (vector-ref prev-k 4)) 16)
+           (define dt-s (/ (exact->inexact (- frame (vector-ref prev-k 4))) 22.4))
+           (define dx (- kux (vector-ref prev-k 2)))
+           (define dy (- kuy (vector-ref prev-k 3)))
+           (define dist (sqrt (+ (* dx dx) (* dy dy))))
+           (define vel (/ dist dt-s))
+           (case utype
+             [(zergling)
+              (when (and (not u-burrowed?) (>= dist 1.8) (>= vel 5.85) (<= vel 10.5))
+                (record-kinematic-hit! 'zergling-movementspeed 2))]
+             [(roach roach-burrowed)
+              (cond
+                [u-burrowed?
+                 (when (and (>= dist 1.2) (>= vel 0.8) (<= vel 5.5))
+                   (set-add! observed-upgs 'tunneling-claws)
+                   (set-add! observed-upgs 'burrow))]
+                [(and (>= dist 1.8) (>= vel 4.50) (<= vel 7.0))
+                 (record-kinematic-hit! 'glial-reconstitution 2)]
+                [(and (>= dist 1.8) (>= vel 3.75) (<= vel 5.0) (near-own-creep-free-main? kux kuy))
+                 (record-kinematic-hit! 'glial-reconstitution 3)])]
+             [(hydralisk)
+              (cond
+                [(and (not u-burrowed?) (>= dist 1.8) (>= vel 4.45) (<= vel 6.8))
+                 (record-kinematic-hit! 'muscular-augments 2)]
+                [(and (not u-burrowed?) (>= dist 1.8) (>= vel 3.60) (<= vel 4.50)
+                      (near-own-creep-free-main? kux kuy))
+                 (record-kinematic-hit! 'muscular-augments 3)])]
+             [(overlord overlord-transport)
+              (when (and (>= dist 1.1) (>= vel 1.65) (<= vel 4.0))
+                (record-kinematic-hit! 'pneumatized-carapace 2))]
+             [(baneling)
+              (when (and (not u-burrowed?) (>= dist 1.8) (>= vel 4.85) (<= vel 6.8))
+                (record-kinematic-hit! 'centrifugal-hooks 2))]
+             [(zealot)
+              (when (and (>= dist 1.8) (>= vel 3.85) (<= vel 12.0))
+                (record-kinematic-hit! 'charge 2))]
+             [(banshee)
+              (when (and (>= dist 1.8) (>= vel 4.55) (<= vel 7.0))
+                (record-kinematic-hit! 'hyperflight-rotors 2))]
+             [else (void)])
+           (hash-set! kinematic-anchors ktag (vector utype u-burrowed? kux kuy frame))]
+          [else (void)])))
 
     (cond
       [(or halluc? (free-summon-unit-sym? utype))
@@ -1048,6 +1354,15 @@
                                         (max 0 (sc2-min-cost ctype))
                                         (max 0 (sc2-gas-cost ctype)))))]))
 
+  ;; Direct persistent-effect spell upgrade observation (`psi-storm` -> `psi-storm-tech`)
+  (when (eq? erace 'Protoss)
+    (let ([effs (hash-ref obs 'effects '())])
+      (when (list? effs)
+        (for ([ef (in-list effs)] #:when (hash? ef))
+          (when (or (eq? (hash-ref ef 'type #f) 'psi-storm)
+                    (equal? (hash-ref ef 'effect-id #f) 1))
+            (set-add! observed-upgs 'psi-storm-tech))))))
+
   (when (>= active-locust-cnt 2)
     (set-opponent-world-model-last-locust-wave-frame! owm frame))
 
@@ -1060,6 +1375,7 @@
                (> (- frame (tracked-enemy-unit-last-seen-frame rec)) 2464))
       (hash-remove! known-units tag)
       (hash-remove! raw-unit-types tag)
+      (hash-remove! kinematic-anchors tag)
       (set-opponent-world-model-expired-sunk-min!
        owm (+ (opponent-world-model-expired-sunk-min owm) (tracked-enemy-unit-min-cost rec)))
       (set-opponent-world-model-expired-sunk-gas!
@@ -1621,9 +1937,31 @@
     (max (opponent-world-model-workers-killed owm)
          (let ([wk (hash-ref obs 'enemy-workers-killed 0)])
            (if (exact-integer? wk) wk 0))))
+  ;; L87B Track A: Track timestamped worker-kill deltas so `integrate-opponent-economy/rates`
+  ;; naturally rebuilds old kills via active TownHalls instead of subtracting them forever!
+  (define prev-recorded-wk (hash-ref ring-st 'last-recorded-workers-killed 0))
+  (define cur-kill-events (hash-ref ring-st 'worker-kill-events '()))
+  (when (> eff-workers-killed prev-recorded-wk)
+    (define delta-wk (- eff-workers-killed prev-recorded-wk))
+    (set! cur-kill-events (append cur-kill-events (list (cons frame delta-wk))))
+    (hash-set! ring-st 'worker-kill-events cur-kill-events)
+    (hash-set! ring-st 'last-recorded-workers-killed eff-workers-killed))
+  (define seen-workers-pre
+    (for/sum ([rec (in-hash-values known-units)]
+              #:when (hash-has-key? WORKER-SYM-SET (tracked-enemy-unit-type rec)))
+      1))
+  (define main-gas-free-early?
+    (and scouted-enemy-main?
+         (= confirmed-geyser-cnt 0)
+         (not (or (set-member? implied-set 'extractor)
+                  (set-member? implied-set 'refinery)
+                  (set-member? implied-set 'assimilator)))
+         (< frame 4032)))
 
-  (define-values (cum-min cum-gas est-unobs-gas est-workers est-workers-born)
-    (integrate-opponent-economy erace frame eff-base-ready-frames eff-geysers eff-workers-killed))
+  (define-values (cum-min cum-gas est-unobs-gas est-workers est-workers-born
+                  est-min-rate est-gas-rate)
+    (integrate-opponent-economy/rates erace frame eff-base-ready-frames eff-geysers eff-workers-killed
+                                      cur-kill-events seen-workers-pre main-gas-free-early?))
 
   ;; Step G: Conservation of Resources (`M_cum = Econ + Tech/Prod + AliveArmy + Dead + Bank + UnseenThreat`)
   (define f-sec (/ (exact->inexact frame) 22.4))
@@ -1806,12 +2144,27 @@
            (set-member? implied-set 'assimilator))
        1]
       [else 0]))
+  ;; L87B Track A: Conservative early gas prior from >= 100s (`2240f`) when enemy main was
+  ;; NOT swept gas-free, plus calibrated mid/late `g-per-base` (`1.25 -> 1.65`) while keeping
+  ;; `confirmed-geyser-cnt` 100% pure for cheese/proxy detection!
+  (define main-swept-gas-free?
+    (and scouted-enemy-main?
+         (= confirmed-geyser-cnt 0)
+         (= gas-tech-min-gases 0)
+         (< frame 4032)))
+  (define early-prior-g
+    (if (and (>= frame 2240)
+             (< frame 5376)
+             (not early-worker-rush-active?)
+             (not main-swept-gas-free?))
+        (if (and (>= frame 3136) (not (eq? erace 'Zerg))) 2 1)
+        0))
   (define econ-baseline-g
     (if (and (>= frame 5376)
              (not early-worker-rush-active?)
              (not enemy-1base-double-gas?)
              (>= estimated-enemy-bases 2))
-        (let ([g-per-base (min 1.45 (+ 0.85 (* 0.0012 (max 0.0 (- f-sec 240.0)))))])
+        (let ([g-per-base (min 1.65 (+ 1.25 (* 0.0011 (max 0.0 (- f-sec 240.0)))))])
           (max 2 (exact-round (* g-per-base (exact->inexact estimated-enemy-bases)))))
         0))
   (define estimated-enemy-gases
@@ -1821,6 +2174,7 @@
              (max confirmed-geyser-cnt
                   gas-tech-min-gases
                   spend-implied-gases
+                  early-prior-g
                   econ-baseline-g))))
   (hash-set! ring-st 'estimated-enemy-bases estimated-enemy-bases)
   (hash-set! ring-st 'estimated-enemy-gases estimated-enemy-gases)
@@ -1879,17 +2233,17 @@
                 (* 130.0 extra-bases-built))))))
   (define total-est-gas (+ cum-gas est-unobs-gas))
   (define baseline-tech-gas-conf
-    (if (or (<= cum-gas 0) (< f-sec 90.0))
+    (if (or (<= cum-gas 0) (< f-sec 85.0))
         0
-        (min (quotient (* cum-gas 45) 100)
-             (exact-round (+ (* 0.85 (max 0.0 (- f-sec 90.0)))
-                             (* 70.0 extra-bases-built))))))
+        (min (quotient (* cum-gas 50) 100)
+             (exact-round (+ (* 1.45 (max 0.0 (- f-sec 85.0)))
+                             (* 105.0 extra-bases-built))))))
   (define baseline-tech-gas-tot
-    (if (or (<= total-est-gas 0) (< f-sec 90.0))
+    (if (or (<= total-est-gas 0) (< f-sec 80.0))
         0
-        (min (quotient (* total-est-gas 48) 100)
-             (exact-round (+ (* 1.10 (max 0.0 (- f-sec 90.0)))
-                             (* 85.0 extra-bases-built))))))
+        (min (quotient (* total-est-gas 55) 100)
+             (exact-round (+ (* 1.95 (max 0.0 (- f-sec 80.0)))
+                             (* 135.0 extra-bases-built))))))
   (define sunk-tech-min (max obs-sunk-tech-min baseline-tech-min))
   (define sunk-tech-gas (max obs-sunk-tech-gas baseline-tech-gas-conf))
   (define tot-sunk-tech-gas (max obs-sunk-tech-gas baseline-tech-gas-tot))
@@ -1944,11 +2298,12 @@
         (* 275 (max 0 (- prod-bldg-cnt 1)))
         0))
 
-  ;; 1) Conservation-based unseen army value (`0.87` factor reflects ~12.5M/supply provider cost for unseen army)
+  ;; 1) Conservation-based unseen army value (`0.87` factor reflects ~12.5M/supply provider cost for unseen army,
+  ;;    and unweighted `1.0x` on unobserved gas calibrated for SC2 Faster `0.87 G/w-s` collection rate)
   (define conservation-unseen-val
     (exact-round (* unseen-threat-weight
                     (+ (* 0.87 unaccounted-min)
-                       (* 1.5 unaccounted-tot-gas)))))
+                       (* 1.0 unaccounted-tot-gas)))))
 
   ;; 2) Physical production-throughput & rolling standing-army window cap:
   ;;    Prevents early opening noise (< 2:00) AND prevents unbounded lifetime cumulative drift (10:00–45:00+)
@@ -2189,6 +2544,124 @@
             latched-frame))
   (hash-set! owm-proxy-state-table owm proxy-state-vec)
   (hash-set! owm-summary-proxy-state-table summary proxy-state-vec)
+  ;; L87 Track 5 + L87B Track A: Full 7-dimension calibrated belief telemetry side-table
+  ;; (ZERO ABI change to 35-field `opponent-world-summary`!).
+  (define seen-workers-cnt
+    (for/sum ([(ut cnt) (in-hash known-unit-counts-mut)]
+              #:when (hash-has-key? WORKER-SYM-SET ut))
+      cnt))
+  (define raw-combat-unit-counts-ht
+    (for/hasheq ([(ut cnt) (in-hash known-unit-counts-mut)]
+                 #:when (and (> cnt 0)
+                             (not (hash-has-key? WORKER-SYM-SET ut))
+                             (not (hash-has-key? FREE-SUMMON-SET ut))
+                             (not (hash-has-key? TOWNHALL-SYM-SET ut))
+                             (not (hash-has-key? GEYSER-BLDG-SYM-SET ut))
+                             (not (memq ut '(overlord overlord-transport dropperlord
+                                             bunker photon-cannon shield-battery
+                                             spine-crawler spore-crawler missile-turret
+                                             creep-tumor creep-tumor-burrowed creep-tumor-queen
+                                             sensor-tower nydus-worm nydus-canal
+                                             supply-depot pylon)))))
+      (values ut cnt)))
+  ;; Update decayed recent combat composition memory (for fog retention + upgrade/prod inference)
+  (define recent-comp-ht
+    (let ([h (hash-ref ring-st 'recent-comp-weights #f)])
+      (if (and (hash? h) (not (immutable? h)))
+          h
+          (let ([nh (make-hasheq)])
+            (hash-set! ring-st 'recent-comp-weights nh)
+            nh))))
+  (for ([(ut cnt) (in-hash raw-combat-unit-counts-ht)])
+    (define prev (hash-ref recent-comp-ht ut #f))
+    (define prev-decayed
+      (if (and (pair? prev) (real? (car prev)) (exact-integer? (cdr prev)))
+          (let ([age-s (/ (exact->inexact (max 0 (- frame (cdr prev)))) 22.4)])
+            (* (exact->inexact (car prev)) (expt 0.5 (/ age-s 180.0))))
+          0.0))
+    (hash-set! recent-comp-ht ut (cons (max (exact->inexact cnt) prev-decayed) frame)))
+
+  ;; Econ-scaled production facility counts (Zerg uses `estimated-enemy-bases`; T/P scale past 3:30)
+  (define prod-counts-ht
+    (compute-owm-prod-counts known-bldgs implied-set destroyed-tech erace estimated-enemy-bases
+                             #:frame frame
+                             #:stopped-expanding? stopped-expanding?
+                             #:early-worker-rush? early-worker-rush-active?
+                             #:unit-counts raw-combat-unit-counts-ht
+                             #:recent-comp recent-comp-ht))
+
+  ;; L87B Calibration 5: Unweighted (`1.0*M + 1.0*G`) `believed-army-val` matching SC2 ActiveForces,
+  ;; deducting unseen inferred production surplus and trimming Zerg unscouted-ambiguity over-bias.
+  (define known-army-unweighted (+ known-army-min known-army-gas))
+  (define-values (inferred-prod-tot-min inferred-prod-tot-gas)
+    (for/fold ([pm 0] [pg 0])
+              ([(psym cnt) (in-hash prod-counts-ht)]
+               #:unless (memq psym '(hatchery lair hive)))
+      (values (+ pm (* cnt (max 0 (sc2-min-cost psym))))
+              (+ pg (* cnt (max 0 (sc2-gas-cost psym)))))))
+  (define inferred-extra-prod-min (max 0 (- inferred-prod-tot-min sunk-tech-min)))
+  (define inferred-extra-prod-gas (max 0 (- inferred-prod-tot-gas tot-sunk-tech-gas)))
+  (define unseen-min-unweighted (max 0 (- unaccounted-min inferred-extra-prod-min)))
+  (define unseen-gas-unweighted (max 0 (- unaccounted-tot-gas inferred-extra-prod-gas)))
+  (define u-wt-unweighted
+    (cond
+      [(< frame 1568) 0.25]
+      [stopped-expanding? 0.70]
+      [(eq? erace 'Zerg) 0.44]
+      [unscouted-expansion-ambiguity? 0.50]
+      [else 0.48]))
+  (define cons-unseen-unweighted
+    (exact-round (* u-wt-unweighted
+                    (+ (* 0.85 (exact->inexact unseen-min-unweighted))
+                       (exact->inexact unseen-gas-unweighted)))))
+  (define prod-window-cap-unweighted
+    (exact-round (* 0.85 (exact->inexact prod-window-cap-val))))
+  (define sup-headroom-unweighted
+    (* (max 0 (- max-army-sup known-army-sup)) 80))
+  (define unseen-army-unweighted
+    (min cons-unseen-unweighted prod-window-cap-unweighted sup-headroom-unweighted))
+  (define believed-army-val-unweighted
+    (+ known-army-unweighted unseen-army-unweighted))
+
+  ;; L87B Calibration 6: Baseline Zerg Queens + fog-retained econ-proportional unit count projection
+  (define combat-unit-counts-ht
+    (compute-owm-projected-units raw-combat-unit-counts-ht
+                                 recent-comp-ht
+                                 erace
+                                 frame
+                                 estimated-enemy-bases
+                                 believed-army-val-unweighted
+                                 early-worker-rush-active?))
+
+  ;; L87B Calibration 4 + L87C Track 1: Observed + evidence-backed canonical upgrades
+  (define owm-upgrades-list
+    (infer-owm-telemetry-upgrades
+     (collect-owm-upgrade-symbols observed-upgs
+                                  (opponent-world-model-max-atk-upg owm)
+                                  (opponent-world-model-max-arm-upg owm)
+                                  (opponent-world-model-max-shd-upg owm)
+                                  erace)
+     erace
+     frame
+     estimated-enemy-bases
+     estimated-enemy-gases
+     known-bldg-counts-mut
+     implied-set
+     raw-combat-unit-counts-ht
+     recent-comp-ht
+     #:known-bldgs known-bldgs
+     #:confirmed-geysers confirmed-geyser-cnt
+     #:unupg-seen unupg-seen-ht
+     #:tech-first-seen tech-first-seen-ht))
+
+  (hash-set! ring-st 'min-rate-per-min est-min-rate)
+  (hash-set! ring-st 'gas-rate-per-min est-gas-rate)
+  (hash-set! ring-st 'seen-workers seen-workers-cnt)
+  (hash-set! ring-st 'prod-counts prod-counts-ht)
+  (hash-set! ring-st 'combat-unit-counts combat-unit-counts-ht)
+  (hash-set! ring-st 'owm-upgrades owm-upgrades-list)
+  (hash-set! ring-st 'believed-army-val-unweighted believed-army-val-unweighted)
+
   (define ring-snapshot-ht
     (hasheq 'ring-pads
             (for/list ([rp (in-list cur-ring-pads)])
@@ -2198,7 +2671,784 @@
             'confirmed-enemy-base-pts confirmed-enemy-base-pts
             'turtle-breakdown turtle-breakdown-ht
             'estimated-enemy-bases estimated-enemy-bases
-            'estimated-enemy-gases estimated-enemy-gases))
+            'estimated-enemy-gases estimated-enemy-gases
+            'min-rate-per-min est-min-rate
+            'gas-rate-per-min est-gas-rate
+            'seen-workers seen-workers-cnt
+            'prod-counts prod-counts-ht
+            'combat-unit-counts combat-unit-counts-ht
+            'owm-upgrades owm-upgrades-list
+            'believed-army-val-unweighted believed-army-val-unweighted))
   (hash-set! owm-summary-l86-ring-state-table summary ring-snapshot-ht)
   (set-opponent-world-model-last-summary! owm summary)
   summary)
+
+;; -----------------------------------------------------------------------------
+;; 5. Loop 87 Track 5 & Loop 87B Track A: Full 7-Dimension OWM Belief Telemetry
+;; -----------------------------------------------------------------------------
+
+(define (canonical-prod-facility-sym sym)
+  (define cs (sc2-canonical-structure-sym sym))
+  (case cs
+    [(warp-gate warpgate) 'gateway]
+    [(barracks factory starport gateway robotics-facility stargate hatchery lair hive) cs]
+    [else #f]))
+
+(define (zerg-th-prod-tier sym)
+  (case sym
+    [(hive) 3]
+    [(lair) 2]
+    [(hatchery) 1]
+    [else 0]))
+
+(define (recent-or-cur-unit-cnt ut raw-ht recent-ht frame)
+  (define cur (if (hash? raw-ht) (hash-ref raw-ht ut 0) 0))
+  (define rec (and (hash? recent-ht) (hash-ref recent-ht ut #f)))
+  (define dec
+    (if (and (pair? rec) (real? (car rec)) (exact-integer? (cdr rec)))
+        (let ([age-s (/ (exact->inexact (max 0 (- frame (cdr rec)))) 22.4)])
+          (if (<= age-s 240.0)
+              (exact-round (* (exact->inexact (car rec)) (expt 0.5 (/ age-s 180.0))))
+              0))
+        0))
+  (max cur dec))
+
+(define (sum-recent-or-cur syms raw-ht recent-ht frame)
+  (for/sum ([u (in-list syms)])
+    (recent-or-cur-unit-cnt u raw-ht recent-ht frame)))
+
+;; Merge spatially-deduped `known-bldgs` + tech-implied minimum `>= 1` + econ-scaled
+;; production facility floor (`estimated-bases` for Zerg; T/P macro scaling past 3:30).
+(define (compute-owm-prod-counts known-bldgs implied-set destroyed-tech erace est-bases
+                                 #:frame [frame 0]
+                                 #:stopped-expanding? [stopped-expanding? #f]
+                                 #:early-worker-rush? [early-worker-rush? #f]
+                                 #:unit-counts [unit-counts (hasheq)]
+                                 #:recent-comp [recent-comp #f])
+  (define non-zerg-clusters (make-hasheq)) ; psym -> list of (cons x y)
+  (define zerg-th-clusters '())            ; list of (vector x y tier sym)
+  (for ([rec (in-hash-values known-bldgs)])
+    (define psym (canonical-prod-facility-sym (tracked-enemy-bldg-canon-type rec)))
+    (when psym
+      (define bx (tracked-enemy-bldg-x rec))
+      (define by (tracked-enemy-bldg-y rec))
+      (define ztier (zerg-th-prod-tier psym))
+      (if (> ztier 0)
+          (let ([matched? #f])
+            (set! zerg-th-clusters
+                  (for/list ([cl (in-list zerg-th-clusters)])
+                    (if (and (not matched?)
+                             (<= (dist2 bx by (vector-ref cl 0) (vector-ref cl 1)) 16.0))
+                        (begin
+                          (set! matched? #t)
+                          (if (> ztier (vector-ref cl 2))
+                              (vector (vector-ref cl 0) (vector-ref cl 1) ztier psym)
+                              cl))
+                        cl)))
+            (unless matched?
+              (set! zerg-th-clusters (cons (vector bx by ztier psym) zerg-th-clusters))))
+          (let ([pts (hash-ref non-zerg-clusters psym '())])
+            (unless (for/or ([pt (in-list pts)])
+                      (<= (dist2 bx by (car pt) (cdr pt)) 6.25))
+              (hash-set! non-zerg-clusters psym (cons (cons bx by) pts)))))))
+  (define prod-mut (make-hasheq))
+  (for ([(psym pts) (in-hash non-zerg-clusters)])
+    (when (pair? pts)
+      (hash-set! prod-mut psym (length pts))))
+  (for ([cl (in-list zerg-th-clusters)])
+    (hash-update! prod-mut (vector-ref cl 3) add1 0))
+  ;; Merge tech-implied facilities (`>= 1` unless destroyed; Hive satisfies Lair)
+  (for ([isym (in-set implied-set)]
+        #:unless (set-member? destroyed-tech isym))
+    (define psym (canonical-prod-facility-sym isym))
+    (when psym
+      (cond
+        [(and (eq? psym 'lair) (> (hash-ref prod-mut 'hive 0) 0)) (void)]
+        [(= (hash-ref prod-mut psym 0) 0)
+         (hash-set! prod-mut psym 1)])))
+  ;; L87B Calibration 3: Econ-scaled production floors across all 3 races!
+  (define eb (max 1 est-bases))
+  (case erace
+    [(Zerg)
+     ;; Zerg production IS Hatchery/Lair/Hive: floor total at `estimated-enemy-bases`!
+     (define z-th-cnt (+ (hash-ref prod-mut 'hatchery 0)
+                         (hash-ref prod-mut 'lair 0)
+                         (hash-ref prod-mut 'hive 0)))
+     (when (< z-th-cnt eb)
+       (hash-update! prod-mut 'hatchery (lambda (c) (+ c (- eb z-th-cnt))) 0))]
+    [(Terran)
+     (when (and (>= frame 4704) (not early-worker-rush?)) ; >= 3:30
+       (define bio-cnt (sum-recent-or-cur '(marine marauder reaper ghost) unit-counts recent-comp frame))
+       (define mech-cnt (sum-recent-or-cur '(hellion hellbat widow-mine cyclone siege-tank thor) unit-counts recent-comp frame))
+       (define air-cnt (sum-recent-or-cur '(medivac viking-fighter viking liberator banshee raven battlecruiser) unit-counts recent-comp frame))
+       (define cur-rax (hash-ref prod-mut 'barracks 0))
+       (define cur-fac (hash-ref prod-mut 'factory 0))
+       (define cur-sp (hash-ref prod-mut 'starport 0))
+       ;; Primary Barracks scaling (conservative so pure mech isn't over-estimated)
+       (when (or (> cur-rax 0) (> bio-cnt 0) (>= frame 5376))
+         (define rax-floor
+           (cond
+             [(>= frame 10752) (min 6 (max 2 (if (>= bio-cnt 10) (+ eb 1) eb)))]
+             [(>= frame 8064) (min 5 (max 2 (if (>= bio-cnt 8) (+ eb 1) eb)))]
+             [(or stopped-expanding? (>= eb 2)) 2]
+             [else 1]))
+         (when (< cur-rax rax-floor)
+           (hash-set! prod-mut 'barracks rax-floor)))
+       ;; Factory scaling once mech/starport seen or midgame >= 4:30 on >= 2 bases
+       (when (or (> cur-fac 0) (> mech-cnt 0) (> cur-sp 0) (> air-cnt 0)
+                 (and (>= frame 6048) (>= eb 2)))
+         (define fac-floor
+           (cond
+             [(and (>= frame 10752) (>= eb 3) (>= mech-cnt 6)) 3]
+             [(and (>= frame 8064) (>= eb 3) (>= mech-cnt 3)) 2]
+             [else 1]))
+         (when (< cur-fac fac-floor)
+           (hash-set! prod-mut 'factory fac-floor)))
+       ;; Starport scaling once air seen or midgame >= 5:00 on >= 2 bases
+       (when (or (> cur-sp 0) (> air-cnt 0)
+                 (and (>= frame 6720) (>= eb 2)))
+         (define sp-floor
+           (if (and (>= frame 8960) (>= eb 3) (>= air-cnt 4)) 2 1))
+         (when (< cur-sp sp-floor)
+           (hash-set! prod-mut 'starport sp-floor))))]
+    [(Protoss)
+     (when (and (>= frame 4704) (not early-worker-rush?)) ; >= 3:30
+       (define gw-cnt (sum-recent-or-cur '(zealot stalker sentry adept high-templar dark-templar archon) unit-counts recent-comp frame))
+       (define robo-cnt (sum-recent-or-cur '(immortal colossus disruptor warp-prism observer) unit-counts recent-comp frame))
+       (define sg-cnt (sum-recent-or-cur '(phoenix void-ray oracle tempest carrier mothership) unit-counts recent-comp frame))
+       (define cur-gw (hash-ref prod-mut 'gateway 0))
+       (define cur-robo (hash-ref prod-mut 'robotics-facility 0))
+       (define cur-sg (hash-ref prod-mut 'stargate 0))
+       (when (or (> cur-gw 0) (> gw-cnt 0) (>= frame 5376))
+         (define gw-floor
+           (min 8
+                (cond
+                  [(>= eb 4) (+ eb 2)]
+                  [(>= eb 3) (if (>= frame 8064) 4 3)]
+                  [(>= eb 2) (if (>= frame 7392) 3 2)]
+                  [stopped-expanding? 2]
+                  [else 1])))
+         (when (< cur-gw gw-floor)
+           (hash-set! prod-mut 'gateway gw-floor)))
+       (when (and (>= cur-robo 1) (>= eb 3) (>= frame 9408) (>= robo-cnt 4) (< cur-robo 2))
+         (hash-set! prod-mut 'robotics-facility 2))
+       (when (and (>= cur-sg 1) (>= eb 3) (>= frame 9408) (>= sg-cnt 4) (< cur-sg 2))
+         (hash-set! prod-mut 'stargate 2)))]
+    [else (void)])
+  (for/hasheq ([(k v) (in-hash prod-mut)] #:when (> v 0))
+    (values k v)))
+
+(define (derive-prod-counts-from-bldg-hash bldg-ht erace est-bases)
+  (define prod-mut (make-hasheq))
+  (when (hash? bldg-ht)
+    (for ([(k v) (in-hash bldg-ht)] #:when (and (exact-integer? v) (> v 0)))
+      (define psym (canonical-prod-facility-sym k))
+      (when psym
+        (hash-update! prod-mut psym (lambda (c) (+ c v)) 0))))
+  (when (eq? erace 'Zerg)
+    (define z-th-cnt (+ (hash-ref prod-mut 'hatchery 0)
+                        (hash-ref prod-mut 'lair 0)
+                        (hash-ref prod-mut 'hive 0)))
+    (when (< z-th-cnt est-bases)
+      (hash-update! prod-mut 'hatchery (lambda (c) (+ c (- est-bases z-th-cnt))) 0)))
+  (for/hasheq ([(k v) (in-hash prod-mut)] #:when (> v 0))
+    (values k v)))
+
+;; L87B Calibration 6: Baseline Zerg Queens + fog-retained econ-proportional unit count projection.
+(define UNIT-PROJECTION-SUPPORT-ONLY
+  '(queen observer overseer warp-prism raven medivac))
+
+(define (compute-owm-projected-units raw-units-ht recent-comp-ht erace frame est-bases
+                                     believed-army-val-unweighted early-worker-rush?)
+  (define out (make-hasheq))
+  (for ([(ut cnt) (in-hash raw-units-ht)] #:when (> cnt 0))
+    (hash-set! out ut cnt))
+  ;; Baseline Zerg Queen floor (`>= 1` at 2:15+, scaling to `min(5, est-bases)` at 3:30+)
+  (when (and (eq? erace 'Zerg) (>= frame 3024) (not early-worker-rush?))
+    (define q-floor (if (>= frame 4704) (min 5 (max 1 est-bases)) 1))
+    (when (< (hash-ref out 'queen 0) q-floor)
+      (hash-set! out 'queen q-floor)))
+  ;; Compute currently accounted unweighted value in `out`
+  (define counted-val
+    (for/sum ([(ut cnt) (in-hash out)])
+      (* cnt (max 25 (+ (max 0 (sc2-min-cost ut)) (max 0 (sc2-gas-cost ut)))))))
+  (define delta-val (max 0 (- believed-army-val-unweighted counted-val)))
+  ;; Build core combat unit composition weights from currently seen units, or recently seen
+  ;; fog-retained units (<= 240s) if between engagements (NEVER hallucinating unseen unit types!).
+  (define core-weights
+    (let ([cur-core
+           (for/list ([(ut cnt) (in-hash raw-units-ht)]
+                      #:when (and (> cnt 0) (not (memq ut UNIT-PROJECTION-SUPPORT-ONLY))))
+             (cons ut (exact->inexact cnt)))])
+      (if (pair? cur-core)
+          cur-core
+          (if (hash? recent-comp-ht)
+              (for/list ([(ut pair-cf) (in-hash recent-comp-ht)]
+                         #:when (and (not (memq ut UNIT-PROJECTION-SUPPORT-ONLY))
+                                     (pair? pair-cf)
+                                     (real? (car pair-cf))
+                                     (exact-integer? (cdr pair-cf))
+                                     (<= (/ (exact->inexact (max 0 (- frame (cdr pair-cf)))) 22.4) 240.0)))
+                (define age-s (/ (exact->inexact (max 0 (- frame (cdr pair-cf)))) 22.4))
+                (cons ut (* (exact->inexact (car pair-cf)) (expt 0.5 (/ age-s 180.0)))))
+              '()))))
+  (when (and (>= delta-val 125) (pair? core-weights))
+    (define proj-budget (* 0.65 (exact->inexact delta-val)))
+    (define tot-wt
+      (for/sum ([p (in-list core-weights)])
+        (define u-cost (exact->inexact (max 50 (+ (max 0 (sc2-min-cost (car p))) (max 0 (sc2-gas-cost (car p)))))))
+        (* (cdr p) u-cost)))
+    (when (> tot-wt 0.0)
+      (for ([p (in-list core-weights)])
+        (define ut (car p))
+        (define wt-cnt (cdr p))
+        (define u-cost (max 50 (+ (max 0 (sc2-min-cost ut)) (max 0 (sc2-gas-cost ut)))))
+        (define u-sup (max 1 (sc2-supply-cost ut)))
+        (define share (* proj-budget (/ (* wt-cnt (exact->inexact u-cost)) tot-wt)))
+        (define raw-add (exact-floor (/ share (exact->inexact u-cost))))
+        (define cap-add
+          (if (<= u-sup 1)
+              (max 4 (min 18 (exact-round (* 2.5 wt-cnt))))
+              (max 1 (min 8 (exact-round (* 1.5 wt-cnt))))))
+        (define add-n (min raw-add cap-add))
+        (when (> add-n 0)
+          (hash-update! out ut (lambda (c) (+ c add-n)) 0)))))
+  (for/hasheq ([(k v) (in-hash out)] #:when (> v 0))
+    (values k v)))
+
+;; Canonical upgrade normalization (including `burrow-or-subterranean-tech -> burrow` for Zerg
+;; and dropping it for Terran/Protoss so Widow Mines never produce false-positive `burrow`!).
+(define (normalize-upg-sym u [erace 'Unknown])
+  (define raw-sym
+    (cond
+      [(symbol? u)
+       (if (memq u '(#f unknown none ||)) #f u)]
+      [(string? u)
+       (define t (string-trim u))
+       (if (or (string=? t "") (string=? t "unknown") (string=? t "none"))
+           #f
+           (string->symbol (string-downcase t)))]
+      [else #f]))
+  (and raw-sym
+       (case raw-sym
+         [(burrow-or-subterranean-tech)
+          (if (memq erace '(Terran Protoss)) #f 'burrow)]
+         [(metabolic-boost zergling-speed) 'zergling-movementspeed]
+         [(roach-speed) 'glial-reconstitution]
+         [(baneling-speed) 'centrifugal-hooks]
+         [(banshee-cloak) 'cloaking-field]
+         [(shield-wall) 'combat-shield]
+         [(punisher-grenades) 'concussive-shells]
+         [(warp-gate) 'warp-gate-research]
+         [(psi-storm) 'psi-storm-tech]
+         [(thermal-lance) 'extended-thermal-lance]
+         [else raw-sym])))
+
+(define (collect-owm-upgrade-symbols observed-upgs max-atk max-arm max-shd [erace 'Unknown])
+  (define s (mutable-seteq))
+  (when (generic-set? observed-upgs)
+    (for ([u (in-set observed-upgs)])
+      (define nu (normalize-upg-sym u erace))
+      (when nu (set-add! s nu))))
+  (when (and (exact-integer? max-atk) (>= max-atk 1)) (set-add! s 'enemy-weapons-1))
+  (when (and (exact-integer? max-atk) (>= max-atk 2)) (set-add! s 'enemy-weapons-2))
+  (when (and (exact-integer? max-atk) (>= max-atk 3)) (set-add! s 'enemy-weapons-3))
+  (when (and (exact-integer? max-arm) (>= max-arm 1)) (set-add! s 'enemy-armor-1))
+  (when (and (exact-integer? max-arm) (>= max-arm 2)) (set-add! s 'enemy-armor-2))
+  (when (and (exact-integer? max-arm) (>= max-arm 3)) (set-add! s 'enemy-armor-3))
+  (when (and (exact-integer? max-shd) (>= max-shd 1)) (set-add! s 'enemy-shields-1))
+  (when (and (exact-integer? max-shd) (>= max-shd 2)) (set-add! s 'enemy-shields-2))
+  (when (and (exact-integer? max-shd) (>= max-shd 3)) (set-add! s 'enemy-shields-3))
+  (sort (set->list s) symbol<?))
+
+;; L87C Track 1: Direct zero-FP mapping from visible enemy unit category + SC2 upgrade levels
+;; (`attack-upgrade-level`, `armor-upgrade-level`, `shield-upgrade-level`) to exact canonical
+;; upgrade symbols (tiers 1..3).
+(define (add-tier-family! upg-set lvl u1 u2 u3)
+  (when (and (exact-integer? lvl) (>= lvl 1))
+    (set-add! upg-set u1)
+    (when (>= lvl 2) (set-add! upg-set u2))
+    (when (>= lvl 3) (set-add! upg-set u3))))
+
+(define (record-direct-unit-tier-upgrades! observed-upgs utype atk-lvl arm-lvl shd-lvl)
+  (when (and (exact-integer? atk-lvl) (> atk-lvl 0))
+    (cond
+      [(memq utype '(roach roach-burrowed ravager hydralisk hydralisk-burrowed
+                     lurker lurker-mp lurker-burrowed lurker-mp-burrowed
+                     locust locust-mp locust-mp-flying infested-terran))
+       (add-tier-family! observed-upgs atk-lvl
+                         'zerg-missile-weapons-1 'zerg-missile-weapons-2 'zerg-missile-weapons-3)]
+      [(memq utype '(zergling zergling-burrowed baneling baneling-burrowed
+                     ultralisk ultralisk-burrowed broodling))
+       (add-tier-family! observed-upgs atk-lvl
+                         'zerg-melee-weapons-1 'zerg-melee-weapons-2 'zerg-melee-weapons-3)]
+      [(memq utype '(mutalisk corruptor brood-lord))
+       (add-tier-family! observed-upgs atk-lvl
+                         'zerg-flyer-weapons-1 'zerg-flyer-weapons-2 'zerg-flyer-weapons-3)]
+      [(memq utype '(marine marauder reaper ghost))
+       (add-tier-family! observed-upgs atk-lvl
+                         'terran-infantry-weapons-1 'terran-infantry-weapons-2 'terran-infantry-weapons-3)]
+      [(memq utype '(hellion hellbat siege-tank siege-tank-sieged cyclone thor thor-ap viking-assault))
+       (add-tier-family! observed-upgs atk-lvl
+                         'terran-vehicle-weapons-1 'terran-vehicle-weapons-2 'terran-vehicle-weapons-3)]
+      [(memq utype '(viking viking-fighter banshee battlecruiser liberator liberator-ag))
+       (add-tier-family! observed-upgs atk-lvl
+                         'terran-ship-weapons-1 'terran-ship-weapons-2 'terran-ship-weapons-3)]
+      [(memq utype '(zealot stalker sentry adept immortal colossus archon dark-templar high-templar))
+       (add-tier-family! observed-upgs atk-lvl
+                         'protoss-ground-weapons-1 'protoss-ground-weapons-2 'protoss-ground-weapons-3)]
+      [(memq utype '(phoenix void-ray oracle carrier interceptor tempest mothership))
+       (add-tier-family! observed-upgs atk-lvl
+                         'protoss-air-weapons-1 'protoss-air-weapons-2 'protoss-air-weapons-3)]
+      [else (void)]))
+  (when (and (exact-integer? arm-lvl) (> arm-lvl 0))
+    (cond
+      [(memq utype '(zergling zergling-burrowed baneling baneling-burrowed
+                     roach roach-burrowed ravager hydralisk hydralisk-burrowed
+                     lurker lurker-mp lurker-burrowed lurker-mp-burrowed
+                     ultralisk ultralisk-burrowed queen queen-burrowed
+                     drone drone-burrowed infestor infestor-burrowed
+                     swarm-host swarm-host-mp swarm-host-burrowed
+                     locust locust-mp broodling))
+       (add-tier-family! observed-upgs arm-lvl
+                         'zerg-ground-carapace-1 'zerg-ground-carapace-2 'zerg-ground-carapace-3)]
+      [(memq utype '(mutalisk corruptor brood-lord overlord overlord-transport overseer viper))
+       (add-tier-family! observed-upgs arm-lvl
+                         'zerg-flyer-carapace-1 'zerg-flyer-carapace-2 'zerg-flyer-carapace-3)]
+      [(memq utype '(marine marauder reaper ghost))
+       (add-tier-family! observed-upgs arm-lvl
+                         'terran-infantry-armor-1 'terran-infantry-armor-2 'terran-infantry-armor-3)]
+      [(memq utype '(hellion hellbat siege-tank siege-tank-sieged cyclone thor thor-ap
+                     widow-mine widow-mine-burrowed viking viking-fighter viking-assault
+                     medivac banshee raven battlecruiser liberator liberator-ag))
+       (add-tier-family! observed-upgs arm-lvl
+                         'terran-vehicle-and-ship-plating-1
+                         'terran-vehicle-and-ship-plating-2
+                         'terran-vehicle-and-ship-plating-3)]
+      [(memq utype '(zealot stalker sentry adept immortal colossus archon
+                     high-templar dark-templar disruptor))
+       (add-tier-family! observed-upgs arm-lvl
+                         'protoss-ground-armor-1 'protoss-ground-armor-2 'protoss-ground-armor-3)]
+      [(memq utype '(phoenix void-ray oracle carrier tempest mothership observer warp-prism))
+       (add-tier-family! observed-upgs arm-lvl
+                         'protoss-air-armor-1 'protoss-air-armor-2 'protoss-air-armor-3)]
+      [else (void)]))
+  (when (and (exact-integer? shd-lvl) (> shd-lvl 0))
+    (add-tier-family! observed-upgs shd-lvl
+                      'protoss-shields-1 'protoss-shields-2 'protoss-shields-3)))
+
+;; L87C Track 1: Record direct visible unupgraded unit observations (`atk-lvl == 0`, `arm-lvl == 0`,
+;; unshielded 45-HP Marine) so fog priors NEVER hallucinate +1/+1 or Combat Shield when we literally
+;; just saw unupgraded units on screen!
+(define (record-unupgraded-evidence! unupg-ht utype frame atk-lvl arm-lvl mhp)
+  (when (and (exact-integer? atk-lvl) (= atk-lvl 0))
+    (cond
+      [(memq utype '(roach roach-burrowed ravager hydralisk hydralisk-burrowed
+                     lurker lurker-mp lurker-burrowed lurker-mp-burrowed))
+       (hash-set! unupg-ht 'zerg-missile-atk-0 frame)]
+      [(memq utype '(zergling zergling-burrowed baneling baneling-burrowed ultralisk ultralisk-burrowed))
+       (hash-set! unupg-ht 'zerg-melee-atk-0 frame)]
+      [(memq utype '(marine marauder))
+       (hash-set! unupg-ht 'terran-inf-atk-0 frame)]
+      [(memq utype '(zealot stalker adept immortal colossus archon))
+       (hash-set! unupg-ht 'protoss-ground-atk-0 frame)]
+      [else (void)]))
+  (when (and (exact-integer? arm-lvl) (= arm-lvl 0))
+    (cond
+      [(memq utype '(zergling zergling-burrowed baneling baneling-burrowed
+                     roach roach-burrowed ravager hydralisk hydralisk-burrowed
+                     lurker lurker-mp lurker-burrowed lurker-mp-burrowed
+                     ultralisk ultralisk-burrowed queen drone))
+       (hash-set! unupg-ht 'zerg-ground-arm-0 frame)]
+      [(memq utype '(marine marauder))
+       (hash-set! unupg-ht 'terran-inf-arm-0 frame)]
+      [(memq utype '(zealot stalker adept immortal colossus archon))
+       (hash-set! unupg-ht 'protoss-ground-arm-0 frame)]
+      [else (void)]))
+  (when (and (eq? utype 'marine) (real? mhp) (> mhp 0.0) (<= mhp 46.0))
+    (hash-set! unupg-ht 'terran-marine-no-cs frame)))
+
+;; Deduplicate generic `enemy-weapons-k`/`enemy-armor-k`/`enemy-shields-k` (`k=1..3`) composite
+;; tokens whenever a specific matching tier-`k` upgrade is already present in `upg-set`.
+(define (dedup-generic-tier1-upgrades! upg-set)
+  (when (for/or ([u (in-list '(terran-infantry-weapons-1 terran-vehicle-weapons-1 terran-ship-weapons-1
+                               protoss-ground-weapons-1 protoss-air-weapons-1
+                               zerg-melee-weapons-1 zerg-missile-weapons-1 zerg-flyer-weapons-1))])
+          (set-member? upg-set u))
+    (set-remove! upg-set 'enemy-weapons-1))
+  (when (for/or ([u (in-list '(terran-infantry-weapons-2 terran-vehicle-weapons-2 terran-ship-weapons-2
+                               protoss-ground-weapons-2 protoss-air-weapons-2
+                               zerg-melee-weapons-2 zerg-missile-weapons-2 zerg-flyer-weapons-2))])
+          (set-member? upg-set u))
+    (set-remove! upg-set 'enemy-weapons-2))
+  (when (for/or ([u (in-list '(terran-infantry-weapons-3 terran-vehicle-weapons-3 terran-ship-weapons-3
+                               protoss-ground-weapons-3 protoss-air-weapons-3
+                               zerg-melee-weapons-3 zerg-missile-weapons-3 zerg-flyer-weapons-3))])
+          (set-member? upg-set u))
+    (set-remove! upg-set 'enemy-weapons-3))
+  (when (for/or ([u (in-list '(terran-infantry-armor-1 terran-vehicle-and-ship-plating-1
+                               protoss-ground-armor-1 protoss-air-armor-1
+                               zerg-ground-carapace-1 zerg-flyer-carapace-1))])
+          (set-member? upg-set u))
+    (set-remove! upg-set 'enemy-armor-1))
+  (when (for/or ([u (in-list '(terran-infantry-armor-2 terran-vehicle-and-ship-plating-2
+                               protoss-ground-armor-2 protoss-air-armor-2
+                               zerg-ground-carapace-2 zerg-flyer-carapace-2))])
+          (set-member? upg-set u))
+    (set-remove! upg-set 'enemy-armor-2))
+  (when (for/or ([u (in-list '(terran-infantry-armor-3 terran-vehicle-and-ship-plating-3
+                               protoss-ground-armor-3 protoss-air-armor-3
+                               zerg-ground-carapace-3 zerg-flyer-carapace-3))])
+          (set-member? upg-set u))
+    (set-remove! upg-set 'enemy-armor-3))
+  (when (set-member? upg-set 'protoss-shields-1)
+    (set-remove! upg-set 'enemy-shields-1))
+  (when (set-member? upg-set 'protoss-shields-2)
+    (set-remove! upg-set 'enemy-shields-2))
+  (when (set-member? upg-set 'protoss-shields-3)
+    (set-remove! upg-set 'enemy-shields-3)))
+
+;; L87B Calibration 4 + L87C Track 1: High-precision evidence-backed upgrade inference for telemetry.
+(define (infer-owm-telemetry-upgrades base-upgs erace frame est-bases est-gases
+                                      bldg-counts implied-set raw-units recent-comp
+                                      #:known-bldgs [known-bldgs #f]
+                                      #:confirmed-geysers [confirmed-geysers 0]
+                                      #:unupg-seen [unupg-seen #f]
+                                      #:tech-first-seen [tech-first-seen #f])
+  (define s (mutable-seteq))
+  (for ([u (in-list base-upgs)])
+    (define nu (normalize-upg-sym u erace))
+    (when nu (set-add! s nu)))
+  (define (direct-bldg-count bsym)
+    (if (hash? known-bldgs)
+        (for/sum ([rec (in-hash-values known-bldgs)]
+                  #:when (eq? (tracked-enemy-bldg-canon-type rec) bsym))
+          1)
+        (hash-ref bldg-counts bsym 0)))
+  (define (has-direct-bldg? bsym)
+    (> (direct-bldg-count bsym) 0))
+  (define (earliest-bldg-ready bsym)
+    (and (hash? known-bldgs)
+         (for/fold ([best #f])
+                   ([rec (in-hash-values known-bldgs)]
+                    #:when (eq? (tracked-enemy-bldg-canon-type rec) bsym))
+           (define rf (tracked-enemy-bldg-ready-frame rec))
+           (if (or (not best) (< rf best)) rf best))))
+  (define (has-bldg? bsym)
+    (or (> (hash-ref bldg-counts bsym 0) 0)
+        (and (generic-set? implied-set) (set-member? implied-set bsym))))
+  (define (recently-seen-unupg? cat-sym [win 2016])
+    (define lf (and (hash? unupg-seen) (hash-ref unupg-seen cat-sym #f)))
+    (and (exact-integer? lf) (<= (- frame lf) win)))
+  (define (tech-age-frames tech-sym)
+    (define ff (and (hash? tech-first-seen) (hash-ref tech-first-seen tech-sym #f)))
+    (if (exact-integer? ff) (max 0 (- frame ff)) 0))
+  (define (u-cnt sym) (recent-or-cur-unit-cnt sym raw-units recent-comp frame))
+  (define (u-sum syms) (sum-recent-or-cur syms raw-units recent-comp frame))
+  (case erace
+    [(Zerg)
+     (define ling-cnt (u-cnt 'zergling))
+     (define roach-cnt (u-cnt 'roach))
+     (define rav-cnt (u-cnt 'ravager))
+     (define hydra-cnt (u-cnt 'hydralisk))
+     (define bane-cnt (u-cnt 'baneling))
+     (define missile-cnt (+ roach-cnt rav-cnt hydra-cnt))
+     ;; L87C Track 1: Never fire Zergling Speed on pure elapsed clock or slowling count!
+     ;; Real Speedlings are detected with 0 FP via Step D kinematic speed (`>= 5.85` t/s) or
+     ;; explicit `'speed`. Fallback ONLY for confirmed Ling/Bane synergy (`>= 4:30`, confirmed
+     ;; gas, Baneling Nest or `>= 2` Banelings, and `>= 6` Zerglings).
+     (when (and (>= frame 6048)
+                (>= confirmed-geysers 1)
+                (>= ling-cnt 6)
+                (or (has-bldg? 'baneling-nest) (>= bane-cnt 2)))
+       (set-add! s 'zergling-movementspeed))
+     ;; L87C Track 1: Roach Speed (`glial-reconstitution`) is detected directly via Step D
+     ;; kinematic velocity (`>= 4.50` t/s anywhere or `>= 3.75` t/s in creep-free own main)
+     ;; or explicit `'speed`, never guessed from clock/Lair/Roach count (avoids FPs on
+     ;; burrow/tunneling or Hatchery-tech Roach builds that skip Roach Speed).
+     ;; Hydralisk Range (`grooved-spines`) & Speed (`muscular-augments`): enforce SC2 Den
+     ;; research-duration physics (`71s` each, `142s` for both sequentially!).
+     (define hydra-tech-age
+       (max (tech-age-frames 'hydralisk-tech)
+            (let ([rf (earliest-bldg-ready 'hydralisk-den)])
+              (if rf (max 0 (- frame rf)) 0))))
+     (when (and (>= frame 9408)
+                (>= hydra-cnt 3)
+                (or (has-bldg? 'hydralisk-den) (>= hydra-cnt 4))
+                (>= hydra-tech-age 1008))
+       (set-add! s 'grooved-spines))
+     (when (and (>= frame 14784)
+                (>= hydra-cnt 6)
+                (has-bldg? 'hydralisk-den)
+                (>= hydra-tech-age 2912))
+       (set-add! s 'muscular-augments))
+     ;; L87C Track 1: Zerg Evo +1 Missile/Melee/Carapace are detected with 0 FP directly from
+     ;; visible unit `attack-upgrade-level` / `armor-upgrade-level` in Step D. Fog fallback
+     ;; strictly requires directly-observed Evolution Chamber(s) AND no recent visible unit
+     ;; with `0` attack/armor refuting the upgrade!
+     (when (and (>= frame 9408)
+                (has-direct-bldg? 'evolution-chamber))
+       (cond
+         [(and (>= missile-cnt 4) (not (recently-seen-unupg? 'zerg-missile-atk-0)))
+          (set-add! s 'zerg-missile-weapons-1)]
+         [(and (>= (+ ling-cnt bane-cnt) 10) (not (recently-seen-unupg? 'zerg-melee-atk-0)))
+          (set-add! s 'zerg-melee-weapons-1)]))
+     (when (and (>= frame 11424)
+                (>= (direct-bldg-count 'evolution-chamber) 2)
+                (>= (+ missile-cnt ling-cnt bane-cnt) 10)
+                (not (recently-seen-unupg? 'zerg-ground-arm-0)))
+       (set-add! s 'zerg-ground-carapace-1))]
+    [(Terran)
+     (define marine-cnt (u-cnt 'marine))
+     (define marauder-cnt (u-cnt 'marauder))
+     (define bio-cnt (+ marine-cnt marauder-cnt))
+     (define banshee-cnt (u-cnt 'banshee))
+     ;; Concussive Shells: Barracks TechLab + >= 2 Marauders past 4:00 (`5376f`)
+     (when (and (>= frame 5376)
+                (>= marauder-cnt 2)
+                (or (has-bldg? 'barracks-techlab) (>= marauder-cnt 3)))
+       (set-add! s 'concussive-shells))
+     ;; Stimpack: Barracks TechLab + >= 10 bio past 6:00 (`8064f`)
+     (when (and (>= frame 8064)
+                (>= bio-cnt 10)
+                (or (has-bldg? 'barracks-techlab) (>= marauder-cnt 2)))
+       (set-add! s 'stimpack))
+     ;; Combat Shield: Barracks TechLab + >= 10 Marines past 7:30 (`10080f`), unless 45-HP Marines observed
+     (when (and (>= frame 10080)
+                (>= marine-cnt 10)
+                (or (has-bldg? 'barracks-techlab) (>= marauder-cnt 2))
+                (not (recently-seen-unupg? 'terran-marine-no-cs)))
+       (set-add! s 'combat-shield))
+     ;; Cloaking Field: >= 2 Banshees past 4:30 (`6048f`) (direct cloak in Step D fires at any time)
+     (when (and (>= frame 6048) (>= banshee-cnt 2))
+       (set-add! s 'cloaking-field))
+     ;; Terran Infantry +1/+1 past 6:30 / 8:00 unless recently refuted by 0-upgrade bio units
+     (when (and (>= frame 8736)
+                (>= bio-cnt 8)
+                (or (has-bldg? 'engineering-bay) (>= est-bases 2))
+                (not (recently-seen-unupg? 'terran-inf-atk-0)))
+       (set-add! s 'terran-infantry-weapons-1))
+     (when (and (>= frame 10752)
+                (>= bio-cnt 12)
+                (or (has-bldg? 'engineering-bay) (>= est-bases 3))
+                (not (recently-seen-unupg? 'terran-inf-arm-0)))
+       (set-add! s 'terran-infantry-armor-1))]
+    [(Protoss)
+     (define zealot-cnt (u-cnt 'zealot))
+     (define stalker-cnt (u-cnt 'stalker))
+     (define colossus-cnt (u-cnt 'colossus))
+     (define gw-cnt (u-sum '(zealot stalker sentry adept)))
+     (define p-ground-cnt (+ gw-cnt (u-sum '(immortal colossus archon high-templar dark-templar))))
+     ;; Warp Gate Research past 4:00 (`5376f`) once CyberCore or >= 3 Gateway units seen
+     (when (and (>= frame 5376)
+                (or (has-bldg? 'cybernetics-core) (>= gw-cnt 3)))
+       (set-add! s 'warp-gate-research))
+     ;; Charge / Blink when Twilight Council observed + matching unit mass past 5:30 (`7392f`)
+     ;; (Exclude DT-prereq Twilight Council with small Zealot counts; kinematic Charge still fires!)
+     (when (and (>= frame 7392)
+                (has-bldg? 'twilight-council)
+                (>= zealot-cnt 4)
+                (or (>= zealot-cnt 6) (not (has-bldg? 'dark-shrine))))
+       (set-add! s 'charge))
+     (when (and (>= frame 7392) (has-bldg? 'twilight-council) (>= stalker-cnt 5))
+       (set-add! s 'blink))
+     ;; Extended Thermal Lance when Colossus + Robo Bay past 7:30 (`10080f`)
+     (when (and (>= frame 10080)
+                (>= colossus-cnt 1)
+                (or (has-bldg? 'robotics-bay) (>= colossus-cnt 2)))
+       (set-add! s 'extended-thermal-lance))
+     ;; Protoss Ground Weapons +1 past 6:30 (`8736f`) unless refuted by recent 0-attack ground units
+     (when (and (>= frame 8736)
+                (>= est-bases 2)
+                (or (has-bldg? 'forge)
+                    (and (>= est-bases 3) (>= p-ground-cnt 6)))
+                (not (recently-seen-unupg? 'protoss-ground-atk-0)))
+       (set-add! s 'protoss-ground-weapons-1))]
+    [else (void)])
+  (dedup-generic-tier1-upgrades! s)
+  (sort (set->list s) symbol<?))
+
+;; Extract observed/inferred upgrade symbols from `mmstate` (`mirror-mind-state`,
+;; `enemy-tech-observation`, hash, list, or set) without importing `mirror-mind-predictor.rkt`.
+(define (extract-mmstate-upgrades mmstate [erace 'Unknown])
+  (define out (mutable-seteq))
+  (define (add-any! x)
+    (cond
+      [(not x) (void)]
+      [(list? x)
+       (for ([elem (in-list x)])
+         (define nu (normalize-upg-sym elem erace))
+         (when nu (set-add! out nu)))]
+      [(generic-set? x)
+       (for ([elem (in-set x)])
+         (define nu (normalize-upg-sym elem erace))
+         (when nu (set-add! out nu)))]
+      [else
+       (define nu (normalize-upg-sym x erace))
+       (when nu (set-add! out nu))]))
+  (define (walk! obj)
+    (cond
+      [(not obj) (void)]
+      [(or (list? obj) (generic-set? obj)) (add-any! obj)]
+      [(hash? obj)
+       (when (hash-has-key? obj 'last-tech-observation)
+         (walk! (hash-ref obj 'last-tech-observation #f)))
+       (when (hash-has-key? obj 'observed-upgrades)
+         (add-any! (hash-ref obj 'observed-upgrades '())))
+       (when (hash-has-key? obj 'upgrades)
+         (add-any! (hash-ref obj 'upgrades '())))]
+      [(struct? obj)
+       (define v (struct->vector obj))
+       (when (> (vector-length v) 1)
+         (case (vector-ref v 0)
+           [(struct:enemy-tech-observation)
+            (add-any! (vector-ref v 1))]
+           [(struct:mirror-mind-state)
+            (for ([i (in-range 1 (vector-length v))])
+              (define elem (vector-ref v i))
+              (when (struct? elem)
+                (define ev (struct->vector elem))
+                (when (and (> (vector-length ev) 1)
+                           (eq? (vector-ref ev 0) 'struct:enemy-tech-observation))
+                  (add-any! (vector-ref ev 1)))))]
+           [else (void)]))]
+      [else (void)]))
+  (walk! mmstate)
+  (set->list out))
+
+;; Exported full 7-dimension OWM belief telemetry snapshot.
+;; Returns a clean immutable `hasheq` for logging (`format-owm-belief-log-line`) and
+;; replay-vs-belief accuracy auditing (`tools/audit-owm-belief-accuracy.py`).
+(define (owm-belief-telemetry-snapshot owm-or-sum [mmstate #f] [frame 0])
+  (define owm (and (opponent-world-model? owm-or-sum) owm-or-sum))
+  (define summary
+    (cond
+      [(opponent-world-summary? owm-or-sum) owm-or-sum]
+      [owm (opponent-world-model-last-summary owm)]
+      [else #f]))
+  (define ring-st
+    (or (and summary (owm-l86-ring-state summary))
+        (and owm (owm-l86-ring-state owm))))
+  (define eff-frame
+    (cond
+      [(and (exact-integer? frame) (> frame 0)) frame]
+      [(and (real? frame) (> frame 0)) (exact-round frame)]
+      [summary (opponent-world-summary-frame summary)]
+      [owm (max 0 (opponent-world-model-last-frame owm))]
+      [else 0]))
+  (define erace
+    (cond
+      [summary (opponent-world-summary-enemy-race summary)]
+      [owm (opponent-world-model-enemy-race owm)]
+      [else 'Unknown]))
+  (define conf-bases
+    (if summary (opponent-world-summary-confirmed-bases summary) 1))
+  (define est-bases
+    (max conf-bases
+         (if (hash? ring-st) (hash-ref ring-st 'estimated-enemy-bases conf-bases) conf-bases)))
+  (define conf-gases
+    (if summary (opponent-world-summary-confirmed-geysers summary) 0))
+  (define est-gases
+    (max conf-gases
+         (if (hash? ring-st) (hash-ref ring-st 'estimated-enemy-gases conf-gases) conf-gases)))
+  (define est-workers
+    (if summary (opponent-world-summary-estimated-workers summary) 0))
+  (define seen-workers
+    (cond
+      [(and (hash? ring-st) (hash-has-key? ring-st 'seen-workers))
+       (hash-ref ring-st 'seen-workers 0)]
+      [summary
+       (for/sum ([(ut cnt) (in-hash (opponent-world-summary-known-unit-counts summary))]
+                 #:when (hash-has-key? WORKER-SYM-SET ut))
+         cnt)]
+      [else 0]))
+  (define est-min-rate
+    (if (hash? ring-st) (hash-ref ring-st 'min-rate-per-min 0) 0))
+  (define est-gas-rate
+    (if (hash? ring-st) (hash-ref ring-st 'gas-rate-per-min 0) 0))
+  (define cum-min
+    (if summary (opponent-world-summary-cum-minerals-mined summary) 0))
+  (define cum-gas
+    (if summary (opponent-world-summary-cum-gas-mined summary) 0))
+  (define prod-ht
+    (cond
+      [(and (hash? ring-st) (hash-has-key? ring-st 'prod-counts))
+       (hash-ref ring-st 'prod-counts (hasheq))]
+      [owm
+       (compute-owm-prod-counts (opponent-world-model-known-bldgs owm)
+                                (opponent-world-model-implied-tech-set owm)
+                                (opponent-world-model-destroyed-tech-set owm)
+                                erace
+                                est-bases)]
+      [summary
+       (derive-prod-counts-from-bldg-hash (opponent-world-summary-known-bldg-counts summary)
+                                          erace
+                                          est-bases)]
+      [else (hasheq)]))
+  (define units-ht
+    (cond
+      [(and (hash? ring-st) (hash-has-key? ring-st 'combat-unit-counts))
+       (hash-ref ring-st 'combat-unit-counts (hasheq))]
+      [summary
+       (for/hasheq ([(ut cnt) (in-hash (opponent-world-summary-known-unit-counts summary))]
+                    #:when (and (> cnt 0)
+                                (not (hash-has-key? WORKER-SYM-SET ut))
+                                (not (hash-has-key? FREE-SUMMON-SET ut))
+                                (not (hash-has-key? TOWNHALL-SYM-SET ut))
+                                (not (hash-has-key? GEYSER-BLDG-SYM-SET ut))
+                                (not (memq ut '(overlord overlord-transport dropperlord
+                                                bunker photon-cannon shield-battery
+                                                spine-crawler spore-crawler missile-turret
+                                                creep-tumor creep-tumor-burrowed creep-tumor-queen
+                                                sensor-tower nydus-worm nydus-canal
+                                                supply-depot pylon)))))
+         (values ut cnt))]
+      [else (hasheq)]))
+  (define owm-upgs
+    (cond
+      [(and (hash? ring-st) (hash-has-key? ring-st 'owm-upgrades))
+       (hash-ref ring-st 'owm-upgrades '())]
+      [owm
+       (collect-owm-upgrade-symbols (opponent-world-model-observed-upgrades-set owm)
+                                    (opponent-world-model-max-atk-upg owm)
+                                    (opponent-world-model-max-arm-upg owm)
+                                    (opponent-world-model-max-shd-upg owm)
+                                    erace)]
+      [else '()]))
+  (define merged-upgs
+    (let ([s (mutable-seteq)])
+      (for ([u (in-list owm-upgs)])
+        (define nu (normalize-upg-sym u erace))
+        (when nu (set-add! s nu)))
+      (for ([u (in-list (extract-mmstate-upgrades mmstate erace))])
+        (define nu (normalize-upg-sym u erace))
+        (when nu (set-add! s nu)))
+      (dedup-generic-tier1-upgrades! s)
+      (sort (set->list s) symbol<?)))
+  (define unseen-min
+    (if summary (opponent-world-summary-unaccounted-minerals summary) 0))
+  (define unseen-gas
+    (if summary (opponent-world-summary-unaccounted-gas summary) 0))
+  (define believed-army-val
+    (cond
+      [(and (hash? ring-st) (hash-has-key? ring-st 'believed-army-val-unweighted))
+       (hash-ref ring-st 'believed-army-val-unweighted 0)]
+      [summary (opponent-world-summary-believed-total-army-value summary)]
+      [else 0]))
+  (hasheq 'frame eff-frame
+          'confirmed-bases conf-bases
+          'estimated-bases est-bases
+          'confirmed-gases conf-gases
+          'estimated-gases est-gases
+          'est-workers est-workers
+          'seen-workers seen-workers
+          'est-min-rate est-min-rate
+          'est-gas-rate est-gas-rate
+          'cum-min cum-min
+          'cum-gas cum-gas
+          'prod prod-ht
+          'upgrades merged-upgs
+          'units units-ht
+          'unseen-min unseen-min
+          'unseen-gas unseen-gas
+          'believed-army-val believed-army-val))

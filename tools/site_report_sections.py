@@ -2993,9 +2993,336 @@ def render_historical_faults_details(rich: Dict[str, Any]) -> str:
 """
 
 
+def _svg_tile_grid_lines(ox: int, oy: int, cols: int, rows: int, tile: int) -> str:
+    """Emit crisp subtle tile-grid lines for inline walling blueprint SVGs."""
+    w = cols * tile
+    h = rows * tile
+    parts: List[str] = [
+        f'<rect x="{ox}" y="{oy}" width="{w}" height="{h}" fill="#FFFDF9" stroke="#DDD6C8" stroke-width="1" />'
+    ]
+    for c in range(1, cols):
+        x = ox + c * tile
+        parts.append(
+            f'<line x1="{x}" y1="{oy}" x2="{x}" y2="{oy + h}" stroke="#EFEAE0" stroke-width="0.75" />'
+        )
+    for r in range(1, rows):
+        y = oy + r * tile
+        parts.append(
+            f'<line x1="{ox}" y1="{y}" x2="{ox + w}" y2="{y}" stroke="#EFEAE0" stroke-width="0.75" />'
+        )
+    return "\n  ".join(parts)
+
+
+def _render_walling_blueprints_and_clips(
+    staged_mp4_map: Optional[Dict[str, str]] = None,
+    staged_poster_map: Optional[Dict[str, str]] = None,
+) -> str:
+    """Render the 3 inline SVG tile-grid wall blueprints + 2-row 6-clip wall/punish showcase."""
+    mp4_map = staged_mp4_map or {}
+    poster_map = staged_poster_map or {}
+
+    grid_14x9 = _svg_tile_grid_lines(30, 38, 14, 9, 20)
+    grid_17x12 = _svg_tile_grid_lines(42, 38, 17, 12, 15)
+
+    svg_terran_ramp = f"""<svg viewBox="0 0 340 272" width="100%" role="img" aria-label="Tile-grid diagram of Mothman's Terran main-ramp wall with two Supply Depots, a Barracks, and an interior east-side add-on pad" xmlns="http://www.w3.org/2000/svg" style="display:block;font-family:system-ui,-apple-system,sans-serif;">
+  <rect x="4" y="4" width="332" height="264" rx="10" fill="#FAF6F0" stroke="#DDD6C8" stroke-width="1.2" />
+  <text x="170" y="25" text-anchor="middle" fill="#1F1F1D" font-size="11.5" font-weight="700">Terran Main-Ramp Gate (3-Piece)</text>
+  {grid_14x9}
+
+  <!-- Ramp lane sloping uphill left to right -->
+  <rect x="30" y="78" width="120" height="80" fill="#F2ECE1" opacity="0.85" />
+  <line x1="90" y1="80" x2="90" y2="156" stroke="#D5CCB9" stroke-width="1" stroke-dasharray="2,3" />
+  <line x1="110" y1="80" x2="110" y2="156" stroke="#D5CCB9" stroke-width="1" stroke-dasharray="2,3" />
+  <text x="60" y="122" text-anchor="middle" fill="#767168" font-size="8.8" font-weight="700" letter-spacing="0.06em">RAMP</text>
+  <text x="262" y="53" text-anchor="middle" fill="#6E6B64" font-size="8.8" font-weight="600">Main Base</text>
+
+  <!-- Cliff edges framing the main ramp -->
+  <path d="M 30 38 H 190 V 58 H 110 V 78 H 30 Z" fill="#DED7C8" stroke="#9B9486" stroke-width="1.4" />
+  <path d="M 30 178 H 130 V 198 H 170 V 218 H 30 Z" fill="#DED7C8" stroke="#9B9486" stroke-width="1.4" />
+  <text x="72" y="52" text-anchor="middle" fill="#6D685E" font-size="8.2" font-weight="600">Cliff edge</text>
+  <text x="78" y="211" text-anchor="middle" fill="#6D685E" font-size="8.2" font-weight="600">Cliff edge</text>
+
+  <!-- Top 2x2 Supply Depot (raise/lower gate) -->
+  <rect x="150" y="58" width="40" height="40" rx="3" fill="#E4F3E9" stroke="#2E6F4E" stroke-width="1.8" />
+  <rect x="154" y="62" width="32" height="32" rx="2" fill="none" stroke="#2E6F4E" stroke-width="0.9" stroke-dasharray="3,2" />
+  <text x="170" y="75" text-anchor="middle" fill="#1E4D35" font-size="8.8" font-weight="700">Depot</text>
+  <text x="170" y="88" text-anchor="middle" fill="#235B3D" font-size="8" font-weight="700">Gate</text>
+
+  <!-- Center 3x3 Barracks -->
+  <rect x="150" y="98" width="60" height="60" rx="3" fill="#DCE8F0" stroke="#35556B" stroke-width="1.8" />
+  <text x="180" y="125" text-anchor="middle" fill="#243E50" font-size="9.6" font-weight="700">Barracks</text>
+  <text x="180" y="139" text-anchor="middle" fill="#4A6B82" font-size="8.4" font-weight="600">3&#215;3</text>
+
+  <!-- Interior east-side 2x2 Add-on pad -->
+  <rect x="210" y="118" width="40" height="40" rx="3" fill="#EEF6F1" stroke="#2E6F4E" stroke-width="1.5" stroke-dasharray="4,2.5" />
+  <text x="230" y="135" text-anchor="middle" fill="#235B3D" font-size="8.4" font-weight="700">Add-on</text>
+  <text x="230" y="147" text-anchor="middle" fill="#2E6F4E" font-size="7.8" font-weight="600">Inside</text>
+
+  <!-- Bottom 2x2 Supply Depot -->
+  <rect x="130" y="158" width="40" height="40" rx="3" fill="#DCE8F0" stroke="#4A6B82" stroke-width="1.8" />
+  <text x="150" y="176" text-anchor="middle" fill="#243E50" font-size="8.8" font-weight="700">Depot</text>
+  <text x="150" y="189" text-anchor="middle" fill="#4A6B82" font-size="8.2" font-weight="600">2&#215;2</text>
+
+  <!-- Blocked attackers outside vs Marines behind the high-ground wall -->
+  <circle cx="112" cy="108" r="4.8" fill="#C4633E" stroke="#8C3D20" stroke-width="1" />
+  <circle cx="122" cy="126" r="4.8" fill="#C4633E" stroke="#8C3D20" stroke-width="1" />
+  <circle cx="110" cy="142" r="4.8" fill="#C4633E" stroke="#8C3D20" stroke-width="1" />
+  <line x1="144" y1="100" x2="144" y2="154" stroke="#B43C2E" stroke-width="2" stroke-dasharray="4,2" />
+
+  <circle cx="242" cy="76" r="4.8" fill="#35556B" stroke="#1E3444" stroke-width="1" />
+  <circle cx="258" cy="84" r="4.8" fill="#35556B" stroke="#1E3444" stroke-width="1" />
+  <circle cx="272" cy="74" r="4.8" fill="#35556B" stroke="#1E3444" stroke-width="1" />
+  <text x="258" y="100" text-anchor="middle" fill="#35556B" font-size="8.2" font-weight="600">Marines</text>
+
+  <!-- Bottom summary pill -->
+  <rect x="18" y="230" width="304" height="26" rx="6" fill="#E6EEF4" stroke="#BACEDB" stroke-width="1" />
+  <text x="170" y="247" text-anchor="middle" fill="#243E50" font-size="9.6" font-weight="700">Sealed to Zerglings &#183; Front Depot lowers for troops</text>
+</svg>"""
+
+    svg_protoss_ramp = f"""<svg viewBox="0 0 340 272" width="100%" role="img" aria-label="Tile-grid diagram of Mothman's Protoss main-ramp wall with Gateway, Cybernetics Core, one-tile doorway, and interior Pylon power field" xmlns="http://www.w3.org/2000/svg" style="display:block;font-family:system-ui,-apple-system,sans-serif;">
+  <defs>
+    <clipPath id="clip-wall-p-ramp"><rect x="30" y="38" width="280" height="180" /></clipPath>
+  </defs>
+  <rect x="4" y="4" width="332" height="264" rx="10" fill="#FAF6F0" stroke="#DDD6C8" stroke-width="1.2" />
+  <text x="170" y="25" text-anchor="middle" fill="#1F1F1D" font-size="11.5" font-weight="700">Protoss Main-Ramp Wall (1-Tile Door)</text>
+  {grid_14x9}
+
+  <!-- Ramp lane -->
+  <rect x="30" y="58" width="120" height="140" fill="#F2ECE1" opacity="0.82" />
+  <line x1="90" y1="62" x2="90" y2="194" stroke="#D5CCB9" stroke-width="1" stroke-dasharray="2,3" />
+  <line x1="110" y1="62" x2="110" y2="194" stroke="#D5CCB9" stroke-width="1" stroke-dasharray="2,3" />
+  <text x="60" y="131" text-anchor="middle" fill="#767168" font-size="8.8" font-weight="700" letter-spacing="0.06em">RAMP</text>
+  <text x="262" y="53" text-anchor="middle" fill="#6E6B64" font-size="8.8" font-weight="600">Main Base</text>
+
+  <!-- 6.5-tile interior Pylon power field -->
+  <circle cx="250" cy="118" r="126" fill="rgba(59,119,168,0.08)" stroke="#4A87BA" stroke-width="1.35" stroke-dasharray="4,3" clip-path="url(#clip-wall-p-ramp)" />
+
+  <!-- Cliff edges -->
+  <rect x="30" y="38" width="180" height="20" fill="#DED7C8" stroke="#9B9486" stroke-width="1.4" />
+  <rect x="30" y="198" width="180" height="20" fill="#DED7C8" stroke="#9B9486" stroke-width="1.4" />
+  <text x="86" y="51" text-anchor="middle" fill="#6D685E" font-size="8.2" font-weight="600">Cliff edge</text>
+  <text x="86" y="211" text-anchor="middle" fill="#6D685E" font-size="8.2" font-weight="600">Cliff edge</text>
+
+  <!-- Top 3x3 Gateway -->
+  <rect x="150" y="58" width="60" height="60" rx="3" fill="#FAF1DC" stroke="#B57C2A" stroke-width="1.8" />
+  <text x="180" y="85" text-anchor="middle" fill="#6E470D" font-size="9.6" font-weight="700">Gateway</text>
+  <text x="180" y="99" text-anchor="middle" fill="#9A6820" font-size="8.4" font-weight="600">3&#215;3</text>
+
+  <!-- 1-Tile Doorway with Hold Position Zealot / emergency plug -->
+  <rect x="150" y="118" width="20" height="20" fill="#E4F3E9" stroke="#2E6F4E" stroke-width="1.4" stroke-dasharray="3,2" />
+  <circle cx="160" cy="128" r="5.6" fill="#C4633E" stroke="#8C3D20" stroke-width="1.1" />
+  <text x="175" y="131" fill="#235B3D" font-size="8.4" font-weight="700">1t door</text>
+
+  <!-- Bottom 3x3 Cybernetics Core -->
+  <rect x="150" y="138" width="60" height="60" rx="3" fill="#FAF1DC" stroke="#B57C2A" stroke-width="1.8" />
+  <text x="180" y="165" text-anchor="middle" fill="#6E470D" font-size="9.3" font-weight="700">Cyber Core</text>
+  <text x="180" y="179" text-anchor="middle" fill="#9A6820" font-size="8.4" font-weight="600">3&#215;3</text>
+
+  <!-- Rear Interior 2x2 Pylon -->
+  <rect x="230" y="98" width="40" height="40" rx="3" fill="#E2EEF8" stroke="#3B77A8" stroke-width="1.8" />
+  <text x="250" y="116" text-anchor="middle" fill="#244F74" font-size="8.8" font-weight="700">Pylon</text>
+  <text x="250" y="129" text-anchor="middle" fill="#3B77A8" font-size="8" font-weight="600">2&#215;2</text>
+  <text x="256" y="153" text-anchor="middle" fill="#3B77A8" font-size="8.2" font-weight="600">6.5t power</text>
+  <text x="256" y="182" text-anchor="middle" fill="#8C3D20" font-size="8" font-weight="600">Cancelable plug</text>
+  <text x="256" y="193" text-anchor="middle" fill="#8C3D20" font-size="8" font-weight="600">if rushed</text>
+
+  <!-- Blocked attackers outside -->
+  <circle cx="114" cy="112" r="4.6" fill="#4A6B82" stroke="#243E50" stroke-width="1" />
+  <circle cx="124" cy="128" r="4.6" fill="#4A6B82" stroke="#243E50" stroke-width="1" />
+  <circle cx="114" cy="144" r="4.6" fill="#4A6B82" stroke="#243E50" stroke-width="1" />
+
+  <!-- Bottom summary pill -->
+  <rect x="18" y="230" width="304" height="26" rx="6" fill="#FAF1DC" stroke="#DFC48C" stroke-width="1" />
+  <text x="170" y="247" text-anchor="middle" fill="#6E470D" font-size="9.6" font-weight="700">1-tile unit door &#183; Protected rear Pylon (6.5t field)</text>
+</svg>"""
+
+    svg_protoss_nat = f"""<svg viewBox="0 0 340 272" width="100%" role="img" aria-label="Tile-grid diagram of Mothman's Protoss natural-choke wall with three 3x3 structures, interior Pylon, reserved doorway corridor, Hold Position Zealot, and natural Nexus" xmlns="http://www.w3.org/2000/svg" style="display:block;font-family:system-ui,-apple-system,sans-serif;">
+  <defs>
+    <clipPath id="clip-wall-p-nat"><rect x="42" y="38" width="255" height="180" /></clipPath>
+  </defs>
+  <rect x="4" y="4" width="332" height="264" rx="10" fill="#FAF6F0" stroke="#DDD6C8" stroke-width="1.2" />
+  <text x="170" y="25" text-anchor="middle" fill="#1F1F1D" font-size="11.5" font-weight="700">Protoss Natural-Choke Wall (Wide)</text>
+  {grid_17x12}
+
+  <!-- 6.5-tile Pylon power circle covering all 3 front wall buildings -->
+  <circle cx="177" cy="113" r="97.5" fill="rgba(59,119,168,0.08)" stroke="#4A87BA" stroke-width="1.3" stroke-dasharray="4,3" clip-path="url(#clip-wall-p-nat)" />
+
+  <!-- Reserved permanent doorway corridor (zero self-traps) -->
+  <rect x="117" y="135" width="88" height="31" rx="3" fill="rgba(46,111,78,0.13)" stroke="#2E6F4E" stroke-width="1.1" stroke-dasharray="3,2.5" />
+  <text x="161" y="153" text-anchor="middle" fill="#235B3D" font-size="8.2" font-weight="700">Door corridor</text>
+
+  <!-- Top & bottom choke cliffs -->
+  <rect x="42" y="38" width="105" height="15" fill="#DED7C8" stroke="#9B9486" stroke-width="1.3" />
+  <rect x="42" y="203" width="105" height="15" fill="#DED7C8" stroke="#9B9486" stroke-width="1.3" />
+  <text x="68" y="72" text-anchor="middle" fill="#767168" font-size="8.2" font-weight="700" letter-spacing="0.05em">OUTSIDE</text>
+
+  <!-- 3 front 3x3 structures spanning wide natural choke -->
+  <rect x="102" y="53" width="45" height="45" rx="3" fill="#FAF1DC" stroke="#B57C2A" stroke-width="1.7" />
+  <text x="124.5" y="74" text-anchor="middle" fill="#6E470D" font-size="8.6" font-weight="700">Gateway</text>
+  <text x="124.5" y="86" text-anchor="middle" fill="#9A6820" font-size="7.8" font-weight="600">3&#215;3</text>
+
+  <rect x="87" y="98" width="45" height="45" rx="3" fill="#FAF1DC" stroke="#B57C2A" stroke-width="1.7" />
+  <text x="109.5" y="119" text-anchor="middle" fill="#6E470D" font-size="8.6" font-weight="700">Cyber</text>
+  <text x="109.5" y="131" text-anchor="middle" fill="#6E470D" font-size="8.6" font-weight="700">Core</text>
+
+  <!-- 1-tile door + Hold Position Zealot -->
+  <rect x="102" y="143" width="15" height="15" fill="#E4F3E9" stroke="#2E6F4E" stroke-width="1.3" />
+  <circle cx="109.5" cy="150.5" r="5" fill="#C4633E" stroke="#8C3D20" stroke-width="1.1" />
+
+  <rect x="102" y="158" width="45" height="45" rx="3" fill="#FAF1DC" stroke="#B57C2A" stroke-width="1.7" />
+  <text x="124.5" y="179" text-anchor="middle" fill="#6E470D" font-size="8.6" font-weight="700">Gateway</text>
+  <text x="124.5" y="191" text-anchor="middle" fill="#9A6820" font-size="7.8" font-weight="600">3&#215;3</text>
+
+  <!-- Interior 2x2 Pylon -->
+  <rect x="162" y="98" width="30" height="30" rx="3" fill="#E2EEF8" stroke="#3B77A8" stroke-width="1.7" />
+  <text x="177" y="116" text-anchor="middle" fill="#244F74" font-size="8.2" font-weight="700">Pylon</text>
+  <text x="177" y="91" text-anchor="middle" fill="#3B77A8" font-size="8" font-weight="600">6.5t field</text>
+
+  <!-- Natural 5x5 Nexus + Mineral Patches -->
+  <rect x="207" y="83" width="75" height="75" rx="4" fill="#F4E4BE" stroke="#A36B1E" stroke-width="1.8" />
+  <text x="244.5" y="117" text-anchor="middle" fill="#5D3B09" font-size="9.5" font-weight="700">Natural</text>
+  <text x="244.5" y="131" text-anchor="middle" fill="#7C5214" font-size="8.4" font-weight="600">Nexus 5&#215;5</text>
+
+  <rect x="285" y="87" width="9" height="11" rx="2" fill="#4A87BA" />
+  <rect x="285" y="105" width="9" height="11" rx="2" fill="#4A87BA" />
+  <rect x="285" y="123" width="9" height="11" rx="2" fill="#4A87BA" />
+  <rect x="285" y="141" width="9" height="11" rx="2" fill="#4A87BA" />
+
+  <!-- Zerglings held outside -->
+  <circle cx="66" cy="138" r="4" fill="#C4633E" stroke="#8C3D20" stroke-width="0.9" />
+  <circle cx="76" cy="151" r="4" fill="#C4633E" stroke="#8C3D20" stroke-width="0.9" />
+  <circle cx="66" cy="164" r="4" fill="#C4633E" stroke="#8C3D20" stroke-width="0.9" />
+  <circle cx="84" cy="159" r="4" fill="#C4633E" stroke="#8C3D20" stroke-width="0.9" />
+  <text x="69" y="182" text-anchor="middle" fill="#8C3D20" font-size="7.8" font-weight="600">Zealot</text>
+  <text x="69" y="192" text-anchor="middle" fill="#8C3D20" font-size="7.8" font-weight="600">1t door</text>
+
+  <!-- Bottom summary pill -->
+  <rect x="18" y="230" width="304" height="26" rx="6" fill="#E4F3E9" stroke="#B4D7BF" stroke-width="1" />
+  <text x="170" y="247" text-anchor="middle" fill="#235B3D" font-size="9.6" font-weight="700">Reserved corridor &#183; Zero self-traps &#183; Zealot plug</text>
+</svg>"""
+
+    blueprints_html = f"""
+    <div class="visual-explainer-card">
+      <div class="ve-header">
+        <h4>Wall Blueprints</h4>
+        <span class="wall-bp-sub">Tile-grid layouts solved dynamically per map spawn</span>
+      </div>
+      <div class="wall-blueprint-grid">
+        <div class="wall-bp-card">
+          <div class="ve-svg-wrap">{svg_terran_ramp}</div>
+          <p class="ve-cap">
+            A 3&#215;3 Barracks and two 2&#215;2 Supply Depots seal the top of the main ramp.
+            The Barracks add-on stays inside the base while either Depot drops on command for friendly troops.
+          </p>
+        </div>
+        <div class="wall-bp-card">
+          <div class="ve-svg-wrap">{svg_protoss_ramp}</div>
+          <p class="ve-cap">
+            Two 3&#215;3 buildings anchor to the cliff edges around a one-tile door.
+            A rear Pylon powers the wall from inside, and an emergency Pylon or Shield Battery plugs the door against early floods.
+          </p>
+        </div>
+        <div class="wall-bp-card">
+          <div class="ve-svg-wrap">{svg_protoss_nat}</div>
+          <p class="ve-cap">
+            Wide natural chokes use three 3&#215;3 structures powered by an interior Pylon.
+            A reserved doorway corridor keeps worker and army pathing open while one Hold Position Zealot seals the entrance.
+          </p>
+        </div>
+      </div>
+    </div>
+"""
+
+    wall_rows = [
+        (
+            "Our Walls in Action",
+            "Live wins showing Mothman's ramp and natural walls absorbing early aggression.",
+            [
+                (
+                    "wall:terran_main_ramp",
+                    "Terran · TvZ · Incorporeal AIE · Win",
+                    "Terran Main-Ramp Depot Gate",
+                    "Two Supply Depots and a Barracks seal the main ramp with the Tech Lab tucked inside. The front Depot lowers right on cue as Marines march out to clear incoming Zerglings.",
+                ),
+                (
+                    "wall:protoss_main_ramp",
+                    "Protoss · PvP · Incorporeal AIE · Win",
+                    "Protoss Tight Main-Ramp Wall",
+                    "Two Gateways and a Cybernetics Core pinch the high-ground ramp behind a safe rear Pylon. Stalkers and Zealots hold the choke against an uphill push and drive back down the ramp.",
+                ),
+                (
+                    "wall:protoss_nat_choke",
+                    "Protoss · PvZ · Ultralove AIE · Win",
+                    "Protoss Natural-Choke Zealot Hold",
+                    "Two Gateways and a Cybernetics Core span the natural entrance in front of the second Nexus. A single Zealot holds the one-tile doorway while ranged troops clear Zerglings outside the wall.",
+                ),
+            ],
+        ),
+        (
+            "Wall-Punish & Wall-Break Strategies",
+            "How Mothman exploits unsealed openings or smashes straight through completed enemy walls.",
+            [
+                (
+                    "punish:zerg_open_wall",
+                    "Zerg · ZvP · Persephone AIE · Win",
+                    "Open-Wall Speedling Flood",
+                    "The opponent spreads a Gateway and Cybernetics Core without sealing the entrance. Mothman's Zerglings sprint straight past the gap and cut down Protoss workers across the mineral line.",
+                ),
+                (
+                    "punish:protoss_adept_shade",
+                    "Protoss · PvT · Persephone AIE · Win",
+                    "Open-Natural Adept Shade Harass",
+                    "The Terran main ramp is sealed, but the natural expansion sits unguarded. Adepts chain Shades past the ramp straight into the open natural to pick off workers while Marines chase.",
+                ),
+                (
+                    "punish:terran_wall_break",
+                    "Terran · TvP · Torches AIE · Win",
+                    "Proxy 2-Rax Marauder Wall-Break",
+                    "When Protoss seals the natural with Gateways and a Cybernetics Core, early Marauders and Marines focus down the front Gateway, tear open the choke, and flood the expansion.",
+                ),
+            ],
+        ),
+    ]
+
+    clips_sections: List[str] = []
+    for row_title, row_desc, specs in wall_rows:
+        cards: List[str] = []
+        for key, meta_l, title, cap in specs:
+            src = mp4_map.get(key)
+            if not src:
+                continue
+            poster = poster_map.get(key, "")
+            media_html = render_video_element(
+                src=src,
+                poster=poster,
+                title=title,
+                download_url=src,
+                playable_mp4=True,
+            )
+            cards.append(
+                f'<article class="clip-card">'
+                f'<div class="gallery-meta-row"><span>{html.escape(meta_l)}</span></div>'
+                f"<h5>{html.escape(title)}</h5>"
+                f'<figure class="clip-figure">{media_html}<figcaption>{html.escape(cap)}</figcaption></figure>'
+                f"</article>"
+            )
+        if cards:
+            clips_sections.append(
+                f'<div class="wall-clips-group">'
+                f'<h4 class="wall-row-title">{html.escape(row_title)}</h4>'
+                f'<p class="wall-row-desc">{html.escape(row_desc)}</p>'
+                f'<div class="wall-clips-grid">{"".join(cards)}</div>'
+                f"</div>"
+            )
+
+    return blueprints_html + "".join(clips_sections)
+
+
 def render_matchup_evaluation_section(
     rich: Dict[str, Any],
     section_num: str = "Section 2",
+    staged_mp4_map: Optional[Dict[str, str]] = None,
+    staged_poster_map: Optional[Dict[str, str]] = None,
 ) -> str:
     mus = rich["matchups"]
     cb = rich.get("current_build") or {}
@@ -3278,6 +3605,10 @@ def render_matchup_evaluation_section(
       </div>
     </div>
 """
+    walling_showcase_html = _render_walling_blueprints_and_clips(
+        staged_mp4_map=staged_mp4_map,
+        staged_poster_map=staged_poster_map,
+    )
 
     # Unified visual tactics section: How Armies Form Up, Flank, and Rotate (#how-we-fight)
     pcp = rich.get("pro_combat_positioning") or {}
@@ -4333,8 +4664,12 @@ def render_matchup_evaluation_section(
   <div class="eval-subsection" id="base-layouts">
     <h3>Base Walls, SimCity &amp; Creep Spread</h3>
     <p class="prose-tight">
-      In-game 3D captures of Mothman's main base, ramp wall, and second-base choke at 4:10 across all nine matchups,
-      alongside current placement and map-control benchmarks.
+      How Mothman seals main ramps and natural chokes, defends through one-tile doorways, and punishes opponents whose walls stay open or break under early pressure.
+    </p>
+    {walling_showcase_html}
+    <h4 class="wall-row-title">4:10 Base Layouts Across All Nine Matchups</h4>
+    <p class="wall-row-desc">
+      In-game 3D captures of Mothman's main base, ramp wall, and second-base choke at 4:10 alongside live placement and map-control benchmarks.
     </p>
     <div class="interactive-panel" style="margin-bottom:1.15rem;">
       <div class="cat-pills" role="tablist" aria-label="Select base layout matchup" style="margin-bottom:0.8rem;">
@@ -5518,6 +5853,48 @@ INTERACTIVE_SECTIONS_CSS = """
   color: var(--ink);
 }
 
+.wall-bp-sub {
+  font-size: 0.82rem;
+  color: var(--ink-2);
+}
+.wall-blueprint-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.95rem;
+  align-items: start;
+}
+.wall-bp-card { min-width: 0; }
+.wall-clips-group { margin: 1.25rem 0 1.35rem; }
+.wall-row-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.02rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.wall-row-desc {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  line-height: 1.48;
+  color: var(--ink-2);
+}
+.wall-clips-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.95rem;
+  align-items: stretch;
+}
+.wall-clips-grid .clip-card {
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+.wall-clips-grid .clip-card h5 {
+  margin: 0.25rem 0 0.35rem;
+  font-size: 0.96rem;
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
 .arena-more-wrap {
   display: flex;
   justify-content: center;
@@ -5528,8 +5905,11 @@ INTERACTIVE_SECTIONS_CSS = """
   padding: 0.45rem 1.15rem;
 }
 
+@media (max-width: 1060px) {
+  .wall-blueprint-grid, .wall-clips-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @media (max-width: 900px) {
-  .subsys-grid, .charts-pair, .case-grid, .case-split, .mu-two-col, .explain-grid, .hist-pair, .site-curves-grid, .obs-grid, .obs-split-2, .ve-grid, .base-control-grid { grid-template-columns: minmax(0, 1fr); }
+  .subsys-grid, .charts-pair, .case-grid, .case-split, .mu-two-col, .explain-grid, .hist-pair, .site-curves-grid, .obs-grid, .obs-split-2, .ve-grid, .base-control-grid, .wall-blueprint-grid, .wall-clips-grid { grid-template-columns: minmax(0, 1fr); }
   .site-curve-card.site-curve-span-2, .obs-card.obs-span-2 { grid-column: auto; }
   .obs-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

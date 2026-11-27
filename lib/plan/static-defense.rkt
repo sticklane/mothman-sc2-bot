@@ -1919,39 +1919,57 @@
         (define actions '())
         (define (emit! a) (set! actions (cons a actions)))
 
-        (for ([bk (in-list bunkers)]
-              #:when (u-complete? bk))
+        (define e-bldgs (sd-index-enemy-bldgs idx))
+        (for ([bk (in-list bunkers)])
           (define bid (u-id bk))
           (define bkx (u-x bk bx))
           (define bky (u-y bk by))
+          (define is-proxy-bunker? (> (fast-dist2 bkx bky bx by) 900.0))
           (define-values (near8? near20?)
             (cloud-near-flags eu-cld bkx bky 8.0 20.0))
-          (define cargo (u-cargo-used bk))
-          (define cap (max 4 (u-cargo-max bk 4)))
-          (define near-aoe?
-            (and (pair? aoe-pts)
-                 (for/or ([pt (in-list aoe-pts)])
-                   (<= (fast-dist2 bkx bky (car pt) (cdr pt)) 6.25))))
-
+          (define proxy-engage11?
+            (and is-proxy-bunker?
+                 (or near8?
+                     (> (cloud-count-within? eu-cld bkx bky 11.0 1) 0)
+                     (for/or ([eb (in-list e-bldgs)])
+                       (<= (fast-dist2 bkx bky (u-x eb 9999.0) (u-y eb 9999.0)) 121.0)))))
           (cond
-            [near-aoe?
-             (emit! (list 'bunker-unload bid))]
-            [(and near8? (< cargo cap))
-             (for ([inf (in-list (k-nearest-to bkx bky (- cap cargo) bio 10.0))])
-               (emit! (list 'bunker-load bid (u-id inf))))]
-            [(and (not near8?) (> cargo 0) near20?)
-             (emit! (list 'bunker-unload bid))]
-            [(and (not near20?)
-                  (= cargo 0)
-                  (or (> frame 4200) (eq? (obs-ref bk 'abandoned? #f) #t)))
-             (emit! (list 'salvage bid))])
+            [(not (u-complete? bk))
+             ;; Loop 87C: Repair damaged/under-fire incomplete proxy Bunkers (and swap low-HP builder SCV)
+             (when (and is-proxy-bunker?
+                        (or (< (u-hp-frac bk) 0.95) near8?))
+               (define repairers (k-nearest-to bkx bky 4 scvs 18.0))
+               (for ([s (in-list repairers)])
+                 (emit! (list 'repair (u-id s) bid))))]
+            [else
+             (define cargo (u-cargo-used bk))
+             (define cap (max 4 (u-cargo-max bk 4)))
+             (define near-aoe?
+               (and (pair? aoe-pts)
+                    (for/or ([pt (in-list aoe-pts)])
+                      (<= (fast-dist2 bkx bky (car pt) (cdr pt)) 6.25))))
+             (define load-active? (or near8? proxy-engage11?))
 
-          ;; Pull 3-6 SCVs auto-repair (`316`) when Bunker < 90% HP or under fire
-          (when (and (not (and (not near20?) (> frame 4200)))
-                     (or (< (u-hp-frac bk) 0.90) near8?))
-            (define repairers (k-nearest-to bkx bky 6 scvs 18.0))
-            (for ([s (in-list repairers)])
-              (emit! (list 'repair (u-id s) bid)))))
+             (cond
+               [near-aoe?
+                (emit! (list 'bunker-unload bid))]
+               [(and load-active? (< cargo cap))
+                (for ([inf (in-list (k-nearest-to bkx bky (- cap cargo) bio (if is-proxy-bunker? 12.0 10.0)))])
+                  (emit! (list 'bunker-load bid (u-id inf))))]
+               [(and (not load-active?) (> cargo 0) near20?)
+                (emit! (list 'bunker-unload bid))]
+               [(and (not near20?)
+                     (not proxy-engage11?)
+                     (= cargo 0)
+                     (or (> frame 4200) (eq? (obs-ref bk 'abandoned? #f) #t)))
+                (emit! (list 'salvage bid))])
+
+             ;; Pull 3-6 SCVs auto-repair (`316`) when Bunker < 90% HP or under fire
+             (when (and (not (and (not near20?) (not proxy-engage11?) (> frame 4200)))
+                        (or (< (u-hp-frac bk) 0.90) load-active?))
+               (define repairers (k-nearest-to bkx bky 6 scvs 18.0))
+               (for ([s (in-list repairers)])
+                 (emit! (list 'repair (u-id s) bid))))]))
 
         (reverse actions))))
 
