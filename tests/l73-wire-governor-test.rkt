@@ -124,17 +124,14 @@
      112))
   (define abs-112 (cmd-abilities out-112))
   (check-true "l73-c2-isolated-p1-train-rescue-beats-tumors-morphs-and-p0-spells"
-              (equal? abs-112 '(1343 1344))
-              (format "Expected '(1343 1344) rescued ahead of 1733/4121 & P0 spells; got ~a" abs-112))
+              (and (equal? abs-112 '(1343 1344 251 1664))
+                   (not (memv 1733 abs-112))
+                   (not (memv 4121 abs-112)))
+              (format "Expected stale train '(1343 1344) first, P0 spells '(251 1664) preserved, filler 1733/4121 dropped; got ~a" abs-112))
 
-  ;; Also test with 4 distinct training/supply commands when tokens = 1.0 -> `1a-pre` rescues AT MOST 3
-  ;; (and does NOT double-rescue with general P1 rescue!)
-  (define gov2b (make-wire-apm-governor #:target-apm 200.0 #:hard-cap-apm 485.0 #:burst-capacity 1.0))
-  ;; Tokens start at 1.0 (< 2.0 normal P1 cost); `1a-pre` floor = -4.0 allows 2 cmds (1.0 -> -1.0 -> -3.0);
-  ;; use burst = 3.0 & drain to 2.0, wait: with burst = 2.0 at loop 100, normal P1 drain emits 1x 1733 (2.0->0.0),
-  ;; then at loop 112 (tokens ~1.78), 1a-pre (floor -4.0, max-count 3) can emit 2 cmds (1.78 -> -0.22 -> -2.22),
-  ;; or with burst = 5.0 at loop 100 emit 2x 1733 (5.0 -> 1.0) -> wait, use same-tag drain to sit at ~2.5 tokens
-  ;; and verify total rescued in 1a-pre + P0 ordering never exceeds 3 even with 5 train+tumor cmds + P0 spells!
+  ;; Also test with 4 distinct training/supply commands when burst-capacity = 2.0:
+  ;; stale train/supply emits 3 bounded cmds ahead of P0 spell 251 (no 4th 1632 flood),
+  ;; P0 spell 251 is never dropped under ample 60s headroom, and filler 1733/4121 drop!
   (define gov2c (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0 #:burst-capacity 2.0))
   (define out-cap3
     (govern-sc2-wire-actions!
@@ -149,11 +146,11 @@
      100))
   (define abs-cap3 (cmd-abilities out-cap3))
   (check-true "l73-c2-1a-pre-train-rescue-capped-at-3-no-double-rescue"
-              (and (= (length abs-cap3) 3)
-                   (equal? abs-cap3 '(1343 1344 1351))
+              (and (equal? abs-cap3 '(1343 1344 1351 251))
+                   (not (memv 1632 abs-cap3))
                    (not (memv 1733 abs-cap3))
                    (not (memv 4121 abs-cap3)))
-              (format "Expected exactly 3 train/supply cmds '(1343 1344 1351) rescued, got ~a" abs-cap3)))
+              (format "Expected bounded 3 train cmds '(1343 1344 1351) + P0 251 (no 1632/1733/4121), got ~a" abs-cap3)))
 
 ;; -----------------------------------------------------------------------------
 ;; 3. Step `1c` (`>= 8`-loop) Isolated Training Rescue Beats P0 Mode Switches

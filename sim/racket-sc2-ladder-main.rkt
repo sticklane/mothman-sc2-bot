@@ -978,7 +978,8 @@
       (define sum-runtime-ms 0.0)
       (define sum-translate-ms 0.0)
       (define match-result "Undecided")
-      (define wire-apm-gov (make-wire-apm-governor #:target-apm 680.0 #:hard-cap-apm 760.0 #:burst-capacity 72.0))
+      (define wire-apm-gov (make-wire-apm-governor #:max-apm 760.0))
+      (define pending-wire-placement-refusals '())
       (define start-bot-action-reject-count (get-total-bot-action-reject-count))
       (define start-wire-action-drop-count (get-total-wire-action-drop-count))
       (define frame0-split-done? #f)
@@ -1020,7 +1021,7 @@
                 (void)]
                [else
                 (define t-step-0 (current-inexact-monotonic-milliseconds))
-                (define obs-hash
+                (define obs-hash0
                   (sc2-observation->runtime-obs-hash
                    obs
                    #:game-info game-info
@@ -1028,6 +1029,11 @@
                    #:configured-race configured-race-sym
                    #:used-creep-tumors (live-bot-runtime-used-creep-tumors runtime)
                    #:defer-expansions? (and (= total-steps 0) (<= last-game-loop 4))))
+                (define obs-hash
+                  (if (pair? pending-wire-placement-refusals)
+                      (hash-set obs-hash0 'wire-placement-refusals pending-wire-placement-refusals)
+                      obs-hash0))
+                (set! pending-wire-placement-refusals '())
                 (define t-obs-1 (current-inexact-monotonic-milliseconds))
 
                 (define actual-race (hash-ref obs-hash 'race 'Zerg))
@@ -1185,7 +1191,7 @@
                      ;; populates commanded-combat-tags before any global spatial maneuver)
                      (define step-res (step-live-bot-runtime! runtime obs-hash))
                      (when (and skip-build-order? (hash-ref step-res 'arena-reset? #f))
-                       (set! wire-apm-gov (make-wire-apm-governor #:target-apm 680.0 #:hard-cap-apm 760.0 #:burst-capacity 72.0)))
+                       (set! wire-apm-gov (make-wire-apm-governor #:max-apm 760.0)))
                      (define rt1 (current-inexact-monotonic-milliseconds))
                      (define step-tel (hash-ref step-res 'telemetry (hash)))
                      (define prio-sum (hash-ref step-tel 'priority-summary (hash)))
@@ -1248,10 +1254,20 @@
                         #:watchdog-expand-ring-syms step-watchdog-expand-ring-syms
                         #:arbiter-ledger step-arbiter-ledger
                         #:mineral-override-pressure? step-min-override-pressure?))
+                     (set! pending-wire-placement-refusals (drain-wire-placement-refusals!))
                      (define cheese-excluded-workers
                        (if (rt-cheese-mode? runtime)
                            (rt-cheese-proxy-worker-tags runtime)
                            (seteqv)))
+                     (define step-min-demand-rate
+                       (or (hash-ref step-res 'mineral-demand-rate #f)
+                           (hash-ref step-tel 'mineral-demand-rate #f)))
+                     (define step-gas-demand-rate
+                       (or (hash-ref step-res 'gas-demand-rate #f)
+                           (hash-ref step-tel 'gas-demand-rate #f)))
+                     (define step-desired-gas-workers
+                       (or (hash-ref step-res 'desired-gas-workers #f)
+                           (hash-ref step-tel 'desired-gas-workers #f)))
                      (define sat-cmds0
                        (saturate-workers-and-gas-commands
                         obs
@@ -1262,7 +1278,10 @@
                         #:game-info game-info
                         #:gas-starvation-boost? step-gas-boost?
                         #:apm-pressure-backoff? step-apm-backoff?
-                        #:mineral-override-pressure? step-min-override-pressure?))
+                        #:mineral-override-pressure? step-min-override-pressure?
+                        #:mineral-demand-rate step-min-demand-rate
+                        #:gas-demand-rate step-gas-demand-rate
+                        #:desired-gas-workers step-desired-gas-workers))
                      ;; Loop 83 (`--no-macro`): Keep worker mineral/gas saturation active while
                      ;; stripping wire-layer autonomous macro casts (MULE 171, Supply Drop 255, Chrono 3755).
                      (define sat-cmds

@@ -237,6 +237,16 @@ def detect_container_runtime(preferred: str | None = None) -> str:
 
 
 def get_repo_commit(repo_dir: Path) -> str:
+    snap_meta = repo_dir / ".snapshot_meta.json"
+    if snap_meta.is_file():
+        try:
+            meta = json.loads(snap_meta.read_text(encoding="utf-8"))
+            if isinstance(meta, dict):
+                val = str(meta.get("rev_id") or meta.get("commit_id") or "").strip()
+                if val:
+                    return val
+        except Exception:
+            pass
     for cmd in (["git", "rev-parse", "--short=8", "HEAD"],
                 ["jj", "log", "-r", "@-", "--no-graph", "-T", "commit_id.short(8)"]):
         try:
@@ -1733,13 +1743,19 @@ def build_match_tasks(
         entries = raw["matches"] if isinstance(raw, dict) and "matches" in raw else raw
         pair_reps: dict[tuple[str, str], int] = {}
         for idx, item in enumerate(entries, start=1):
+            p1_mode = str(item.get("p1_mode") or args.mothman_mode).strip()
+            p2_mode = str(item.get("p2_mode") or args.mothman_mode).strip()
+            p1_alias = str(item.get("p1_alias") or "").strip()
+            p2_alias = str(item.get("p2_alias") or "").strip()
             b1 = resolve_bot_spec(
-                item["bot"], roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
+                item["bot"], roster, p1_mode, arena_dir, repo_dir, mothman_cache,
+                alias_name=p1_alias,
                 stage_mothman=stage_mothman,
                 cheese_profile=item.get("cheese_profile") or p1_cheese_profile,
             )
             b2 = resolve_bot_spec(
-                item["opponent"], roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
+                item["opponent"], roster, p2_mode, arena_dir, repo_dir, mothman_cache,
+                alias_name=p2_alias,
                 stage_mothman=stage_mothman,
                 cheese_profile=item.get("p2_cheese_profile") or p2_cheese_profile,
             )

@@ -11,7 +11,10 @@
          "build-orders/cheese.rkt"
          "econ-ledger.rkt"
          "stall-watchdog.rkt"
-         "plan/situational-counter.rkt")
+         "plan/situational-counter.rkt"
+         "plan/pro-curves.rkt"
+         "plan/macro-game-plan.rkt"
+         "econ/escrow-engine.rkt")
 
 (provide
  ;; 1. Declarative SC2 Tech, Cost, Build-Time, Facility-Slot & Prerequisite DAG
@@ -70,6 +73,10 @@
  macro-escrow-record-decision!
  macro-escrow-in-backoff?
  macro-brain-decision-watchdog-info
+ macro-brain-decision-game-plan
+ macro-brain-decision-flow-report
+ macro-brain-decision-flow-demand
+ macro-brain-decision-desired-addons
  T3-TECH-STRUCT-SYMS
  t3-struct-payoff-syms
  t3-core-production-ready?
@@ -5628,7 +5635,10 @@
                                    #:arbiter-gas-override-count [arbiter-gas-overrides 0]
                                    #:arbiter-facility-override-count [arbiter-fac-overrides 0]
                                    #:cheese-spec [cheese-spec #f]
-                                   #:cheese-phase [raw-cheese-phase #f])
+                                   #:cheese-phase [raw-cheese-phase #f]
+                                   #:owm-summary [override-owm-summary #f]
+                                   #:physical-refusals [override-physical-refusals #f]
+                                   #:in-progress-tech-etas [override-in-progress-tech-etas #f])
   (define enemy-u-counts
     (or (and (hash? override-enemy-unit-counts) override-enemy-unit-counts)
         (macro-world-state-enemy-unit-counts state)))
@@ -5835,6 +5845,59 @@
               4)))
     (define ws-depleting-bases (macro-world-state-depleting-bases state))
     (define ws-natural-blocked? (macro-world-state-natural-blocked? state))
+    (define ws-owm-summary
+      (or override-owm-summary
+          (and (hash? raw-mirror-signals)
+               (hash-ref raw-mirror-signals 'owm-summary #f))))
+    (define ws-physical-refusals
+      (or (and (or (hash? override-physical-refusals) (list? override-physical-refusals))
+               override-physical-refusals)
+          (and (hash? raw-mirror-signals)
+               (or (hash-ref raw-mirror-signals 'physical-refusals #f)
+                   (hash-ref raw-mirror-signals 'wire-placement-refusals #f)))))
+    (define ws-in-progress-tech-etas
+      (or (and (hash? override-in-progress-tech-etas) override-in-progress-tech-etas)
+          (and (hash? raw-mirror-signals)
+               (let ([v (hash-ref raw-mirror-signals 'in-progress-tech-etas #f)])
+                 (and (hash? v) v)))))
+    (define-values (live-m-rate-sec live-g-rate-sec)
+      (compute-live-income-rates mineral-harvesters gas-harvesters workers ready-bldg-counts race))
+    (define game-plan
+      (build-macro-game-plan
+       #:race race
+       #:enemy-race enemy-race
+       #:frame frame
+       #:workers workers
+       #:active-bases active-bases
+       #:total-bases total-townhalls-incl-pending
+       #:army-supply army-supply
+       #:enemy-threat-supply enemy-threat-supply
+       #:under-attack? under-attack?
+       #:enemy-unit-counts enemy-u-counts
+       #:enemy-building-counts enemy-b-counts
+       #:ready-bldg-counts ready-bldg-counts
+       #:total-bldg-counts total-bldg-counts
+       #:unit-counts unit-counts
+       #:owm-summary ws-owm-summary
+       #:mirror-signals raw-mirror-signals
+       #:cheese-spec (and cheese-active? eff-cheese-spec)))
+    (define flow-report
+      (compute-flow-balance
+       #:plan game-plan
+       #:race race
+       #:minerals minerals
+       #:gas gas
+       #:workers workers
+       #:active-bases active-bases
+       #:total-bases total-townhalls-incl-pending
+       #:mineral-harvesters mineral-harvesters
+       #:gas-harvesters gas-harvesters
+       #:ready-bldg-counts ready-bldg-counts
+       #:total-bldg-counts total-bldg-counts
+       #:depleting-bases ws-depleting-bases
+       #:in-progress-tech-etas ws-in-progress-tech-etas))
+    (define desired-addons-ht (macro-game-plan-desired-addons game-plan))
+    (define fwd-tech-gas-reserve (escrow-flow-report-forward-tech-gas-reserve flow-report))
     ;; L31-P0-2 (`#20/#21/H2H#06`): Detect 0 alive workers even when total-workers includes pending workers,
     ;; while preserving legacy synthetic tests with empty unit-counts or explicit positive harvesters.
     (define race-worker-sym
@@ -6640,26 +6703,12 @@
   ;;   - Even in normal fog macro, once >= 30 workers (`2`-base saturation), scale standing army parity
   ;;     with `believed-opp-army-sup` so we never sit at 10 army supply against an 8-Gateway/Bio ball!
   (define believed-opp-army-sup
-    (if (hash? raw-mirror-signals)
-        (max 0.0 (exact->inexact (hash-ref raw-mirror-signals 'believed-enemy-army-supply 0)))
-        0.0))
+    (hash-ref (macro-game-plan-owm-signals-used game-plan) 'believed-army-supply 0.0))
   (define opp-stopped-expanding?
-    (and (hash? raw-mirror-signals)
-         (eq? (hash-ref raw-mirror-signals 'opp-stopped-expanding? #f) #t)))
-  (define belief-army-floor
-    (cond
-      [(< frame 2464) 0.0]
-      [(and opp-stopped-expanding? (>= workers 16))
-       (* 0.85 believed-opp-army-sup)]
-      [(>= workers 52)
-       (* 0.80 believed-opp-army-sup)]
-      [(>= workers 32)
-       (* 0.60 believed-opp-army-sup)]
-      [else 0.0]))
-  (define belief-army-deficit?
-    (and (> belief-army-floor 0.0)
-         (or opp-stopped-expanding? (eq? race 'Zerg))
-         (< (exact->inexact army-supply) belief-army-floor)))
+    (hash-ref (macro-game-plan-owm-signals-used game-plan) 'stopped-expanding? #f))
+  ;; Declarative all-3-race army parity floor from `macro-game-plan` (lifts Zerg-only gate!)
+  (define belief-army-floor (macro-game-plan-army-parity-floor game-plan))
+  (define belief-army-deficit? (macro-game-plan-army-deficit? game-plan))
   ;; Loop 64 A1 (P0 #2 Zerg 6:00-8:30 Midgame Drone Brake — EvoZ / t-bone):
   ;; Freeze Drones at <= 55w from 5:30+ when known/believed enemy army >= 1.15x ours
   ;; (or >= 50w & >= 1.10x when opponent stopped expanding)!
@@ -15918,6 +15967,8 @@
                                      (priority-candidate-min-cost c))))
                  (gas-building-cap-ok? cur-gas-bldgs active-bases)
                  (or (and zerg-cap-air-extractor-boost? (eq? id 'extractor) (>= workers 14))
+                     (and (escrow-flow-report-need-more-gas-geysers? flow-report)
+                          (>= workers (pro-min-workers-for-next-gas-bldg race enemy-race 0)))
                      (>= workers (pro-min-workers-for-next-gas-bldg race enemy-race cur-gas-bldgs)))
                  (not early-zero-army-attack?)
                  (or (not (hash? open-facility-slots))
@@ -16915,6 +16966,8 @@
                     (not (and terran-tvz-wall-depot2-due? (eq? id 'refinery)))
                     (gas-building-cap-ok? cur-gas-bldgs active-bases)
                     (or (and zerg-cap-air-extractor-boost? (eq? id 'extractor) (>= workers 14))
+                        (and (escrow-flow-report-need-more-gas-geysers? flow-report)
+                             (>= workers (pro-min-workers-for-next-gas-bldg race enemy-race 0)))
                         (>= workers (pro-min-workers-for-next-gas-bldg race enemy-race cur-gas-bldgs)))
                     (or (= cur-gas-bldgs 0) (< gas (if (>= workers 42) 450 250)))
                     (not early-zero-army-attack?))]
@@ -19734,14 +19787,26 @@
              [pvt-robo-bay-boost? (max 960.0 (+ 400.0 u0))]
              [is-repaired? (max (+ 380.0 u0) 520.0)]
              [(and (memq sym '(extractor refinery assimilator))
-                   (= (bldg-count-equivalent total-bldg-counts sym) 0)
+                   (or (= (bldg-count-equivalent total-bldg-counts sym) 0)
+                       (and (escrow-flow-report-need-more-gas-geysers? flow-report)
+                            (not under-early-rush-crisis?)
+                            (not early-ling-rush-defense-active?)
+                            (not early-proxy-marauder-rush-active?)
+                            (not (terran-defer-for-111-sym? sym))))
                    (>= workers 15)
                    (or (not (eq? sym 'assimilator))
                        (> (bldg-count-equivalent total-bldg-counts 'gateway) 0))
                    (not (and terran-tvz-wall-depot2-due? (eq? sym 'refinery)))
                    (not natural-exp-window?)
                    (not zerg-16-hatch-pending?))
-              (max plan-weight 490.0 u0)]
+              (max plan-weight
+                   (cond
+                     [(and (escrow-flow-report-need-more-gas-geysers? flow-report)
+                           (<= (bldg-count-equivalent total-bldg-counts sym) 1))
+                      585.0] ; governor-param: gas geyser #2 above optional upgrade bays when gas-starved
+                     [(escrow-flow-report-need-more-gas-geysers? flow-report) 520.0]
+                     [else 490.0])
+                   u0)]
              [(and gas-unlock-tech-boost? (>= gas 150)) (max plan-weight 492.0 u0)]
              [defer-for-worker-recovery? (min 425.0 u-after-gas-lock)]
              [proactive-overseer-boost? (max 475.0 (+ 140.0 u0))]
@@ -22302,13 +22367,6 @@
   (define used-morph-slots (make-hasheq))
   (define worker-build-escrowed? #f)
   (define min-floor 0)
-  (define min-floor-for-worker 0)
-  ;; Loop 87F Track 3: Disjoint TownHall Worker Slot Decoupling (Terran & Protoss).
-  ;; Terran CCs and Protoss Nexuses train 50M workers on a producer slot completely
-  ;; disjoint from combat/tech production (unlike Zerg Hatchery Larvae). When an idle
-  ;; TownHall slot is open and workers < worker-cap-now (and not supply-preempted,
-  ;; rebuilding first TH, or under emergency rush/crisis), non-essential combat and
-  ;; building escrows must NOT raise `min-floor-for-worker`.
   (define pt-disjoint-th-worker-active?
     (and (memq race '(Terran Protoss))
          (< workers worker-cap-now)
@@ -22335,13 +22393,96 @@
   (define gas-floor 0)
   (define scheduled-cands '())
   (define reserved-cand #f)
-  (define reserved-pure-gas-starved? #f)
+  (define reserved-tier 'T2)
+  (define reserved-slot 'worker)
+  (define reserved-slack #f)
   (define reserved-gas-blocked? #f)
   (define reserved-emergency-gas-near-ready? #f)
   (define protected-core-gas-syms
     '(colossus siege-tank robotics-bay robotics-facility spire lair immortal warp-prism))
   (define decision-entries '())
   (define escrowed-entries '())
+
+  ;; Survival-emergency predicate: only genuine survival emergencies (supply, rush/breach
+  ;; defense, emergency cloak detection, or first mobile detector vs cloak/observer) may
+  ;; preempt a higher-ranked non-T0 escrow.
+  (define (cand-survival-emergency? csym cat)
+    (or (eq? cat 'supply)
+        (and zero-townhall-rebuild-due? (eq? csym race-expand-sym))
+        (and (emergency-cloak-det-boost-info csym) #t)
+        (and (memq csym '(overseer observer raven))
+             (= (unit-count-equivalent unit-counts csym) 0)
+             (or requires-detection?
+                 (and (hash? enemy-u-counts)
+                      (> (unit-count-equivalent enemy-u-counts 'observer) 0))))
+        (and early-worker-rush-active? (memq csym '(zergling spine-crawler marine zealot)))
+        (and early-ling-rush-defense-active? (<= army-supply 8) (early-ling-rush-boost-info csym))
+        (and early-proxy-marauder-rush-active? (< army-supply 12) (early-proxy-marauder-boost-info csym))
+        (and (or protoss-early-breach-zealot-due? protoss-early-rush-zealot-first?) (eq? csym 'zealot))
+        (and terran-early-ground-rush-survival-due? (< army-supply 10) (memq csym '(hellion marine bunker)))))
+
+  ;; Single declarative tier classifier feeding Time-Horizon Slack Escrow (`lib/econ/escrow-engine.rkt`)
+  (define (cand-escrow-tier csym cat u-score)
+    (cond
+      [(cand-survival-emergency? csym cat) 'T0]
+      [(and (eq? cat 'expansion)
+            (<= total-townhalls-incl-pending 1)
+            (not (and protoss-nat-probe-interleave?
+                      (not late-1base-commit-expand-due?)
+                      (eq? csym 'nexus)
+                      (< rem-min (if pvp-early-nat-nexus-due? 220 260)))) ; governor-param: PvP vs PvT/PvZ nat probe interleave
+            (not (and (eq? race 'Terran)
+                      (eq? csym 'command-center)
+                      (not terran-1base-nat-cc-lock?)
+                      (not late-1base-commit-expand-due?)
+                      (< rem-min 175)))) ; governor-param: 1-base CC midgame gate
+       'T0]
+      [(and (eq? race 'Terran)
+            (or (and (eq? csym 'orbital-command) terran-orbital-1-urgent?)
+                (and (eq? csym 'factory) terran-111-factory-due? (>= gas 75) (>= minerals 100)) ; physics: gas+min ready
+                (and (eq? csym 'starport)
+                     (or (and terran-111-starport-due? (>= gas 75) (>= minerals 100)) ; physics: gas+min ready
+                         (and terran-det-starport-due? (>= enemy-banshee-cnt 2))))
+                (and (eq? csym 'factory-techlab) terran-tvt-factl-priority-due?)
+                (and (eq? csym 'siege-tank)
+                     (or terran-tvt-tank1-hard-lock?
+                         (and (or terran-111-tvt-tank-due? terran-tvt-tank4-lock-due?)
+                              (< (unit-count-equivalent unit-counts 'siege-tank) 2)
+                              (>= gas 90)))) ; physics: tank gas near-ready
+                (and (eq? csym 'viking-fighter) terran-det-viking-due?
+                     (or (>= enemy-banshee-cnt 2) terran-enemy-banshee-starport-tl?))
+                (and (eq? csym 'command-center)
+                     (or terran-1base-nat-cc-lock?
+                         late-1base-commit-expand-due?
+                         (and (not under-attack?)
+                              (>= army-supply 20)
+                              (or terran-4th-cc-due?
+                                  (and terran-3rd-cc-due? (>= workers 48) (>= rem-min terran-3rd-cc-min-floor)))))))) ; physics: 3-base mineral saturation (3*16w)
+       'T0]
+      [(and (eq? race 'Protoss)
+            (or (and (eq? csym 'gateway)
+                     (or protoss-first-gateway-due?
+                         (and protoss-banshee-gate3-due?
+                              (if protoss-active-air-cloak-raid? (>= workers 4) (>= workers 20))))) ; physics: 1-base saturated economy (16m+4g)
+                (and (eq? csym 'cybernetics-core) protoss-root-cyber-due?)
+                (and (eq? csym 'stalker)
+                     protoss-urgent-aa-reaper-stalker-due?
+                     (if protoss-active-air-cloak-raid? (>= workers 4) (>= workers 20))) ; physics: 1-base saturated economy (16m+4g)
+                (and (eq? csym 'colossus) protoss-colossus-core2-due?
+                     (>= gas (if (= (unit-count-equivalent unit-counts 'colossus) 0) 60 100))) ; physics: core colossus gas
+                (and (eq? csym 'stargate) protoss-anti-tempest-stargate-due?)
+                (and (eq? csym 'nexus) (or late-1base-commit-expand-due? protoss-3rd-nexus-oversat-urgent?))))
+       'T0]
+      [(and (eq? race 'Zerg)
+            (or (and (eq? csym 'spire) zerg-cap-air-spire-due? (>= gas 120)) ; physics: spire gas near-ready
+                (and (eq? csym 'lair)
+                     (or zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due? zerg-air-lair-remorph-due?))
+                (and (eq? csym 'hydralisk-den) (or zerg-mass-air-aa-tech-due? zerg-zvt-banshee-aa-rush?))))
+       'T0]
+      [(and (eq? csym 'robotics-bay) protoss-pvt-midgame-chargelot-due? (< (unit-count-equivalent unit-counts 'zealot) 6))
+       'T2]
+      [(memq csym protected-core-gas-syms) 'T1]
+      [else (macro-game-plan-tier-for-category cat #f)]))
 
   (for ([c (in-list sorted-cands)]
         [rank-idx (in-naturals 1)])
@@ -22398,6 +22539,8 @@
               (not (hash-ref cheese-allowed-syms id #f)))
          #f]
         [(wd-sym-on-cooldown? csym)
+         #f]
+        [(refusal-active? ws-physical-refusals csym frame)
          #f]
         [(zerg-2base-3rd-hatch-deferred-sym? csym)
          #f]
@@ -22986,521 +23129,75 @@
                                   (memq (normalize-brain-sym (priority-candidate-id reserved-cand))
                                         protected-core-gas-syms))))))))
 
-    ;; W4-P0-4a + W5-P0-4-belief: Never let Factory-only mineral escrow starve early Terran Marines or SCVs
-    (define factory-only-min-escrow?
-      (and (pair? escrowed-entries)
-           (andmap (lambda (ee)
-                     (or (<= (cadr ee) 0)
-                         (eq? (normalize-brain-sym (cadddr ee)) 'factory)))
-                   escrowed-entries)))
-    (define terran-early-marine-ignores-factory-min-escrow?
-      (and (eq? race 'Terran)
-           (eq? csym 'marine)
-           (if (>= gas 100)
-               (< army-supply 4)
-               (or (< army-supply 6) (> enemy-threat-supply 0)))
-           slot-ok?
-           factory-only-min-escrow?))
-    (define terran-early-scv-ignores-factory-min-escrow?
-      (and (eq? race 'Terran)
-           (eq? cat 'worker)
-           (< workers 28)
-           (not under-attack?)
-           (<= enemy-threat-supply 0)
-           slot-ok?
-           (or (< rem-gas 75) (< rem-min 100))
-           factory-only-min-escrow?))
-
-    ;; W8-P0-1-belief (#18/#30) + W10-P0-3-belief (#45) + L47-P0-2a (`H2H #04 PvT` 0-RoboBay fix):
-    ;; Never let void-ray/tempest/stargate (or non-due robotics-bay) escrow lock out Stalkers from 3+ Gateways,
-    ;; while NEVER bypassing `robotics-bay` escrow when `protoss-midgame-robo-bay-due?` is active!
-    (define protoss-aa-stalker-ignores-heavy-escrow?
-      (and protoss-aa-stalker-over-heavy-escrow?
-           (eq? csym 'stalker)
-           reserved-cand
-           (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
-             (or (and (memq rid '(void-ray tempest robotics-bay))
-                      (not (and (eq? rid 'robotics-bay) protoss-midgame-robo-bay-due?))
-                      (or (>= minerals 250)
-                          (<= open-stargate-slots 0)
-                          (eq? rid 'robotics-bay)))
-                 (and (eq? rid 'stargate)
-                      (not (and protoss-anti-tempest-stargate-due?
-                                (= (bldg-count-equivalent total-bldg-counts 'stargate) 0)
-                                (>= minerals 150)))
-                      (or (>= (bldg-count-equivalent total-bldg-counts 'stargate) 1)
-                          (>= gas 100)
-                          (>= minerals 250)))))))
-    ;; W11-P0-2-belief (#8/#14): Keep Barracks #1 pumping continuous Marines when army-supply < 8!
-    ;; Yield to imminent Factory #1 at >=100G once we already have >=4 army supply in peace (preserves W6-P0-3),
-    ;; and NEVER bypass Supply Depot escrow (preserves <6% SupBlk Pro gate!).
-    (define terran-early-marine-ignores-macro-escrow?
-      (and terran-early-marine-pump-due?
-           (eq? csym 'marine)
-           (>= supply-left 2)
-           (or (< minerals 325) under-attack? (> enemy-threat-supply 0))
-           (not (and (or terran-first-factory-gas-ready?
-                         (and terran-111-factory-priority-due? (>= minerals 100)))
-                     (>= army-supply 4)
-                     (not under-attack?)))
-           reserved-cand
-           (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
-             (and (memq rid '(command-center factory orbital-command barracks bunker))
-                  (not (and (or terran-1base-nat-cc-lock? late-1base-commit-expand-due?)
-                            (eq? rid 'command-center)
-                            (or (>= army-supply 2) (>= minerals 250) late-1base-commit-expand-due?)))
-                  (not (and terran-orbital-1-urgent? (>= minerals 100) (eq? rid 'orbital-command)))))))
-    ;; W15b (#17 TvT) + L24-P0-2 (`#02/#29/#32/#35/#47`): Never let `command-center` escrow block
-    ;; `marine` or `scv` under pressure, when `army-supply < 14`, or when a 3rd+ CC still has `rem-min < 225`
-    ;; — EXCEPT during peaceful 1-base natural CC lock (`terran-1base-nat-cc-lock?` or `late-1base-commit-expand-due?`),
-    ;; where draining below `250M` stalls Natural CC!
-    (define terran-late-cc-escrow-protected?
-      (and (not under-attack?)
-           (>= army-supply 20)
-           (<= enemy-threat-supply (* 0.85 (max 10 army-supply)))
-           (or terran-4th-cc-due?
-               (and terran-3rd-cc-due?
-                    (>= workers 48)
-                    (>= rem-min terran-3rd-cc-min-floor)))))
-    (define terran-marine-scv-ignores-cc-escrow?
-      (and (eq? race 'Terran)
-           reserved-cand
-           (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'command-center)
-           (>= supply-left 2)
-           (not supply-preempt-now?)
-           (not terran-1base-nat-cc-lock?)
-           (not late-1base-commit-expand-due?)
-           (not terran-late-cc-escrow-protected?)
-           (not (and terran-3rd-cc-mined-out-air-rescue? (>= rem-min 150)))
-           (not (and (or terran-first-factory-gas-ready?
-                         (and terran-111-factory-priority-due? (>= minerals 100)))
-                     (>= army-supply 4)
-                     (not under-attack?)))
-           (or (and (eq? csym 'marine)
-                    (or under-attack?
-                        (> enemy-threat-supply 0)
-                        (and (>= total-townhalls-incl-pending 2) terran-cloaked-det-crisis?)
-                        (and (< army-supply 14)
-                             (or (>= total-townhalls-incl-pending 2)
-                                 step-post-t3-tech-expand-due?
-                                 (< minerals 325)))
-                        (and (>= total-townhalls-incl-pending 2)
-                             (< rem-min 225)
-                             (not (and (or terran-3rd-cc-due? terran-4th-cc-due?)
-                                       (or (> ws-depleting-bases 0) (>= gas 500))
-                                       (>= rem-min 150)))
-                             (not (and terran-3rd-cc-due?
-                                       (>= workers 48)
-                                       (>= army-supply 20)
-                                       (>= rem-min terran-3rd-cc-min-floor)))
-                             (not (and terran-4th-cc-due?
-                                       (>= workers 48)
-                                       (>= army-supply 20)
-                                       (>= rem-min terran-4th-cc-min-floor))))))
-               (and (eq? csym 'scv)
-                    (not severe-home-crisis-throttle-workers?)
-                    (< workers (min race-max-workers (* 22 (max 2 active-bases))))
-                    (or (and (>= total-townhalls-incl-pending 2)
-                             (< rem-min 350)
-                             (not (and (> ws-depleting-bases 0) (>= workers 48))))
-                        (and (< workers 48)
-                             (or under-attack?
-                                 (> enemy-threat-supply 0)
-                                 (and (>= total-townhalls-incl-pending 2) terran-cloaked-det-crisis?)
-                                 (and (< army-supply 14)
-                                      (or (>= total-townhalls-incl-pending 2)
-                                          step-post-t3-tech-expand-due?
-                                          (< minerals 240)))
-                                 (and (>= total-townhalls-incl-pending 2)
-                                      (< rem-min 225)
-                                      (not (and (or terran-3rd-cc-due? terran-4th-cc-due?)
-                                                (or (> ws-depleting-bases 0) (>= gas 500))
-                                                (>= rem-min 150)))
-                                      (not (and terran-3rd-cc-due?
-                                                (>= workers 48)
-                                                (>= army-supply 20)
-                                                (>= rem-min terran-3rd-cc-min-floor)))
-                                      (not (and terran-4th-cc-due?
-                                                (>= workers 48)
-                                                (>= army-supply 20)
-                                                (>= rem-min terran-4th-cc-min-floor)))))))))))
-    ;; W9-P0-1-belief (#11/#17) + L24-P0-2 + L32-P0-2: Never let 2nd Starport/Liberator/Viking escrow hard-block
-    ;; SCV/Marine/Marauder, while protecting Terran's 1st Starport (`terran-111-starport-due?`) and air-dominated
-    ;; Viking/Starport #2+ AA escalation at `>= 100M & >= 75G`!
-    (define terran-bio-scv-ignores-air-escrow?
-      (and (eq? race 'Terran)
-           reserved-cand
-           (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
-             (and (memq rid '(starport liberator viking-fighter))
-                  (not (and enemy-air-dominated-now?
-                            (memq rid '(starport viking-fighter))
-                            (>= minerals 100)
-                            (>= gas 75)))
-                  (not (and (>= enemy-banshee-cnt 2)
-                            (eq? rid 'starport)
-                            terran-det-starport-due?
-                            (>= workers 10)))
-                  (not (and terran-det-viking-due?
-                            (eq? rid 'viking-fighter)
-                            (or (and terran-enemy-banshee-starport-tl?
-                                     (< (unit-count-equivalent unit-counts 'viking-fighter)
-                                        (if (>= enemy-banshee-cnt 2)
-                                            (min 8 (* 2 enemy-banshee-cnt))
-                                            4))
-                                     (>= gas 25)
-                                     (or (< enemy-banshee-cnt 2) (>= workers 10)))
-                                (and (>= minerals 100) (>= gas 50)))))
-                  (or (and (eq? csym 'scv)
-                           (not severe-home-crisis-throttle-workers?)
-                           (< workers 48)
-                           (not (and (eq? rid 'starport) terran-111-starport-due? (>= minerals 100))))
-                      (eq? csym 'marine)
-                      (and (eq? csym 'marauder)
-                           (or (not (or enemy-cap-air? enemy-air-dominated-now?)) (>= gas 125) (<= open-starport-slots 0))))))))
-    ;; W9-P0-3-belief + W10-P0-3-belief + L35-P0-2 (PvP/#24/#48/#75/#54): Never let Stalker escrow starve
-    ;; Probes or idle-Robo Immortals/Colossi, EXCEPT during urgent anti-air/anti-Reaper Stalker crisis
-    ;; (where >=20 Probes, or >=4..8 Probes during active cloaked/air raids, & Immortals MUST yield to Stalkers)!
-    (define protoss-probe-or-immortal-ignores-stalker-escrow?
-      (and (eq? race 'Protoss)
-           reserved-cand
-           (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'stalker)
-           (or (and (eq? csym 'probe)
-                    (not under-early-rush-crisis?)
-                    (or (and protoss-urgent-aa-reaper-stalker-due?
-                             (if protoss-active-air-cloak-raid?
-                                 (and (< workers 8)
-                                      (not (and (>= workers 4) (>= gas 50) (< rem-min 175))))
-                                 (< workers 20)))
-                        (and (not protoss-urgent-aa-reaper-stalker-due?)
-                             (or (and (< workers 44)
-                                      (not under-attack?)
-                                      (<= enemy-threat-supply army-supply))
-                                 (and (< workers 52) (>= minerals 175))))))
-               (and (not protoss-urgent-aa-reaper-stalker-due?)
-                    (eq? csym 'immortal)
-                    protoss-robo-immortal-due?)
-               (and (eq? csym 'colossus)
-                    protoss-midgame-colossus-due?))))
-    ;; L53-1C (`#1300`/`#1301` `#39 norman` `ESCROW_LOCKOUT: immortal, 455M/92G`):
-    ;; Under base attack or heavy threat (`enemy-threat-supply > 1.3 * army-supply`) with open
-    ;; Gateway slots, `minerals >= 275`, and `gas >= 50`, never let `immortal` lock minerals/gas
-    ;; ahead of defending `stalker` warp-ins!
-    (define protoss-defending-stalker-ignores-immortal-escrow?
-      (and (eq? race 'Protoss)
-           (eq? csym 'stalker)
-           (or (and (or under-attack?
-                        (> enemy-threat-supply (* 1.3 army-supply)))
-                    (or (not (hash? open-facility-slots))
-                        (> open-gw-slots-live 0))
-                    (>= minerals 275)
-                    (>= gas 50)
-                    reserved-cand
-                    (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
-                      (or (eq? rid 'immortal)
-                          (and (eq? rid 'robotics-facility)
-                               (>= (bldg-count-equivalent total-bldg-counts 'robotics-facility) 1)))))
-               (and protoss-colossus-release-for-defense?
-                    (or (not (hash? open-facility-slots))
-                        (> open-gw-slots-live 0))
-                    (>= gas 50)
-                    reserved-cand
-                    (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'colossus)))))
-    ;; L54-1B (`#1322`/`#1323` `#58` `corruptor` escrow lockout):
-    ;; When `corruptor` waits on `< 100G` with `minerals >= 350`, never block 0-gas Queens/Lings/Hatches/Spores
-    ;; OR `overseer #1` (`overseer == 0`, `50M/50G`)!
-    (define zerg-zero-gas-ignores-corruptor-escrow?
-      (and (eq? race 'Zerg)
-           reserved-cand
-           (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'corruptor)
-           (< rem-gas 100)
-           (>= minerals 350)
-           (= g-cost 0)
-           (memq csym '(queen zergling hatchery spore-crawler))))
-    (define zerg-overseer1-ignores-corruptor-escrow?
-      (and (eq? race 'Zerg)
-           reserved-cand
-           (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'corruptor)
-           (< rem-gas 100)
-           (eq? csym 'overseer)
-           (= (unit-count-equivalent unit-counts 'overseer) 0)
-           (>= rem-gas 50)))
-    ;; W9-P0-4-belief + W11-P0-1-belief + W12-P0-4-belief + L30-P0-2 (`#19 AirAAStarve`):
-    ;; Never let Hydralisk/HydraliskDen/Ravager escrow block Roach/Baneling/Zergling —
-    ;; EXCEPT when facing Stargate mass-air (`>= 4` air or Stargate+`>=2` air), where Roach MUST NOT steal gas from HydraDen/Hydras!
-    (define zerg-roach-ignores-hydra-escrow?
-      (and (eq? race 'Zerg)
-           (memq csym '(roach baneling zergling))
-           reserved-cand
-           (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
-             (or (and (memq rid '(hydralisk-den hydralisk))
-                      (not enemy-cap-air?)
-                      (not enemy-air-dominated-now?)
-                      (not zerg-stargate-mass-air-active?)
-                      (not zerg-zvt-banshee-aa-rush?)
-                      (not zerg-mass-air-aa-tech-due?)
-                      (not zerg-mass-air-hydra-due?)
-                      (not (and (eq? rid 'hydralisk-den) zerg-zvz-midgame-hydraden-due?))
-                      (not (and (eq? rid 'hydralisk)
-                                (>= (priority-candidate-utility-score reserved-cand) 900.0)))
-                      (or (>= open-larva-cnt 3) under-attack? (> enemy-threat-supply 0) (< army-supply 28) (< rem-gas 50)))
-                 (and (eq? rid 'ravager)
-                      (< rem-gas 75)
-                      (>= open-larva-cnt 3))))))
-    ;; W17-P0-2a-belief (`#1 Z v titania`): Never let `lair@1260` / `spore-crawler@940` escrow
-    ;; block ALL Zerg combat units when `minerals >= 400` or `open-larva-cnt >= 8` (EXCEPT active emergency cloak detection)!
-    (define zerg-combat-ignores-lair-spore-escrow?
-      (and (eq? race 'Zerg)
-           zerg-high-bank-or-larva-overflow?
-           (not zerg-late-low-min-high-gas-3rd-hatch-due?)
-           (memq csym '(roach ravager hydralisk baneling mutalisk corruptor zergling))
-           reserved-cand
-           (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
-             (and (memq rid '(lair spore-crawler))
-                  (not (and (eq? rid 'lair)
-                            (or zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due? zerg-air-lair-remorph-due? zerg-zvt-early-lair-due?)
-                            (> g-cost 0)))
-                  (not (emergency-cloak-det-boost-info rid))))))
-    ;; W17-P0-2b-belief (`#4 Z v monsterbot`): When Zerg has `gas >= 600`, let excess-gas combat
-    ;; (`ravager` 25M/75G, `baneling` 25M/25G; plus `mutalisk`/`corruptor` when mined-out, >=3 bases, or >=400M)
-    ;; spend gas past non-supply escrow instead of rotting at 1,675G!
-    (define zerg-excess-gas-dump-ignores-escrow?
-      (and zerg-excess-gas-spend-due?
-           reserved-cand
-           (not (eq? (priority-candidate-category reserved-cand) 'supply))
-           (not (and (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'spire)
-                     zerg-cap-air-spire-due?
-                     (< minerals (+ spire-min 25))))
-           (or (and (memq csym '(ravager baneling))
-                    (or (not zerg-late-low-min-high-gas-3rd-hatch-due?)
-                        (< minerals 220)
-                        (>= gas 1000)
-                        (and (exact-integer? mineral-harvesters) (<= mineral-harvesters 6))))
-               (and (or (eq? csym 'mutalisk)
-                        (and (eq? csym 'corruptor) (not zerg-corruptor-capped?)))
-                    (or (not zerg-late-low-min-high-gas-3rd-hatch-due?)
-                        (>= minerals 400)
-                        (and (exact-integer? mineral-harvesters) (<= mineral-harvesters 6)))))))
-    ;; L32-P0-2 Pillar 3 (`#10 ZvP` 2.69x WallTie): Never let `hive` or `hatchery #4+` escrow-block
-    ;; midgame combat (`ravager`/`hydralisk`/`roach`/`zergling`) when `minerals < 200 & gas >= 200`
-    ;; OR `army-supply < 50` past 8:00 (`frame >= 10752`)!
-    (define zerg-midgame-combat-ignores-hive-hatch4-escrow?
-      (and (eq? race 'Zerg)
-           (memq csym '(ravager hydralisk roach zergling))
-           reserved-cand
-           (not (ormap (lambda (ee) (eq? (list-ref ee 4) 'supply)) escrowed-entries))
-           (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
-             (or (eq? rid 'hive)
-                 (and (eq? rid 'hatchery)
-                      (>= total-townhalls-incl-pending 3))))
-           (or (and (< minerals 200) (>= gas 200))
-               (and (>= frame 10752) (< army-supply 50)))))
-    ;; W17-P1-1-belief (`#14 T`, `#15 P`): Under `< 5:30` proxy Marauder rush, never let any non-supply,
-    ;; non-rush-defense escrow block boosted rush-defense units!
-    (define marauder-rush-defense-ignores-other-escrow?
-      (and early-proxy-marauder-rush-active?
-           (early-proxy-marauder-boost-info csym)
-           reserved-cand
-           (not (eq? (priority-candidate-category reserved-cand) 'supply))
-           (not (early-proxy-marauder-boost-info
-                 (normalize-brain-sym (priority-candidate-id reserved-cand))))))
-    ;; W18-P0-1-belief (`#8/#34/#35/#36` `< 3:30` Zergling rush): Never let any non-supply escrow block
-    ;; continuous core defenders (`zergling`/`marine`/`zealot`/`adept`), or any non-ling-boost escrow
-    ;; block boosted 2nd Gate/Rax/Bunker/Spine/Battery!
-    (define early-ling-rush-defense-ignores-escrow?
-      (and early-ling-rush-defense-active?
-           (early-ling-rush-boost-info csym)
-           reserved-cand
-           (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
-             (and (not (eq? (priority-candidate-category reserved-cand) 'supply))
-                  (or (and (memq csym '(zergling marine zealot adept))
-                           (not (and (= (bldg-count-equivalent total-bldg-counts early-rush-root-sym) 0)
-                                     (eq? rid early-rush-root-sym))))
-                      (not (early-ling-rush-boost-info rid)))))))
-    ;; W18-P0-3-belief (`#14 T v oberon`): Never let `factory-techlab` escrow block
-    ;; `marine`, `marauder`, `bunker`, or `barracks` under active attack/rush (but protect peaceful TvT TechLab!).
-    (define terran-bio-ignores-factory-techlab-escrow?
-      (and (eq? race 'Terran)
-           (not terran-tvt-factl-priority-due?)
-           (memq csym '(marine marauder bunker barracks))
-           reserved-cand
-           (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'factory-techlab)))
-    ;; L20-P0-2 (`#13 ZvT` `486` naked Lings vs `16` Siege Tanks): Never let `hive`/upgrade/static-def
-    ;; escrow freeze Baneling/Ravager/Viper/BroodLord morphs while facing >= 3 Siege Tanks (< 8 breakers)!
-    (define zerg-anti-tank-morph-ignores-nonspire-escrow?
-      (and zerg-anti-tank-comp-due?
-           (memq csym '(baneling ravager viper brood-lord))
-           reserved-cand
-           (not (eq? (priority-candidate-category reserved-cand) 'supply))
-           (not (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'spire))
-           (< (+ (unit-count-equivalent unit-counts 'baneling)
-                 (unit-count-equivalent unit-counts 'ravager)
-                 (* 2 (unit-count-equivalent unit-counts 'viper))
-                 (* 2 (unit-count-equivalent unit-counts 'brood-lord)))
-              8)))
-    ;; L20/L30-P0-2 (3D Visual-QA `#36 P v 12PoolBot`): Active base breach OR `< 4:00` Ling/pool rush
-    ;; with ready Gateway & `< 2` Zealots -> never let any non-supply escrow block Zealot training!
-    (define protoss-early-breach-zealot-ignores-escrow?
-      (and (or protoss-early-breach-zealot-due?
-               protoss-early-rush-zealot-first?)
-           (eq? csym 'zealot)
-           reserved-cand
-           (not (eq? (priority-candidate-category reserved-cand) 'supply))))
-    ;; L20-P0-2 (`#17/#32 TvT`): Never let Starport (`100G`) gas escrow block immediate
-    ;; FactoryTechLab (`50M/25G`) attachment in TvT (Siege Tank core first!).
-    (define terran-tvt-factl-ignores-starport-escrow?
-      (and terran-factory-techlab-due?
-           (eq? enemy-race 'Terran)
-           (eq? csym 'factory-techlab)
-           reserved-cand
-           (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'starport)))
-    ;; L23-P0-2 + L24-P0-2 (Continuous 2:00-4:00+ Terran/Protoss Worker Production):
-    ;; Exempt 50M P/T TownHall workers from non-supply, non-natural-expand escrow floors while
-    ;; TownHall slot is open during happy-path-macro so mid-tier buildings never freeze Nexus/CC —
-    ;; while excluding Terran's core 1-1-1 milestones (Orbital, Factory #1, Starport #1, Rax #2,
-    ;; TvT Tank < 4) so SCV@575 never starves Terran opening tech (Protoss 100% untouched!).
-    (define pt-worker-ignores-non-nat-escrow?
-      (and pt-continuous-worker-due?
-           (not zero-townhall-rebuild-due?)
-           (not early-worker-rush-pause-workers?)
-           (not severe-home-crisis-throttle-workers?)
-           (eq? cat 'worker)
-           (or (not (hash? open-facility-slots))
-               (> (hash-ref open-facility-slots 'townhall 0) 0))
-           reserved-cand
-           (let ([rcat (priority-candidate-category reserved-cand)]
-                 [rid  (normalize-brain-sym (priority-candidate-id reserved-cand))])
-             (and (not (eq? rcat 'supply))
-                  (not (and (eq? rcat 'expansion)
-                            (<= total-townhalls-incl-pending 1)
-                            (not (and protoss-nat-probe-interleave?
-                                      (not late-1base-commit-expand-due?)
-                                      (eq? rid 'nexus)
-                                      (< rem-min (cond
-                                                   [(and pvp-early-nat-nexus-due? (>= frame 2128)) 180]
-                                                   [pvp-early-nat-nexus-due? 220]
-                                                   [else 260]))))))
-                  (not (and (eq? rcat 'expansion)
-                            (>= rem-min (cond
-                                          [(and protoss-3rd-nexus-oversat-urgent?
-                                                (eq? rid 'nexus))
-                                           0]
-                                          [(and protoss-nat-probe-interleave?
-                                                (not late-1base-commit-expand-due?)
-                                                (eq? rid 'nexus))
-                                           (cond
-                                             [(and pvp-early-nat-nexus-due? (>= frame 2128)) 180]
-                                             [pvp-early-nat-nexus-due? 220]
-                                             [else 260])]
-                                          [(and terran-3rd-cc-due?
-                                                (eq? rid 'command-center)
-                                                (>= workers 48)
-                                                (> ws-depleting-bases 0))
-                                           terran-3rd-cc-min-floor]
-                                          [(and terran-4th-cc-due?
-                                                (eq? rid 'command-center)
-                                                (or (>= workers 44)
-                                                    (> ws-depleting-bases 0)
-                                                    (>= frame 11424)))
-                                           0]
-                                          [(and (or terran-3rd-cc-due? terran-4th-cc-due?)
-                                                (eq? rid 'command-center))
-                                           350]
-                                          [(and zerg-zvp-peaceful-3rd-hatch-ready?
-                                                (eq? rid 'hatchery))
-                                           180]
-                                          [else 200]))))
-                  (not (emergency-cloak-det-boost-info rid))
-                  (not (memq rid '(engineering-bay missile-turret forge photon-cannon
-                                   observer robotics-facility raven
-                                   factory-techlab spawning-pool orbital-command warp-gate-research)))
-                  (not (and (eq? race 'Protoss)
-                            (or (and (eq? rid 'stalker)
-                                     protoss-urgent-aa-reaper-stalker-due?
-                                     (if protoss-active-air-cloak-raid?
-                                         (or (>= workers 8)
-                                             (and (>= workers 4) (>= gas 50) (< rem-min 175)))
-                                         (>= workers 20)))
-                                (and (eq? rid 'gateway)
-                                     protoss-banshee-gate3-due?
-                                     (if protoss-active-air-cloak-raid?
-                                         (or (>= workers 8)
-                                             (and (>= workers 4) (>= gas 50) (< rem-min 175)))
-                                         (>= workers 20)))
-                                (and (eq? rid 'stargate)
-                                     protoss-anti-tempest-stargate-due?)
-                                (and (eq? rid 'blink)
-                                     protoss-anti-tempest-blink-due?)
-                                (and (eq? rid 'colossus)
-                                     protoss-colossus-core2-due?
-                                     (>= workers 34)
-                                     (>= gas (if (= (unit-count-equivalent unit-counts 'colossus) 0) 60 100)))
-                                (and (eq? rid 'immortal)
-                                     protoss-pvp-immortal-cadence-due?
-                                     (>= workers 34)
-                                     (>= minerals 175)))))
-                  (not (and (eq? race 'Terran)
-                            (or (and (or terran-tvt-tank1-hard-lock? (>= minerals 75))
-                                     (eq? rid 'siege-tank)
-                                     (or terran-111-tvt-tank-due?
-                                         terran-core-tank-floor-due?
-                                         (and terran-tvt-tank4-lock-due?
-                                              (< (unit-count-equivalent unit-counts 'siege-tank) 2))))
-                                (and (>= enemy-banshee-cnt 2)
-                                     (>= workers 10)
-                                     (>= minerals 50)
-                                     (or (and (eq? rid 'starport) terran-det-starport-due?)
-                                         (and (eq? rid 'viking-fighter) terran-det-viking-due? (>= gas 25))))
-                                (and (>= minerals 100)
-                                     (or (and (eq? rid 'factory) terran-111-factory-due?)
-                                         (and (eq? rid 'starport) (or terran-111-starport-due? terran-det-starport-due? terran-air-dom-starport-scale-due?))
-                                         (and (eq? rid 'viking-fighter)
-                                              (or (and terran-air-dom-viking-due? (>= gas 75))
-                                                  (and terran-det-viking-due? terran-enemy-banshee-starport-tl? (>= gas 25))))
-                                         (and (eq? rid 'barracks) terran-111-rax2-due?))))))))))
-    ;; L48-WR: During an active early worker rush, never let any non-supply, non-root-building
-    ;; escrow block core defenders (`zergling`/`spine-crawler`/`marine`/`zealot`), AND allow
-    ;; Protoss 1 anti-deadlock Probe (`50M`) when `workers <= 8` & `50 <= minerals < 100`
-    ;; so the bank never freezes permanently at `80M` (#5140055)!
-    (define early-worker-rush-defense-ignores-escrow?
-      (and early-worker-rush-active?
-           (memq csym '(zergling spine-crawler marine zealot))
-           reserved-cand
-           (let ([rcat (priority-candidate-category reserved-cand)]
-                 [rid  (normalize-brain-sym (priority-candidate-id reserved-cand))])
-             (and (not (eq? rcat 'supply))
-                  (not (and (eq? race 'Zerg)
-                            (eq? csym 'zergling)
-                            (eq? rid 'spine-crawler)
-                            (>= (unit-count-equivalent unit-counts 'zergling) 6)
-                            (= (bldg-count-equivalent total-bldg-counts 'spine-crawler) 0)))
-                  (not (and (= (bldg-count-equivalent total-bldg-counts early-rush-root-sym) 0)
-                            (eq? rid early-rush-root-sym)))))))
+    ;; Single general Time-Horizon Slack Escrow check (Loop 88A, `lib/econ/escrow-engine.rkt`):
+    ;; replaces all 23 ad-hoc `*-ignores-*-escrow?` overrides with zero-delay disjoint-slot
+    ;; slack + T0 survival precedence + 3.5s Zeno-Paradox worker lock!
+    (define c-tier (cand-escrow-tier csym cat u-score))
     (define worker-rush-anti-deadlock-probe?
       (and early-worker-rush-active?
            (not early-worker-rush-pause-workers?)
            (eq? race 'Protoss)
            (eq? csym 'probe)
            (<= workers 4)
-           (>= minerals 50)
-           (< minerals 100)
+           (< minerals (sc2-min-cost 'zealot 100)) ; physics: below Zealot mineral cost
            (>= supply-left 1)
            (not (ormap (lambda (sc) (eq? (normalize-brain-sym (priority-candidate-id sc)) 'probe))
-                       scheduled-cands))
-           (or (not reserved-cand)
-               (not (eq? (priority-candidate-category reserved-cand) 'supply)))))
-    ;; L35-P0-2 Pillar 3 (`#41`/`#53`): Under Terran `< 5:00` ground-rush survival, never let any non-supply
-    ;; non-rush-survival escrow block `hellion` / `marine` / `bunker` — EXCEPT TvT Tank #1 hard-lock (`#1923`)!
-    (define terran-rush-survival-ignores-other-escrow?
-      (and terran-early-ground-rush-survival-due?
-           (memq csym '(hellion marine bunker))
-           reserved-cand
-           (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
-             (and (not (eq? (priority-candidate-category reserved-cand) 'supply))
-                  (not (and terran-tvt-tank1-hard-lock? (eq? rid 'siege-tank)))
-                  (not (memq rid '(hellion marine bunker)))))))
-    ;; Supply candidate ignores non-supply floors (PV4); gas-blocked escrow never blocks 0-gas extractors
-    ;; OR 0-gas combat-units/workers (e.g. SiegeTank gas-escrow at 55G must never starve Marine/SCV #29!),
-    ;; except Terran 1-1-1 Factory/Starport/TvT-Tank/TvT-FactoryTechLab milestones and active emergency cloak detectors!
+                       scheduled-cands))))
+    (define reserved-slack-live
+      (and reserved-cand
+           (compute-escrow-slack
+            #:item-sym (normalize-brain-sym (priority-candidate-id reserved-cand))
+            #:item-min-cost (priority-candidate-min-cost reserved-cand)
+            #:item-gas-cost (priority-candidate-gas-cost reserved-cand)
+            #:tier reserved-tier
+            #:rem-min rem-min
+            #:rem-gas rem-gas
+            #:m-rate-sec live-m-rate-sec
+            #:g-rate-sec live-g-rate-sec
+            #:frame frame
+            #:physical-refusals ws-physical-refusals)))
+    (define slack-spend-allowed?
+      (or (not reserved-cand)
+          (eq? cat 'supply)
+          worker-rush-anti-deadlock-probe?
+          (and (cand-survival-emergency? csym cat) (not (eq? reserved-tier 'T0)))
+          (and (not (eq? reserved-tier 'T0))
+               (or (and (eq? cat 'worker)
+                        (eq? pslot 'townhall)
+                        pt-disjoint-th-worker-active?
+                        (not under-attack?)
+                        (<= enemy-threat-supply 0)
+                        (< workers 16) ; physics: below 1 saturated mineral line (16w)
+                        (>= (- rem-min m-cost) (sc2-min-cost csym 50)))
+                   (and wd-worker-plateau-boost? (eq? cat 'worker)
+                        (not protoss-air-cloak-raid-pause-probes?)
+                        (not severe-home-crisis-throttle-workers?)
+                        (not (memq (priority-candidate-category reserved-cand) '(supply expansion))))
+                   (and wd-idle-bank-flush-now? (memq cat '(combat-unit worker))
+                        (not (and early-worker-rush-pause-workers? (eq? cat 'worker)))
+                        (not (memq (priority-candidate-category reserved-cand) '(supply expansion))))))
+          (and reserved-slack-live
+               (or (not (eq? cat 'worker))
+                   (not (eq? pslot 'townhall))
+                   pt-disjoint-th-worker-active?
+                   (and (<= (exact->inexact m-cost) (escrow-slack-result-mineral-slack reserved-slack-live))
+                        (<= (exact->inexact g-cost) (escrow-slack-result-gas-slack reserved-slack-live))))
+               (escrow-allows-disjoint-spend?
+                reserved-slack-live
+                #:a-slot reserved-slot
+                #:a-tier reserved-tier
+                #:a-cat (priority-candidate-category reserved-cand)
+                #:b-slot pslot
+                #:b-cat cat
+                #:b-min-cost m-cost
+                #:b-gas-cost g-cost
+                #:m-rate-sec live-m-rate-sec
+                #:rem-min rem-min
+                #:rem-gas rem-gas
+                #:open-larva-cnt open-larva-cnt
+                #:open-slot-cnt (if (and rem-slots (not (eq? pslot 'worker)))
+                                    (hash-ref rem-slots pslot 0)
+                                    1)))))
     (define app-min-floor
       (cond
         [(and zero-townhall-rebuild-due?
@@ -23508,193 +23205,35 @@
               (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) race-expand-sym))
          min-floor]
         [(eq? cat 'supply) 0]
-        [worker-rush-anti-deadlock-probe? 0]
-        [early-worker-rush-defense-ignores-escrow? 0]
-        [(and wd-worker-plateau-boost?
-              (eq? cat 'worker)
-              (not protoss-air-cloak-raid-pause-probes?)
-              (not severe-home-crisis-throttle-workers?)
-              reserved-cand
-              (not (and (eq? race 'Terran)
-                        (>= enemy-banshee-cnt 2)
-                        (memq (normalize-brain-sym (priority-candidate-id reserved-cand))
-                              '(missile-turret starport viking-fighter))))
-              (not (and terran-tvt-tank1-hard-lock?
-                        (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'siege-tank)))
-              (not (memq (priority-candidate-category reserved-cand) '(supply expansion))))
-         0]
-        [(and wd-idle-bank-flush-now?
-              (memq cat '(combat-unit worker))
-              (not (and early-worker-rush-pause-workers? (eq? cat 'worker)))
-              reserved-cand
-              (not (and terran-tvt-tank1-hard-lock?
-                        (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'siege-tank)))
-              (not (memq (priority-candidate-category reserved-cand) '(supply expansion)))
-              (not (memq (normalize-brain-sym (priority-candidate-id reserved-cand))
-                         '(hatchery nexus command-center))))
-         0]
-        [pt-worker-ignores-non-nat-escrow? 0]
-        [(and reserved-gas-blocked?
-              (memq csym '(extractor refinery assimilator))
-              (not (terran-defer-for-111-sym? csym))
-              (not (and (eq? race 'Protoss)
-                        (eq? csym 'assimilator)
-                        (or (and (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'robotics-bay)
-                                 protoss-midgame-robo-bay-due?
-                                 (>= gas 100))
-                            (and (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'colossus)
-                                 protoss-colossus-core2-due?
-                                 (>= gas 100)))))
-              (not (and (eq? race 'Zerg)
-                        (eq? csym 'extractor)
-                        (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'spire)
-                        zerg-cap-air-spire-due?
-                        (>= gas 140)
-                        (< rem-min 225)))
-              (not (and (eq? race 'Terran)
-                        (eq? csym 'refinery)
-                        (>= (bldg-count-equivalent total-bldg-counts 'refinery) 2)
-                        (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'siege-tank)
-                        (or terran-111-tvt-tank-due? terran-tvt-tank4-lock-due?)
-                        (>= gas 75)))
-              (< gas (priority-candidate-gas-cost reserved-cand)))
-         0]
-        [(and reserved-gas-blocked?
-              (= (priority-candidate-gas-cost c) 0)
-              (or (memq cat '(combat-unit worker))
-                  (and (eq? race 'Terran)
-                       (eq? csym 'barracks)
-                       (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'siege-tank)
-                       terran-tvt-tank4-lock-due?
-                       (>= (unit-count-equivalent unit-counts 'siege-tank) 2)
-                       (< (bldg-count-equivalent total-bldg-counts 'barracks) (if (>= active-bases 2) 4 2))))
-              (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
-                (and (not (emergency-cloak-det-boost-info rid))
-                     (not (and (eq? race 'Terran) (eq? rid 'factory)))
-                     (not (and (eq? race 'Terran)
-                               (eq? rid 'factory-techlab)
-                               terran-tvt-factl-priority-due?))
-                     (not (and (eq? race 'Terran)
-                               (eq? rid 'siege-tank)
-                               (or terran-111-tvt-tank-due?
-                                   (and terran-tvt-tank4-lock-due?
-                                        (< (unit-count-equivalent unit-counts 'siege-tank) 2)
-                                        (>= gas 100))
-                                   (and terran-core-tank-floor-due? (>= gas 100)))
-                               (or terran-tvt-tank1-hard-lock?
-                                   (eq? cat 'worker)
-                                   (and (not under-attack?)
-                                        (>= army-supply (if (eq? enemy-race 'Terran) 12 4))))))
-                     (not (and (eq? race 'Terran)
-                               (eq? rid 'viking-fighter)
-                               terran-det-viking-due?
-                               terran-enemy-banshee-starport-tl?
-                               (< (unit-count-equivalent unit-counts 'viking-fighter)
-                                  (if (>= enemy-banshee-cnt 2)
-                                      (min 8 (* 2 enemy-banshee-cnt))
-                                      4))
-                               (>= gas 25)))
-                     (not (and (eq? race 'Terran)
-                               (eq? cat 'worker)
-                               (>= minerals 100)
-                               (and (eq? rid 'starport) terran-111-starport-due?)))
-                     ;; L39-P0-2c + L42-P0-2c + Loop 87B: Never let 0-gas Zealot warp-ins (or >=34W Probes at >=60G/#1, >=100G/#2)
-                     ;; bypass RoboticsBay, core Colossus #1-#2, or Robo Immortal mineral escrow while waiting on gas!
-                     (not (and (eq? race 'Protoss)
-                               (or (and (eq? csym 'zealot)
-                                        (or (and (eq? rid 'colossus) protoss-colossus-core2-due?)
-                                            (and (eq? rid 'immortal)
-                                                 (>= gas 50)
-                                                 (< rem-min 300)
-                                                 (not protoss-early-breach-zealot-due?)
-                                                 (not protoss-early-rush-zealot-first?)
-                                                 (not pvz-early-ling-zealot-pump?))
-                                            (and (eq? rid 'robotics-bay)
-                                                 protoss-midgame-robo-bay-due?
-                                                 (not (and protoss-pvt-midgame-chargelot-due?
-                                                           (< (unit-count-equivalent unit-counts 'zealot) 6)
-                                                           (>= rem-min 200))))))
-                                   (and (eq? cat 'worker)
-                                        (eq? rid 'colossus)
-                                        protoss-colossus-core2-due?
-                                        (>= workers 34)
-                                        (>= gas (if (= (unit-count-equivalent unit-counts 'colossus) 0) 60 100))))))
-                     ;; Loop 87: Never let 0-gas Probe or Zealot bypass urgent AA Stalker escrow
-                     ;; (>= 8 Probes, or >= 4 Probes w/ >= 50G & < 175M during active cloaked/air raid).
-                     (not (and (eq? race 'Protoss)
-                               (eq? rid 'stalker)
-                               protoss-urgent-aa-reaper-stalker-due?
-                               (or (not (eq? cat 'worker))
-                                   (if protoss-active-air-cloak-raid?
-                                       (or (>= workers 8)
-                                           (and (>= workers 4) (>= gas 50) (< rem-min 175)))
-                                       (>= workers 20)))))
-                     ;; L40-P0-2b (`#31 ZvP` Tempest:13): Never let 0-gas Drone/Zergling drain bank below
-                     ;; Spire's 200M cost while gas is >=140G waiting on Spire!
-                     (not (and (eq? race 'Zerg)
-                               (eq? rid 'spire)
-                               zerg-cap-air-spire-due?
-                               (>= gas 140)
-                               (< rem-min 250))))))
-         0]
-        [protoss-aa-stalker-ignores-heavy-escrow? 0]
-        [terran-early-marine-ignores-macro-escrow? 0]
-        [terran-marine-scv-ignores-cc-escrow? 0]
-        [terran-bio-scv-ignores-air-escrow? 0]
-        [protoss-probe-or-immortal-ignores-stalker-escrow? 0]
-        [protoss-defending-stalker-ignores-immortal-escrow? 0]
-        [zerg-zero-gas-ignores-corruptor-escrow? 0]
-        [zerg-overseer1-ignores-corruptor-escrow? 0]
-        [zerg-roach-ignores-hydra-escrow? 0]
-        [zerg-combat-ignores-lair-spore-escrow? 0]
-        [zerg-excess-gas-dump-ignores-escrow? 0]
-        [zerg-midgame-combat-ignores-hive-hatch4-escrow? 0]
-        [zerg-anti-tank-morph-ignores-nonspire-escrow? 0]
-        [protoss-early-breach-zealot-ignores-escrow? 0]
-        [terran-tvt-factl-ignores-starport-escrow? 0]
-        [early-ling-rush-defense-ignores-escrow? 0]
-        [terran-bio-ignores-factory-techlab-escrow? 0]
-        [marauder-rush-defense-ignores-other-escrow? 0]
-        [terran-rush-survival-ignores-other-escrow? 0]
-        [terran-early-marine-ignores-factory-min-escrow? 0]
-        [terran-early-scv-ignores-factory-min-escrow? 0]
-        [(and high-bank-tech-unlock? (memq cat '(combat-unit worker))) 0]
-        [(eq? cat 'worker) min-floor-for-worker]
+        [slack-spend-allowed? 0]
+        [(and high-bank-tech-unlock? (memq cat '(combat-unit worker expansion))) 0]
+        [reserved-cand (max min-floor (priority-candidate-min-cost reserved-cand))]
         [else min-floor]))
     (define app-gas-floor
       (cond
         [(eq? cat 'supply) 0]
-        [protoss-aa-stalker-ignores-heavy-escrow? 0]
-        [(and terran-bio-scv-ignores-air-escrow?
-              (or (not (or enemy-cap-air? enemy-air-dominated-now?)) (<= open-starport-slots 0) (>= gas 125)))
-         0]
-        [protoss-probe-or-immortal-ignores-stalker-escrow? 0]
-        [protoss-defending-stalker-ignores-immortal-escrow? 0]
-        [zerg-zero-gas-ignores-corruptor-escrow? 0]
-        [zerg-overseer1-ignores-corruptor-escrow? 0]
-        [zerg-roach-ignores-hydra-escrow? 0]
-        [zerg-combat-ignores-lair-spore-escrow? 0]
-        [zerg-excess-gas-dump-ignores-escrow? 0]
-        [zerg-midgame-combat-ignores-hive-hatch4-escrow? 0]
-        [zerg-anti-tank-morph-ignores-nonspire-escrow? 0]
-        [protoss-early-breach-zealot-ignores-escrow? 0]
-        [terran-tvt-factl-ignores-starport-escrow? 0]
-        [early-ling-rush-defense-ignores-escrow? 0]
-        [terran-bio-ignores-factory-techlab-escrow? 0]
-        [marauder-rush-defense-ignores-other-escrow? 0]
-        [terran-rush-survival-ignores-other-escrow? 0]
-        [(and high-bank-tech-unlock? (>= gas 400) (memq cat '(combat-unit worker))) 0]
+        [slack-spend-allowed? 0]
+        [(and high-bank-tech-unlock? (>= gas 400) (memq cat '(combat-unit worker))) 0] ; governor-param: high gas flush
         [else gas-floor]))
+    (define eff-fwd-gas-floor
+      (if (and (> fwd-tech-gas-reserve 0)
+               (> g-cost 0)
+               (not (eq? c-tier 'T0))
+               (not under-attack?)
+               (not (memq csym '(overseer observer raven)))
+               (not (memq cat '(counter-tech tech-upgrade))))
+          fwd-tech-gas-reserve
+          0))
     (define floor-min-ok? (>= (- rem-min m-cost) app-min-floor))
     (define floor-gas-ok?
       (or (= g-cost 0)
-          (and (>= (- rem-gas g-cost) app-gas-floor)
-               (not (and (terran-tvt-tank4-defer-air-sym? csym) (< rem-gas 200)))
-               (not (and (protoss-colossus-core2-defer-sym? csym) (< rem-gas 200)))
+          (and (>= (- rem-gas g-cost) (max app-gas-floor eff-fwd-gas-floor))
+               (not (and (terran-tvt-tank4-defer-air-sym? csym) (< rem-gas 200))) ; governor-param: tank4 gas lock
+               (not (and (protoss-colossus-core2-defer-sym? csym) (< rem-gas 200))) ; governor-param: colossus2 gas lock
                (not (and terran-enemy-banshee-starport-tl?
                          (terran-confirmed-cloak-defer-prod-sym? csym)
-                         (< rem-gas 150)))
-               (not (and (protoss-banshee-defer-non-aa-sym? csym) (< rem-gas 150))))))
+                         (< rem-gas 150))) ; governor-param: cloak counter gas lock
+               (not (and (protoss-banshee-defer-non-aa-sym? csym) (< rem-gas 150)))))) ; governor-param: aa gas lock
 
     (cond
       [(and tech-cap-ok? unit-cap-ok? prereq-ok? slot-ok? worker-cap-ok? supply-ok? min-ok? gas-ok? floor-min-ok? floor-gas-ok?)
@@ -23749,10 +23288,11 @@
                 (loop (sub1 extra-rem))]
                [(and extra-slot-ok? blk-ok? (not reserved-cand) (< rem-min m-cost))
                 (set! min-floor (max min-floor m-cost))
-                (set! min-floor-for-worker (max min-floor-for-worker m-cost))
                 (when (eq? pslot 'worker)
                   (set! worker-build-escrowed? #t))
                 (set! reserved-cand c)
+                (set! reserved-tier 'T0)
+                (set! reserved-slot pslot)
                 (set! escrowed-entries (cons (list u-score m-cost g-cost id cat) escrowed-entries))
                 (set! decision-entries
                       (cons (priority-decision-entry rank-idx id cat act m-cost g-cost s-cost
@@ -23818,18 +23358,27 @@
                            (> open-gw-slots-live 0))
                        (>= minerals 275)
                        (>= gas 50)))))
-       ;; W5-P0-4-belief: When top reserved-cand is pure-gas-starved? (or gas-blocked under threat / low army),
-       ;; never let a lower-priority 400M expansion stack a 400M mineral floor behind it (`gas_starved_min_lockout`).
+       (define c-slack
+         (compute-escrow-slack
+          #:item-sym csym
+          #:item-min-cost m-cost
+          #:item-gas-cost g-cost
+          #:tier c-tier
+          #:rem-min rem-min
+          #:rem-gas rem-gas
+          #:m-rate-sec live-m-rate-sec
+          #:g-rate-sec live-g-rate-sec
+          #:frame frame
+          #:physical-refusals ws-physical-refusals))
        (define skip-exp-behind-gas-starved?
          (and (eq? cat 'expansion)
               (not protoss-3rd-nexus-oversat-urgent?)
-              (or (and reserved-pure-gas-starved?
-                       (or under-attack? (< army-supply 20) (>= active-bases 2)))
-                  (and reserved-gas-blocked?
-                       (or under-attack? (< army-supply 20))))))
+              reserved-gas-blocked?
+              (or under-attack? (< army-supply 20) (>= active-bases 2))))
        (define escrowed-now? #f)
        (when (and tech-cap-ok? unit-cap-ok? prereq-ok? slot-ok? worker-slot-escrow-ok? blk-ok? supply-ok?
                   rem-escrow-plausible?
+                  (escrow-slack-result-should-escrow? c-slack)
                   (not (and (eq? csym 'spawning-pool)
                             (> (bldg-count-equivalent total-bldg-counts 'spawning-pool) 0)))
                   (not unbuildable-immortal-escrow?)
@@ -23837,114 +23386,29 @@
                   (not high-bank-skip-tech-escrow?)
                   (not static-def-skip-escrow?)
                   (or (< rem-min m-cost) (< rem-gas g-cost)))
-         ;; W2-P1-1a + W5-P0-4-belief + W8-P0-3-belief (#29) + L67B (`#2037`):
-         ;; Protect core tech/power units (`colossus`, `siege-tank`, `robotics-bay`, `robotics-facility`,
-         ;; `immortal`, `warp-prism`, `spire`, `lair`, urgent AA `viking-fighter`/`stalker`) from losing
-         ;; mineral escrow while gas is close; keep `gas-deficit-min-overflow?` strictly INSIDE the
-         ;; protected-tech guard and gated on genuine gas starvation (`< g-cost - 35`, `>= m-cost + 250`,
-         ;; `>= 480M`)!
-         (define gas-deficit-emergency-near-ready?
-           (and has-gas-income?
-                (>= rem-gas (- g-cost 15))
-                (or (and (emergency-cloak-det-boost-info csym) #t)
-                    (and (eq? csym 'viking-fighter) terran-det-viking-due? terran-enemy-banshee-starport-tl?)
-                    (and (eq? csym 'spire) zerg-cap-air-spire-due?)
-                    (and (eq? csym 'lair) zerg-air-lair-remorph-due?)
-                    (and (eq? csym 'stalker) protoss-urgent-aa-reaper-stalker-due?))))
-         (define gas-deficit-min-overflow?
-           (and (> g-cost 0)
-                (< rem-gas (- g-cost 35))
-                (>= rem-min (+ m-cost 250))
-                (>= minerals 480)
-                (not gas-deficit-emergency-near-ready?)))
-         (define pure-gas-starved?
-           (and (> g-cost 0)
-                (< rem-gas g-cost)
-                (not (and has-gas-income?
-                          (or (and (eq? csym 'colossus)
-                                   (>= rem-gas (if (= (unit-count-equivalent unit-counts 'colossus) 0) 60 100)))
-                              (and (eq? csym 'immortal) (>= rem-gas 50))
-                              (and (eq? csym 'robotics-facility) (>= rem-gas 50))
-                              (eq? csym 'warp-prism)
-                              (and (eq? csym 'siege-tank)
-                                   terran-tvt-tank4-lock-due?
-                                   (< (unit-count-equivalent unit-counts 'siege-tank) 2)
-                                   (>= rem-gas 95))
-                              (and (eq? csym 'viking-fighter) terran-det-viking-due? terran-enemy-banshee-starport-tl? (>= rem-gas 25))
-                              (and (eq? csym 'robotics-bay) (>= rem-gas 100))
-                              (and (eq? csym 'spire) zerg-cap-air-spire-due? (>= rem-gas (max 100 (- spire-gas 60))))
-                              (and (eq? csym 'lair) zerg-air-lair-remorph-due? (>= rem-gas 60))
-                              (and (eq? csym 'stalker) protoss-urgent-aa-reaper-stalker-due?
-                                   (or (>= rem-gas 25)
-                                       (and protoss-confirmed-banshee-or-sptl? (>= rem-gas 10)))))))
-                (or gas-deficit-min-overflow?
-                    (not has-gas-income?)
-                    (<= rem-gas (- g-cost 30))
-                    (and (eq? csym 'corruptor) (>= minerals 350))
-                    (>= rem-min (+ m-cost 150)))))
-         (define min-escrow-amt (if pure-gas-starved? 0 m-cost))
-         (set! min-floor (max min-floor min-escrow-amt))
-         ;; Loop 87F Track 3: Disjoint P/T TownHall worker slot decoupling!
-         ;; Only supply, expansion, emergency cloak/air detection/AA, hard-locked core
-         ;; counters/tech, and essential 1-base opening roots may raise `min-floor-for-worker`.
-         ;; Normal combat units & scaling/tech buildings still raise `min-floor` for
-         ;; non-worker spending without freezing idle Terran CCs / Protoss Nexuses!
-         (define escrow-blocks-pt-townhall-worker?
-           (or (not pt-disjoint-th-worker-active?)
-               (eq? cat 'supply)
-               (eq? cat 'expansion)
-               (and (emergency-cloak-det-boost-info csym) #t)
-               (and (eq? race 'Terran)
-                    (or (and (eq? csym 'orbital-command) terran-orbital-1-urgent?)
-                        (and (eq? csym 'factory) terran-111-factory-due? (>= minerals 100))
-                        (and (eq? csym 'starport)
-                             (or (and terran-111-starport-due? (>= minerals 100))
-                                 (and terran-det-starport-due? (>= enemy-banshee-cnt 2))))
-                        (and (eq? csym 'siege-tank)
-                             (or terran-tvt-tank1-hard-lock?
-                                 (and terran-111-tvt-tank-due?
-                                      (< (unit-count-equivalent unit-counts 'siege-tank) 2))))
-                        (and (eq? csym 'viking-fighter)
-                             terran-det-viking-due?
-                             (or (>= enemy-banshee-cnt 2) terran-enemy-banshee-starport-tl?)
-                             (>= gas 25))
-                        (and (eq? csym 'supply-depot) terran-tvz-wall-depot2-due? (< minerals 150))))
-               (and (eq? race 'Protoss)
-                    (or (and (eq? csym 'gateway) protoss-first-gateway-due? (< minerals 200))
-                        (and (eq? csym 'cybernetics-core) protoss-root-cyber-due? (< minerals 200))
-                        (and (eq? csym 'stalker)
-                             protoss-urgent-aa-reaper-stalker-due?
-                             (if protoss-active-air-cloak-raid?
-                                 (or (>= workers 8)
-                                     (and (>= workers 4) (>= gas 50) (< rem-min 175)))
-                                 (>= workers 20)))
-                        (and (eq? csym 'gateway)
-                             protoss-banshee-gate3-due?
-                             (if protoss-active-air-cloak-raid?
-                                 (or (>= workers 8)
-                                     (and (>= workers 4) (>= gas 50) (< rem-min 175)))
-                                 (>= workers 20)))
-                        (and (eq? csym 'colossus)
-                             protoss-colossus-core2-due?
-                             (>= workers 34)
-                             (>= gas (if (= (unit-count-equivalent unit-counts 'colossus) 0) 60 100)))))))
-         (unless (or pure-gas-starved? (not escrow-blocks-pt-townhall-worker?))
-           (set! min-floor-for-worker (max min-floor-for-worker min-escrow-amt)))
-         (when (> g-cost 0)
-           (set! gas-floor (max gas-floor g-cost)))
+         (define min-escrow-amt (escrow-slack-result-effective-min-floor c-slack))
+         (define gas-escrow-amt (escrow-slack-result-effective-gas-floor c-slack))
+         (define gas-bound-now? (escrow-slack-result-gas-bound? c-slack))
+         (when (or (not reserved-cand) (eq? c-tier 'T0))
+           (set! min-floor (max min-floor min-escrow-amt))
+           (when (> gas-escrow-amt 0)
+             (set! gas-floor (max gas-floor gas-escrow-amt))))
          (when (and (eq? pslot 'worker) (> min-escrow-amt 0))
            (set! worker-build-escrowed? #t))
-         (when (and pslot (not pure-gas-starved?) (not (memq pslot '(worker larva townhall))))
+         (when (and pslot
+                    (or (eq? c-tier 'T0) (not gas-bound-now?))
+                    (not (memq pslot '(worker larva townhall))))
            (set! reserved-slots (cons pslot reserved-slots)))
          (set! escrowed-now? #t)
-         (set! escrowed-entries (cons (list u-score min-escrow-amt g-cost id cat) escrowed-entries))
+         (set! escrowed-entries (cons (list u-score min-escrow-amt gas-escrow-amt id cat) escrowed-entries))
          (unless reserved-cand
            (set! reserved-cand c)
-           (when pure-gas-starved?
-             (set! reserved-pure-gas-starved? #t))
+           (set! reserved-tier c-tier)
+           (set! reserved-slot pslot)
+           (set! reserved-slack c-slack)
            (when (and (> g-cost 0) (< rem-gas g-cost))
              (set! reserved-gas-blocked? #t))
-           (when gas-deficit-emergency-near-ready?
+           (when (and (eq? c-tier 'T0) (escrow-slack-result-near-ready? c-slack))
              (set! reserved-emergency-gas-near-ready? #t))))
 
        (define outcome-sym
@@ -24043,6 +23507,33 @@
              (not supply-preempt-now?)
              (< gas 50))
     (set! gas-floor (max gas-floor 50)))
+  ;; Capture active escrow gas floor before adding forward-tech lookahead reserve
+  ;; (so `compute-flow-balance` never double-counts `fwd-tech-gas-reserve`).
+  (define active-escrow-gas-floor-only gas-floor)
+  (when (and (> fwd-tech-gas-reserve 0)
+             (not supply-preempt-now?)
+             (not under-attack?)
+             (< gas fwd-tech-gas-reserve))
+    (set! gas-floor (max gas-floor fwd-tech-gas-reserve)))
+  (define final-flow-report
+    (if (> active-escrow-gas-floor-only 0)
+        (compute-flow-balance
+         #:plan game-plan
+         #:race race
+         #:minerals minerals
+         #:gas gas
+         #:workers workers
+         #:active-bases active-bases
+         #:total-bases total-townhalls-incl-pending
+         #:mineral-harvesters mineral-harvesters
+         #:gas-harvesters gas-harvesters
+         #:ready-bldg-counts ready-bldg-counts
+         #:total-bldg-counts total-bldg-counts
+         #:depleting-bases ws-depleting-bases
+         #:in-progress-tech-etas ws-in-progress-tech-etas
+         #:active-escrow-gas-floor active-escrow-gas-floor-only)
+        flow-report))
+  (define final-flow-demand-ht (escrow-flow-report->sat-kwargs final-flow-report))
 
   (define (tumor-direct-count sym)
     (max (if (hash? total-bldg-counts) (hash-ref total-bldg-counts sym 0) 0)
@@ -24137,6 +23628,10 @@
       (hash-set! ht 'wd-worker-plateau? wd-worker-plateau-boost?)
       (hash-set! ht 'wd-supply-urgent? wd-supply-urgent?)
       (hash-set! ht 'wd-idle-bank-flush? wd-idle-bank-flush-now?)
+      (hash-set! ht 'macro-game-plan game-plan)
+      (hash-set! ht 'escrow-flow-report final-flow-report)
+      (hash-set! ht 'flow-demand final-flow-demand-ht)
+      (hash-set! ht 'desired-addons desired-addons-ht)
       (for ([c (in-list sorted-cands)])
         (define cat (priority-candidate-category c))
         (define u (priority-candidate-utility-score c))
@@ -24190,6 +23685,7 @@
              final-bo-is-supply?
              final-bo-is-nat-expand?)
          (not (wd-sym-on-cooldown? final-bo-goal-norm))
+         (not (refusal-active? ws-physical-refusals final-bo-goal-norm frame))
          (not (zerg-2base-3rd-hatch-deferred-sym? final-bo-goal-norm))
          (not (and queen-non-blocking-now? (eq? final-bo-goal-norm 'queen)))
          (or (and (eq? final-bo-goal-norm race-expand-sym)
@@ -24547,6 +24043,40 @@
               'idle-bank-flush? (hash-ref cat-ht 'wd-idle-bank-flush? #f))
       (hasheq 'goal-stage 'ok 'stalled-goal #f 'worker-plateau? #f
               'supply-urgent? #f 'idle-bank-flush? #f)))
+
+;; Declarative Macro Game Plan, Closed-Loop Flow Demand & Desired Terran Addons Accessors
+;; (Loop 88A: attached via `priority-schedule-result` meta hash, preserving 100% ABI!)
+(define (macro-brain-decision-game-plan dec)
+  (define sched (and (macro-brain-decision? dec)
+                     (macro-brain-decision-priority-schedule dec)))
+  (define cat-ht (and (priority-schedule-result? sched)
+                      (priority-schedule-result-category-utilities sched)))
+  (and (hash? cat-ht) (hash-ref cat-ht 'macro-game-plan #f)))
+
+(define (macro-brain-decision-flow-report dec)
+  (define sched (and (macro-brain-decision? dec)
+                     (macro-brain-decision-priority-schedule dec)))
+  (define cat-ht (and (priority-schedule-result? sched)
+                      (priority-schedule-result-category-utilities sched)))
+  (and (hash? cat-ht) (hash-ref cat-ht 'escrow-flow-report #f)))
+
+(define (macro-brain-decision-flow-demand dec)
+  (define sched (and (macro-brain-decision? dec)
+                     (macro-brain-decision-priority-schedule dec)))
+  (define cat-ht (and (priority-schedule-result? sched)
+                      (priority-schedule-result-category-utilities sched)))
+  (if (hash? cat-ht)
+      (hash-ref cat-ht 'flow-demand (escrow-flow-report->sat-kwargs #f))
+      (escrow-flow-report->sat-kwargs #f)))
+
+(define (macro-brain-decision-desired-addons dec)
+  (define sched (and (macro-brain-decision? dec)
+                     (macro-brain-decision-priority-schedule dec)))
+  (define cat-ht (and (priority-schedule-result? sched)
+                      (priority-schedule-result-category-utilities sched)))
+  (if (hash? cat-ht)
+      (hash-ref cat-ht 'desired-addons (macro-game-plan-desired-addons #f))
+      (macro-game-plan-desired-addons #f)))
 
 (define (enemy-cap-air-latch-update! race enemy-race frame raw-cap-air?)
   (define key (list race enemy-race))

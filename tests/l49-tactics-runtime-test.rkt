@@ -203,34 +203,38 @@
               (mk-u (+ 1101 i) 'scv 29.0 (+ 35.5 (* 0.3 i)) #:hp 45.0 #:order-ability-id 3666 #:order-target-id 1002))
             (for/list ([i (in-range 17)])
               (mk-u (+ 1110 i) 'scv 28.0 (+ 30.0 (* 0.3 i)) #:hp 45.0 #:order-ability-id 3666 #:order-target-id 1901))))
-  ;; (i) Gas-rich (`500G`) + mineral-starved (`120M`) + `< 175` supply -> MUST emit `rebalance-gas-to-minerals`!
-  (define a-pull
-    (step-layer2-economy!
+  ;; Loop 88A Single-Authority Update: Duplicate runtime `wd-gas-mode` is deleted;
+  ;; live `step-layer2-economy!` never emits duplicate `rebalance-gas-to-minerals` or `harvest-gas`,
+  ;; delegating live gas staffing exclusively to `worker-saturation-policy.rkt` via flow demand!
+  (define res-pull
+    (step-live-bot-runtime!
      (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
      (mk-live-obs 'Terran 'Zerg 6000 #:minerals 120 #:gas 500 #:supply-used 90 #:supply-cap 110
                   #:mineral-harvesters 17 #:vespene-harvesters 3 #:vesp-rate 160
                   #:ally-units scvs-pull #:ally-buildings (list cc ref) #:mineral-patches mps)))
-  (define reb-act (findf (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals))) a-pull))
-  ;; (ii) `sec >= 300` (`f=7200`), `20` workers, empty ready Refinery (`assigned=0`, `vesp-rate=0`) -> MUST emit `harvest-gas`!
+  (define reb-act (findf (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals)))
+                         (hash-ref res-pull 'actions '())))
   (define ref-empty (mk-u 1002 'refinery 28.5 36.5 #:hp 500.0 #:assigned-harvesters 0 #:ideal-harvesters 3 #:vespene-contents 1800))
   (define scvs-fill
     (for/list ([i (in-range 20)])
       (mk-u (+ 1201 i) 'scv 28.0 (+ 30.0 (* 0.3 i)) #:hp 45.0 #:orders (if (< i 3) '() (list (hasheq 'ability-id 3666))))))
-  (define a-fill
-    (step-layer2-economy!
+  (define res-fill
+    (step-live-bot-runtime!
      (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
      (mk-live-obs 'Terran 'Zerg 7200 #:minerals 300 #:gas 20 #:supply-used 60 #:supply-cap 78
                   #:mineral-harvesters 17 #:vespene-harvesters 0 #:vesp-rate 0
                   #:ally-units scvs-fill #:ally-buildings (list cc ref-empty) #:mineral-patches mps)))
-  (define fill-act (findf (lambda (a) (and (pair? a) (eq? (car a) 'harvest-gas) (= (third a) 1002))) a-fill))
+  (define fill-act (findf (lambda (a) (and (pair? a) (eq? (car a) 'harvest-gas) (= (third a) 1002)))
+                          (hash-ref res-fill 'actions '())))
   (check-true "L49-T1a-watchdog-law2-gas-valve-pull-and-force-saturate"
-              (and reb-act
-                   (list? (second reb-act))
-                   (>= (length (second reb-act)) 2)
-                   fill-act
-                   (list? (second fill-act))
-                   (>= (length (second fill-act)) 2))
-              (format "reb=~a fill=~a" reb-act fill-act)))
+              (and (not reb-act)
+                   (not fill-act)
+                   (real? (hash-ref res-pull 'mineral-demand-rate #f))
+                   (real? (hash-ref res-fill 'gas-demand-rate #f)))
+              (format "reb=~a fill=~a mDem=~a gDem=~a"
+                      reb-act fill-act
+                      (hash-ref res-pull 'mineral-demand-rate #f)
+                      (hash-ref res-fill 'gas-demand-rate #f))))
 
 ;; -----------------------------------------------------------------------------
 ;; 2. L49-T1b: Stall Watchdog Law 2 — Zero-Income Recovery (`>= 48f`, worker-rush guarded)
@@ -5086,57 +5090,30 @@
          (= (length (second (car hm-0))) 4)
          (null? hm-4)))
 
-  ;; (c) `wd-gas-valve` opposite-direction `112f` cooldown prevents pull <-> fill oscillation
+  ;; (c) Loop 88A Single-Authority Update: live runtime emits ZERO conflicting duplicate
+  ;; `rebalance-gas-to-minerals` or `harvest-gas` commands (sole owner: `worker-saturation-policy.rkt`)
+  ;; and exports flow demand rates cleanly on `step-res`.
   (define rt-gv (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
   (define cc-gv (mk-u 92301 'command-center 32.5 32.5 #:hp 1500.0 #:assigned-harvesters 14 #:ideal-harvesters 16))
   (define ref-gv-full (mk-u 92302 'refinery 28.5 36.5 #:hp 500.0 #:assigned-harvesters 3 #:ideal-harvesters 3 #:vespene-contents 1800))
-  (define ref-gv-empty (mk-u 92302 'refinery 28.5 36.5 #:hp 500.0 #:assigned-harvesters 0 #:ideal-harvesters 3 #:vespene-contents 1800))
-  (define mps-gv (list (hasheq 'id 92390 'type 'mineral-field 'x 26.5 'y 32.5 'mineral-contents 1500)))
-  (define scvs-gv
-    (append (for/list ([i (in-range 3)]) (mk-u (+ 92310 i) 'scv 29.0 (+ 35.5 (* 0.3 i)) #:hp 45.0 #:order-ability-id 3666 #:order-target-id 92302))
-            (for/list ([i (in-range 17)]) (mk-u (+ 92320 i) 'scv 28.0 (+ 30.0 (* 0.3 i)) #:hp 45.0 #:order-ability-id 3666 #:order-target-id 92390))))
-  (define gv-pull
-    (step-layer2-economy!
-     rt-gv
-     (mk-live-obs 'Terran 'Zerg 6000 #:minerals 120 #:gas 500 #:supply-used 90 #:supply-cap 110
-                  #:mineral-harvesters 17 #:vespene-harvesters 3 #:vesp-rate 160
-                  #:ally-units scvs-gv #:ally-buildings (list cc-gv ref-gv-full) #:mineral-patches mps-gv)))
-  (define gv-fill-early
-    (step-layer2-economy!
-     rt-gv
-     (mk-live-obs 'Terran 'Zerg 6040 #:minerals 300 #:gas 20 #:supply-used 90 #:supply-cap 110
-                  #:mineral-harvesters 20 #:vespene-harvesters 0 #:vesp-rate 0
-                  #:ally-units scvs-gv #:ally-buildings (list cc-gv ref-gv-empty) #:mineral-patches mps-gv)))
-  (define gv-fill-after
-    (step-layer2-economy!
-     rt-gv
-     (mk-live-obs 'Terran 'Zerg 6120 #:minerals 300 #:gas 20 #:supply-used 90 #:supply-cap 110
-                  #:mineral-harvesters 20 #:vespene-harvesters 0 #:vesp-rate 0
-                  #:ally-units scvs-gv #:ally-buildings (list cc-gv ref-gv-empty) #:mineral-patches mps-gv)))
-  ;; Loop 61B (`#1641`, restored in Loop 87G): backup `wd-gas-valve` triggers at `215G / 90M` (`> 3` gas harvesters), NOT at `195G / 90M`!
   (define ref-gv2 (mk-u 92303 'refinery 36.5 36.5 #:hp 500.0 #:assigned-harvesters 2 #:ideal-harvesters 3 #:vespene-contents 1800))
+  (define mps-gv (list (hasheq 'id 92390 'type 'mineral-field 'x 26.5 'y 32.5 'mineral-contents 1500)))
   (define scvs-gv5
     (append (for/list ([i (in-range 3)]) (mk-u (+ 92310 i) 'scv 29.0 (+ 35.5 (* 0.3 i)) #:hp 45.0 #:order-ability-id 3666 #:order-target-id 92302))
             (for/list ([i (in-range 2)]) (mk-u (+ 92315 i) 'scv 36.0 (+ 35.5 (* 0.3 i)) #:hp 45.0 #:order-ability-id 3666 #:order-target-id 92303))
             (for/list ([i (in-range 17)]) (mk-u (+ 92320 i) 'scv 28.0 (+ 30.0 (* 0.3 i)) #:hp 45.0 #:order-ability-id 3666 #:order-target-id 92390))))
-  (define gv-195-no
-    (step-layer2-economy!
-     (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
-     (mk-live-obs 'Terran 'Zerg 6000 #:minerals 90 #:gas 195 #:supply-used 90 #:supply-cap 110
-                  #:mineral-harvesters 17 #:vespene-harvesters 5 #:vesp-rate 160
-                  #:ally-units scvs-gv5 #:ally-buildings (list cc-gv ref-gv-full ref-gv2) #:mineral-patches mps-gv)))
-  (define gv-215-yes
-    (step-layer2-economy!
-     (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+  (define gv-res
+    (step-live-bot-runtime!
+     rt-gv
      (mk-live-obs 'Terran 'Zerg 6000 #:minerals 90 #:gas 215 #:supply-used 90 #:supply-cap 110
                   #:mineral-harvesters 17 #:vespene-harvesters 5 #:vesp-rate 160
                   #:ally-units scvs-gv5 #:ally-buildings (list cc-gv ref-gv-full ref-gv2) #:mineral-patches mps-gv)))
   (define gas-cd-ok?
-    (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals))) gv-pull)
-         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'harvest-gas))) gv-fill-early))
-         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'harvest-gas))) gv-fill-after)
-         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals))) gv-195-no))
-         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals))) gv-215-yes)))
+    (and (not (ormap (lambda (a) (and (pair? a) (memq (car a) '(rebalance-gas-to-minerals harvest-gas))))
+                     (hash-ref gv-res 'actions '())))
+         (real? (hash-ref gv-res 'mineral-demand-rate #f))
+         (real? (hash-ref gv-res 'gas-demand-rate #f))
+         (exact-nonnegative-integer? (hash-ref gv-res 'desired-gas-workers #f))))
 
   ;; (d) `open-mineral-wall-after-5min` skips workers already harvesting `lead-seam`
   (define wall-100 (hasheq 'tag 92490 'type 'mineral-field-450 'unit-type-id 665 'x 80.0 'y 80.0 'mineral-contents 100))

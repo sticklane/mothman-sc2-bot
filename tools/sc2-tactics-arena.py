@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import concurrent.futures
+import fcntl
 import json
 import math
 import os
@@ -44,6 +45,7 @@ import tempfile
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1940,6 +1942,240 @@ def filter_scenarios(
     return out
 
 
+def shard_scenarios(
+    specs: list[SkirmishSpec],
+    shard_index: int = 0,
+    shard_count: int = 1,
+) -> list[SkirmishSpec]:
+    """Deterministically partition scenarios via interleaved slicing `specs[shard_index::shard_count]`.
+
+    Across 0 <= shard_index < shard_count, the union equals the full scenario list and shards
+    are pairwise disjoint, balancing races and categories across shards.
+    """
+    sc = int(shard_count)
+    si = int(shard_index)
+    if sc < 1:
+        raise ValueError(f"--shard-count must be >= 1, got {sc}")
+    if si < 0 or si >= sc:
+        raise ValueError(f"--shard-index must satisfy 0 <= shard_index < shard_count ({sc}), got {si}")
+    if sc == 1:
+        return list(specs)
+    return list(specs[si::sc])
+
+
+def read_repo_revision_meta(repo_dir: Path | str) -> dict[str, str]:
+    """Read revision attribution from `.snapshot_meta.json`, falling back to `jj` or `git`."""
+    rdir = Path(repo_dir)
+    meta_path = rdir / ".snapshot_meta.json"
+    if meta_path.is_file():
+        try:
+            raw = json.loads(meta_path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                rev_id = str(
+                    raw.get("rev_id")
+                    or raw.get("commit_id")
+                    or raw.get("jj_change_id")
+                    or ""
+                ).strip()
+                commit_id = str(raw.get("commit_id") or rev_id).strip()
+                rev_label = str(raw.get("rev_label") or raw.get("label") or "").strip()
+                if rev_id or commit_id:
+                    return {
+                        "rev_id": rev_id or commit_id,
+                        "commit_id": commit_id or rev_id,
+                        "rev_label": rev_label,
+                    }
+        except (OSError, ValueError, TypeError):
+            pass
+
+    if (rdir / ".jj").exists():
+        try:
+            proc = subprocess.run(
+                [
+                    "jj",
+                    "log",
+                    "-r",
+                    "@",
+                    "--no-graph",
+                    "-T",
+                    'change_id.short(8) ++ "\\t" ++ commit_id.short(8) ++ "\\t" ++ description.first_line()',
+                ],
+                cwd=str(rdir),
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                parts = proc.stdout.rstrip("\r\n").split("\t")
+                chg = parts[0].strip() if len(parts) > 0 else ""
+                cid = parts[1].strip() if len(parts) > 1 else ""
+                desc = parts[2].strip() if len(parts) > 2 else ""
+                if chg or cid:
+                    rev_id = f"{chg}_{cid}" if (chg and cid) else (cid or chg)
+                    return {
+                        "rev_id": rev_id,
+                        "commit_id": cid or chg,
+                        "rev_label": desc,
+                    }
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    if (rdir / ".git").exists():
+        try:
+            proc = subprocess.run(
+                ["git", "rev-parse", "--short=8", "HEAD"],
+                cwd=str(rdir),
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                cid = proc.stdout.strip()
+                lbl = ""
+                try:
+                    bproc = subprocess.run(
+                        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                        cwd=str(rdir),
+                        capture_output=True,
+                        text=True,
+                        timeout=2.0,
+                    )
+                    if bproc.returncode == 0:
+                        btxt = bproc.stdout.strip()
+                        if btxt and btxt != "HEAD":
+                            lbl = btxt
+                except (OSError, subprocess.SubprocessError):
+                    pass
+                return {
+                    "rev_id": cid,
+                    "commit_id": cid,
+                    "rev_label": lbl,
+                }
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    return {"rev_id": "unknown", "commit_id": "unknown", "rev_label": ""}
+
+
+def compute_step_p95_ms(step_ms_samples: list[float]) -> float:
+    """Compute p95 bot step latency in milliseconds from per-step samples."""
+    if not step_ms_samples:
+        return 0.0
+    vals = sorted(float(x) for x in step_ms_samples if float(x) >= 0.0)
+    if not vals:
+        return 0.0
+    idx = min(len(vals) - 1, int(math.ceil(0.95 * len(vals))) - 1)
+    return round(vals[max(0, idx)], 2)
+
+
+def format_stream_jsonl_record(
+    rec: dict[str, Any],
+    rev_meta: dict[str, str] | None = None,
+    opp_mode: str = "dummy",
+    shard_index: int = 0,
+    shard_count: int = 1,
+) -> dict[str, Any]:
+    """Build one compact, self-contained JSONL record for live continuous-eval streaming."""
+    rm = rev_meta or {}
+    eff_opp = str(rec.get("opponent_mode") or opp_mode or "dummy")
+    win_tag = "Mothman-P1" if eff_opp == "self" else "Mothman"
+    winner = str(rec.get("winner") or "")
+    passed = bool(rec["passed"]) if "passed" in rec else (winner == win_tag)
+    our_surv = round(float(rec.get("our_surviving_val", 0.0)), 1)
+    en_surv = round(float(rec.get("enemy_surviving_val", 0.0)), 1)
+    win_margin = (
+        round(float(rec["win_margin"]), 1)
+        if "win_margin" in rec
+        else round(our_surv - en_surv, 1)
+    )
+    elapsed_frames = int(rec.get("elapsed_frames", rec.get("loops_simulated", 0)) or 0)
+    sid = str(rec.get("scenario_id") or rec.get("id") or "")
+    payload: dict[str, Any] = {
+        "rev_id": str(rm.get("rev_id") or rec.get("rev_id") or "unknown"),
+        "commit_id": str(rm.get("commit_id") or rec.get("commit_id") or "unknown"),
+        "rev_label": str(rm.get("rev_label") or rec.get("rev_label") or ""),
+        "opponent_mode": eff_opp,
+        "scenario_id": sid,
+        "id": sid,
+        "tier": str(rec.get("tier") or ""),
+        "category": str(rec.get("category") or ""),
+        "terrain": str(rec.get("terrain") or ""),
+        "fast_core": bool(rec.get("fast_core", False)),
+        "scoring_mode": str(rec.get("scoring_mode") or "combat"),
+        "race": str(rec.get("race") or ""),
+        "enemy_race": str(rec.get("enemy_race") or ""),
+        "bot": str(rec.get("bot") or ""),
+        "p2_bot": str(rec.get("p2_bot") or ""),
+        "winner": winner,
+        "win_type": str(rec.get("win_type") or ""),
+        "end_reason": str(rec.get("end_reason") or ""),
+        "passed": passed,
+        "trade_ratio": float(rec.get("trade_ratio", 0.0)),
+        "win_margin": win_margin,
+        "our_surviving_val": our_surv,
+        "enemy_surviving_val": en_surv,
+        "p1_lost_val": float(rec.get("p1_lost_val", 0.0)),
+        "p2_lost_val": float(rec.get("p2_lost_val", 0.0)),
+        "elapsed_frames": elapsed_frames,
+        "loops_simulated": elapsed_frames,
+        "wall_ms": float(rec.get("wall_ms", 0.0)),
+        "step_p95_ms": float(rec.get("step_p95_ms", 0.0)),
+        "allow_macro": bool(rec.get("allow_macro", False)),
+        "macro_ability_cmds": int(rec.get("macro_ability_cmds", 0) or 0),
+        "concave_arc_width": float(rec.get("concave_arc_width", 0.0)),
+        "role_inversion_pct": float(rec.get("role_inversion_pct", 0.0)),
+        "anti_splash_clump_score": float(rec.get("anti_splash_clump_score", 0.0)),
+        "dps_active_pct": float(rec.get("dps_active_pct", 0.0)),
+        "shard_index": int(shard_index),
+        "shard_count": int(shard_count),
+        "finished_at": str(rec.get("finished_at") or datetime.now(timezone.utc).isoformat()),
+    }
+    if "spell_verified" in rec:
+        payload["spell_verified"] = rec["spell_verified"]
+    if rec.get("spell_patch_gated"):
+        payload["spell_patch_gated"] = True
+    if "non_combat_score" in rec:
+        payload["non_combat_score"] = rec["non_combat_score"]
+    if "net_econ_score" in rec:
+        payload["net_econ_score"] = rec["net_econ_score"]
+    if "runby_score" in rec:
+        payload["runby_score"] = rec["runby_score"]
+    return payload
+
+
+def append_stream_jsonl_record(
+    stream_path: Path | str,
+    rec: dict[str, Any],
+    rev_meta: dict[str, str] | None = None,
+    opp_mode: str = "dummy",
+    shard_index: int = 0,
+    shard_count: int = 1,
+) -> dict[str, Any]:
+    """Append one compact JSONL line atomically (locked + flushed) for immediate daemon visibility."""
+    payload = format_stream_jsonl_record(
+        rec,
+        rev_meta=rev_meta,
+        opp_mode=opp_mode,
+        shard_index=shard_index,
+        shard_count=shard_count,
+    )
+    line = json.dumps(payload, separators=(",", ":")) + "\n"
+    sp = Path(stream_path)
+    sp.parent.mkdir(parents=True, exist_ok=True)
+    with sp.open("a", encoding="utf-8") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            fh.write(line)
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                pass
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    return payload
+
+
 def _needs_isolated_batch(s: SkirmishSpec) -> bool:
     """Return True when a scenario requires a clean fresh match (exact starting bank, map features, macro lifecycle, & fresh game_loop)."""
     return bool(
@@ -2027,6 +2263,7 @@ def run_single_container(
     scenario_ids: list[str] | None = None,
     batch_tag: str = "",
     map_override: str = "",
+    rev_meta: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     repo_dir = Path(args.repo_dir).resolve()
     maps_dir = Path(args.maps_dir).resolve()
@@ -2049,6 +2286,12 @@ def run_single_container(
             raise FileNotFoundError(f"Scenarios file not found: {custom_sc}")
         custom_scenarios_in_container = "/harness/custom-scenarios.json"
         mounts.extend(["-v", f"{custom_sc}:{custom_scenarios_in_container}:ro"])
+    stream_in_container = ""
+    if getattr(args, "stream_jsonl", ""):
+        stream_host = Path(args.stream_jsonl).resolve()
+        stream_host.parent.mkdir(parents=True, exist_ok=True)
+        stream_in_container = f"/out-stream/{stream_host.name}"
+        mounts.extend(["-v", f"{stream_host.parent}:/out-stream:rw"])
     replay_host_path: Path | None = None
     opp_mode = getattr(args, "opponent", "dummy")
     if save_replays_dir is not None and args.mode == "duel":
@@ -2108,6 +2351,19 @@ def run_single_container(
             inner_cmd.extend(["--suite", args.suite])
     if replay_host_path is not None:
         inner_cmd.extend(["--save-replay-path", f"/out-replays/{replay_host_path.name}"])
+    if stream_in_container:
+        inner_cmd.extend(["--stream-jsonl", stream_in_container])
+    shard_cnt_arg = int(getattr(args, "shard_count", 1) or 1)
+    shard_idx_arg = int(getattr(args, "shard_index", 0) or 0)
+    if shard_cnt_arg > 1:
+        inner_cmd.extend(["--shard-index", str(shard_idx_arg), "--shard-count", str(shard_cnt_arg)])
+    if rev_meta:
+        if rev_meta.get("rev_id"):
+            inner_cmd.extend(["--rev-id", str(rev_meta["rev_id"])])
+        if rev_meta.get("commit_id"):
+            inner_cmd.extend(["--commit-id", str(rev_meta["commit_id"])])
+        if rev_meta.get("rev_label"):
+            inner_cmd.extend(["--rev-label", str(rev_meta["rev_label"])])
     cmd = ["podman", "run", "--rm", "--network", "none", *mounts, args.image, *inner_cmd]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
@@ -2466,6 +2722,9 @@ def extract_sc2_early_game_end(
 def run_host_driver(args: argparse.Namespace) -> int:
     t0 = time.monotonic()
     repo_dir = Path(args.repo_dir).resolve()
+    rev_meta = read_repo_revision_meta(repo_dir)
+    shard_index = int(getattr(args, "shard_index", 0) or 0)
+    shard_count = int(getattr(args, "shard_count", 1) or 1)
     opp_mode = getattr(args, "opponent", "dummy")
     all_specs = load_scenarios(getattr(args, "scenarios", ""), repo_dir)
     if getattr(args, "validate", False):
@@ -2501,6 +2760,7 @@ def run_host_driver(args: argparse.Namespace) -> int:
         if raw_sids:
             by_id_l = {s.id: s for s in listed_specs}
             listed_specs = [by_id_l[sid] for sid in raw_sids if sid in by_id_l]
+        listed_specs = shard_scenarios(listed_specs, shard_index, shard_count)
         print_scenario_listing(listed_specs, validated=bool(getattr(args, "validate", False)))
         return 0
     matched_specs = filter_scenarios(
@@ -2519,6 +2779,11 @@ def run_host_driver(args: argparse.Namespace) -> int:
         matched_specs = [by_id_m[sid] for sid in raw_sids if sid in by_id_m]
         if not matched_specs:
             raise ValueError(f"No scenarios matched --scenario-ids={args.scenario_ids!r}")
+    matched_specs = shard_scenarios(matched_specs, shard_index, shard_count)
+
+    if getattr(args, "stream_jsonl", ""):
+        stream_p = Path(args.stream_jsonl).resolve()
+        stream_p.parent.mkdir(parents=True, exist_ok=True)
 
     render_dir = Path(args.render_dir).resolve() if getattr(args, "render_dir", "") else None
     save_replays_dir: Path | None = None
@@ -2530,7 +2795,10 @@ def run_host_driver(args: argparse.Namespace) -> int:
     max_workers = max(1, int(getattr(args, "workers", 3)))
 
     race_reports_for_render: list[dict[str, Any]] = []
-    if args.mode == "duel":
+    if not matched_specs:
+        sc2_wall_ms = round((time.monotonic() - t0) * 1000.0, 1)
+        report = _build_aggregate_report(args, [], sc2_wall_ms, opp_mode)
+    elif args.mode == "duel":
         batches = partition_duel_batches(matched_specs, default_map=args.map)
         batch_keys: list[tuple[str, str, str, int, list[SkirmishSpec]]] = batches
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(batch_keys)))) as pool:
@@ -2547,6 +2815,7 @@ def run_host_driver(args: argparse.Namespace) -> int:
                     [s.id for s in b_specs],
                     btag,
                     eff_map,
+                    rev_meta,
                 )
                 futs[fut] = (eff_map, r1, r2, b_idx, btag)
             sub_reports: dict[str, dict[str, Any]] = {}
@@ -2610,6 +2879,7 @@ def run_host_driver(args: argparse.Namespace) -> int:
                         [s.id for s in b_specs],
                         btag,
                         eff_map,
+                        rev_meta,
                     )
                     retry_futs[fut] = (eff_map, r1, r2, b_idx, btag)
                 retry_reports: dict[str, dict[str, Any]] = {}
@@ -2652,9 +2922,16 @@ def run_host_driver(args: argparse.Namespace) -> int:
     else:
         target_race = matched_specs[0].our_race if args.race.lower() != "all" else args.race
         target_enemy = getattr(args, "enemy_race", "")
-        report = run_single_container(args, target_race, save_replays_dir, enemy_race=target_enemy)
+        report = run_single_container(args, target_race, save_replays_dir, enemy_race=target_enemy, rev_meta=rev_meta)
         sc2_wall_ms = round((time.monotonic() - t0) * 1000.0, 1)
         report["sc2_duel_wall_ms"] = sc2_wall_ms
+
+    report["rev_id"] = rev_meta["rev_id"]
+    report["commit_id"] = rev_meta["commit_id"]
+    report["rev_label"] = rev_meta["rev_label"]
+    if shard_count > 1:
+        report["shard_index"] = shard_index
+        report["shard_count"] = shard_count
 
     if render_dir is not None and args.mode == "duel" and race_reports_for_render:
         t_ren0 = time.monotonic()
@@ -4022,6 +4299,16 @@ async def run_in_container(args: argparse.Namespace) -> int:
         raise RuntimeError(f"SC2_x64 on :{port} failed to start: {last_err}")
 
     all_specs = load_scenarios(getattr(args, "scenarios", ""), Path("/mothman-repo"))
+    shard_index = int(getattr(args, "shard_index", 0) or 0)
+    shard_count = int(getattr(args, "shard_count", 1) or 1)
+    if getattr(args, "rev_id", "") or getattr(args, "commit_id", ""):
+        in_container_rev_meta = {
+            "rev_id": str(getattr(args, "rev_id", "") or getattr(args, "commit_id", "")),
+            "commit_id": str(getattr(args, "commit_id", "") or getattr(args, "rev_id", "")),
+            "rev_label": str(getattr(args, "rev_label", "") or ""),
+        }
+    else:
+        in_container_rev_meta = read_repo_revision_meta(Path("/mothman-repo"))
     if getattr(args, "scenario_ids", ""):
         by_id = {s.id: s for s in all_specs}
         want_ids = [sid.strip() for sid in args.scenario_ids.split(",") if sid.strip()]
@@ -4046,6 +4333,21 @@ async def run_in_container(args: argparse.Namespace) -> int:
             getattr(args, "category", ""),
             eff_suite_in,
         )
+        scenarios = shard_scenarios(scenarios, shard_index, shard_count)
+        if not scenarios:
+            empty_rep: dict[str, Any] = {
+                "mode": args.mode,
+                "opponent_mode": getattr(args, "opponent", "dummy"),
+                "engine": "SC2_x64_Base75689",
+                "map": args.map,
+                "rev_id": in_container_rev_meta["rev_id"],
+                "commit_id": in_container_rev_meta["commit_id"],
+                "rev_label": in_container_rev_meta["rev_label"],
+                "summary": {"total": 0, "mothman_wins": 0, "agg_trade_ratio": 1.0},
+                "scenarios": [],
+            }
+            print(json.dumps(empty_rep, indent=2))
+            return 0
 
     opp_mode = getattr(args, "opponent", "dummy")
 
@@ -4218,6 +4520,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         "last_combat_event_loop": 0,
                         "prev_unit_hp_map": {},
                         "pos_samples": [],
+                        "step_ms_samples": [],
+                        "last_obs_sent_ts": None,
                         "results": [],
                         "errors": [],
                         "sc2_ended_reason": None,
@@ -5381,6 +5685,9 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             "p2_combat_alive_cnt": dstate["p2_combat_alive_cnt"],
                             "p1_lost_val": round(p1_lost, 1),
                             "p2_lost_val": round(p2_lost, 1),
+                            "our_surviving_val": round(float(dstate["p1_rem_val"]), 1),
+                            "enemy_surviving_val": round(float(dstate["p2_rem_val"]), 1),
+                            "win_margin": round(float(dstate["p1_rem_val"]) - float(dstate["p2_rem_val"]), 1),
                             "trade_ratio": trade,
                             "p1_trade_ratio": trade,
                             "p2_trade_ratio": p2_trade,
@@ -5407,6 +5714,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             "dps_active_pct": pos_agg["dps_active_pct"],
                             "first_action_loop_offset": dstate.get("first_action_loop_offset", -1),
                             "loops_simulated": cur_loop - dstate["phase_start_loop"],
+                            "step_p95_ms": compute_step_p95_ms(dstate.get("step_ms_samples") or []),
                             "wall_ms": round((time.monotonic() - dstate["round_t0"]) * 1000.0, 1),
                         }
                         if dstate["ability_reject_codes"]:
@@ -5444,6 +5752,15 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 sorted(dstate["p2_ability_counts"].items(), key=lambda kv: -kv[1])[:10]
                             )
                         dstate["results"].append(rec)
+                        if getattr(args, "stream_jsonl", ""):
+                            append_stream_jsonl_record(
+                                args.stream_jsonl,
+                                rec,
+                                rev_meta=in_container_rev_meta,
+                                opp_mode=opp_mode,
+                                shard_index=shard_index,
+                                shard_count=shard_count,
+                            )
 
                     def _ensure_active_round_finalized(fallback_reason: str = "early_match_end") -> None:
                         if (
@@ -5467,6 +5784,10 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                     continue
                                 req = sc2api_pb2.Request()
                                 req.ParseFromString(msg.data)
+
+                                if dstate["phase"] == "fighting" and dstate["last_obs_sent_ts"] is not None and (req.HasField("action") or req.HasField("step")):
+                                    dstate["step_ms_samples"].append((time.monotonic() - float(dstate["last_obs_sent_ts"])) * 1000.0)
+                                    dstate["last_obs_sent_ts"] = None
 
                                 pending_action_cmds: list[tuple[int, int] | None] = []
                                 if req.HasField("action"):
@@ -6657,6 +6978,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         dstate["econ_worker_total_ticks"] = 0
                                         dstate["nc"] = {}
                                         dstate["pos_samples"] = []
+                                        dstate["step_ms_samples"] = []
+                                        dstate["last_obs_sent_ts"] = None
 
                                     elif dstate["phase"] == "carrier_fill" and gl >= dstate["phase_start_loop"] + 2:
                                         # Top off debug-spawned Carriers from SC2's default 4/8 -> full 8/8 Interceptors (`1042`)!
@@ -7271,6 +7594,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                     )
 
                                 await bot_ws.send_bytes(resp.SerializeToString())
+                                if req.HasField("observation") and resp.HasField("observation") and dstate["phase"] == "fighting":
+                                    dstate["last_obs_sent_ts"] = time.monotonic()
                                 if dstate["done"].is_set():
                                     break
                         except Exception as exc:
@@ -7407,6 +7732,9 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         "mode": "duel",
                         "opponent_mode": opp_mode,
                         "engine": "SC2_x64_Base75689",
+                        "rev_id": in_container_rev_meta["rev_id"],
+                        "commit_id": in_container_rev_meta["commit_id"],
+                        "rev_label": in_container_rev_meta["rev_label"],
                         "bot": bname1,
                         "p2_bot": p2_label,
                         "race": our_race,
@@ -7590,7 +7918,13 @@ def main() -> int:
     parser.add_argument("--video-format", choices=["mp4", "webp"], default=DEFAULT_VIDEO_FORMAT, help="Output 3D video container/codec: mp4 (default H.264) or webp")
     parser.add_argument("--max-render-frames", type=int, default=DEFAULT_MAX_RENDER_FRAMES, help="Max rendered 3D frames per duel (default: 480 = full 960 loops @ step=2)")
     parser.add_argument("--scenario-ids", default="", help="Optional comma-separated exact scenario IDs to run")
+    parser.add_argument("--shard-index", type=int, default=0, help="0-based shard index for deterministic scenario sharding (default: 0)")
+    parser.add_argument("--shard-count", type=int, default=1, help="Total shard count for deterministic interleaved scenario sharding (default: 1)")
+    parser.add_argument("--stream-jsonl", default="", help="Optional JSONL path to append and flush one compact record per completed scenario")
     parser.add_argument("--save-replay-path", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--rev-id", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--commit-id", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--rev-label", default="", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.in_container:
         return asyncio.run(run_in_container(args))

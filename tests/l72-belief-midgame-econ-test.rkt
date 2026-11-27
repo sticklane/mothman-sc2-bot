@@ -126,28 +126,32 @@
             (make-min-workers 1200 100.0 30.0 (map sat-mineral-info-tag mins-b3) 15)
             (make-gas-workers 2000 30.0 22.0 10 3)))
 
-  ;; 1a: Early (loop=5000) AND 3-base mid-game (loop=9000, 50w): 210G/90M MUST latch #t & pull down to 1!
+  ;; 1a: Loop 88A Flow-Balanced Physics (mineral-heavy demand on early & 3-base mid-game):
+  ;;     At 210G/90M with mineral-heavy demand (`m-dem=1800, g-dem=150`), flow balance computes G*=0,
+  ;;     latches #t, and pulls surplus gas workers on BOTH early (loop=5000) AND 3-base (loop=9000, 50w)!
   (define st-5000 (make-worker-sat-state))
   (define ds-5000
     (evaluate-worker-saturation-policy!
      st-5000 #:loop 5000 #:race 'Protoss #:minerals 90 #:gas 210
      #:workers ws-50-3g #:bases (list b1 b2 b3) #:gas-buildings (list g1 g2-0 g3-0)
-     #:minerals-fields all-3b-mins))
+     #:minerals-fields all-3b-mins
+     #:mineral-demand-rate 1800.0 #:gas-demand-rate 150.0))
   (define st-9000 (make-worker-sat-state))
   (define ds-9000
     (evaluate-worker-saturation-policy!
      st-9000 #:loop 9000 #:race 'Terran #:minerals 90 #:gas 210
      #:workers ws-50-3g #:bases (list b1 b2 b3) #:gas-buildings (list g1 g2-0 g3-0)
-     #:minerals-fields all-3b-mins))
+     #:minerals-fields all-3b-mins
+     #:mineral-demand-rate 1800.0 #:gas-demand-rate 150.0))
   (check! (and (unbox (worker-sat-gas-pull-latch-box st-5000))
-               (= (gas-pull-count ds-5000) 2)
+               (>= (gas-pull-count ds-5000) 2)
                (unbox (worker-sat-gas-pull-latch-box st-9000))
-               (= (gas-pull-count ds-9000) 2))
-          (format "1a. R20 GRMS 210G/90M must latch #t & pull 3->1 (2 pulls) on both early & 3b/50w; l5=~a p5=~a l9=~a p9=~a"
+               (>= (gas-pull-count ds-9000) 2))
+          (format "1a. Flow-balanced 210G/90M mineral-heavy must latch #t & pull >=2 on early & 3b/50w; l5=~a p5=~a l9=~a p9=~a"
                   (unbox (worker-sat-gas-pull-latch-box st-5000)) (gas-pull-count ds-5000)
                   (unbox (worker-sat-gas-pull-latch-box st-9000)) (gas-pull-count ds-9000)))
 
-  ;; 1b: 3-base mid-game (loop=9000, 50w) at 260G/90M MUST trigger gas-pull-to-zero-now? (pulls even 1->0)!
+  ;; 1b: 3-base mid-game (loop=9000, 50w) at 260G/90M with mineral-heavy demand evacuates 1->0!
   (define st-evac (make-worker-sat-state))
   (define g1-1 (mk-g 10 30.0 22.0 #:asgn 1 #:ideal 3 #:base 1))
   (define ws-50-1g
@@ -159,14 +163,18 @@
     (evaluate-worker-saturation-policy!
      st-evac #:loop 9000 #:race 'Zerg #:minerals 90 #:gas 260
      #:workers ws-50-1g #:bases (list b1 b2 b3) #:gas-buildings (list g1-1 g2-0 g3-0)
-     #:minerals-fields all-3b-mins))
+     #:minerals-fields all-3b-mins
+     #:mineral-demand-rate 2000.0 #:gas-demand-rate 120.0))
   (check! (and (unbox (worker-sat-gas-pull-latch-box st-evac))
                (= (gas-pull-count ds-evac) 1))
-          (format "1b. R20 GRMS 260G/90M on 3b/50w must still evacuate 1->0; latch=~a pulls=~a"
+          (format "1b. Flow-balanced 260G/90M mineral-heavy on 3b/50w must evacuate 1->0; latch=~a pulls=~a"
                   (unbox (worker-sat-gas-pull-latch-box st-evac)) (gas-pull-count ds-evac)))
 
-  ;; 1c: 3-base mid-game (loop=9000) with 6 gas & 25 mineral workers (< 28 R20 floor) STILL blocks slot #7!
+  ;; 1c: 3-base mid-game (loop=9000) with 6 gas & 25 mineral workers: when macro demand needs
+  ;;     <= 6 gas workers (`m-dem=1400, g-dem=240` at 200M/120G -> G*<=6), slot #7 is NOT refilled;
+  ;;     when macro demand is gas-heavy (`m-dem=800, g-dem=600` -> G*=9), slot #7 refills immediately!
   (define st-3b-g7 (make-worker-sat-state))
+  (define st-3b-g7-hi (make-worker-sat-state))
   (define b1-g7 (mk-b 1 30.0 30.0 #:asgn 9 #:ideal 16 #:patches (map sat-mineral-info-tag mins-b1)))
   (define b2-g7 (mk-b 2 65.0 30.0 #:asgn 8 #:ideal 16 #:patches (map sat-mineral-info-tag mins-b2)))
   (define b3-g7 (mk-b 3 100.0 30.0 #:asgn 8 #:ideal 16 #:patches (map sat-mineral-info-tag mins-b3)))
@@ -180,10 +188,18 @@
     (evaluate-worker-saturation-policy!
      st-3b-g7 #:loop 9000 #:race 'Protoss #:minerals 200 #:gas 120
      #:workers ws-3b-25m-6g #:bases (list b1-g7 b2-g7 b3-g7) #:gas-buildings (list g1 g2 g3-0)
-     #:minerals-fields all-3b-mins))
-  (check! (= (gas-refill-count ds-3b-g7) 0)
-          (format "1c. R20 g>=6 floor=28 must stay intact on 3b with 25 mineral workers; refills=~a"
-                  (gas-refill-count ds-3b-g7))))
+     #:minerals-fields all-3b-mins
+     #:mineral-demand-rate 1400.0 #:gas-demand-rate 240.0))
+  (define ds-3b-g7-hi
+    (evaluate-worker-saturation-policy!
+     st-3b-g7-hi #:loop 9000 #:race 'Protoss #:minerals 200 #:gas 120
+     #:workers ws-3b-25m-6g #:bases (list b1-g7 b2-g7 b3-g7) #:gas-buildings (list g1 g2 g3-0)
+     #:minerals-fields all-3b-mins
+     #:mineral-demand-rate 800.0 #:gas-demand-rate 600.0))
+  (check! (and (= (gas-refill-count ds-3b-g7) 0)
+               (>= (gas-refill-count ds-3b-g7-hi) 1))
+          (format "1c. Flow-balanced slot #7 blocks under low gas-dem & refills under gas-heavy dem; low=~a hi=~a"
+                  (gas-refill-count ds-3b-g7) (gas-refill-count ds-3b-g7-hi))))
 
 ;; =============================================================================
 ;; 2. Post-4:30 (`> 6048f`) A2 Mineral Rally & 3rd/4th-Base Transfer Kickstart

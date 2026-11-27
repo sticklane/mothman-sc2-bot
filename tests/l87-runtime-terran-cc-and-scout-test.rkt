@@ -436,14 +436,22 @@
                           #:enemy-units enemy-tank-and-distant-pf
                           #:enemy-buildings distant-pf-bldg)))
   (define attacked-tank-despite-distant-pf?
-    (ormap (lambda (a)
-             (and (pair? a)
-                  (memq (car a) '(attack-unit attack))
-                  (member (third a) '(4201 4202))))
-           acts-pf))
+    (and (not (ormap (lambda (a) (and (pair? a) (memq (car a) '(move kite)))) acts-pf))
+         (ormap (lambda (a)
+                  (and (pair? a)
+                       (or (and (memq (car a) '(attack-unit attack))
+                                (member (third a) '(4201 4202)))
+                           (and (eq? (car a) 'attack-pos)
+                                (let ([u (second a)])
+                                  (or (member u '(4100 4101 4102 4103 4104 4105))
+                                      (and (list? u)
+                                           (ormap (lambda (id) (member id '(4100 4101 4102 4103 4104 4105))) u))))
+                                (real? (third a)) (real? (fourth a))
+                                (<= (dist2d (third a) (fourth a) 98.5 89.0) 14.0)))))
+                acts-pf)))
   (check-test "T4a-l87-distant-enemy-pf-does-not-disable-tank-shell-zone-commit-fire"
               attacked-tank-despite-distant-pf?
-              (format "acts=~s" (filter (lambda (a) (and (pair? a) (memq (car a) '(attack-unit attack move kite)))) acts-pf)))
+              (format "acts=~s" (filter (lambda (a) (and (pair? a) (memq (car a) '(attack-unit attack attack-pos move kite)))) acts-pf)))
 
   ;; T4b: Home muster enters at 1200-val Natural push (< old 1800) and releases at 0.78x (>= 0.72, < old 0.85)!
   (define rt-hm (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
@@ -2006,8 +2014,9 @@
                       committed-4g11? (rt-cheese-phase rt-4g11)
                       committed-8g11? (rt-cheese-phase rt-8g11)))
 
-  ;; T11d (restored in Loop 87G): Duplicate wd-gas-mode safety valve triggers at >= 210G & < 100M
-  ;; (> 3 gas harvesters) and stays off below 210G (195G/80M) or at <= 3 gas harvesters!
+  ;; T11d (Loop 88A single-authority update): Duplicate runtime `wd-gas-mode` is deleted;
+  ;; live `step-layer2-economy!` emits ZERO conflicting `rebalance-gas-to-minerals` and
+  ;; `step-live-bot-runtime!` exports Brain/Escrow demand rates to `worker-saturation-policy.rkt`!
   (define gas11-bldgs
     (list (mk-u 11301 'nexus 32.0 32.0 #:hp 1000.0 #:shield 1000.0)
           (mk-u 11302 'nexus 56.0 32.0 #:hp 1000.0 #:shield 1000.0)
@@ -2023,27 +2032,27 @@
               (hash 'id (+ 11313 i) 'type 'probe 'x 35.5 'y 28.5 'hp 20.0 'max-hp 20.0 'shield 20.0 'max-shield 20.0
                     'order-ability-id 295 'order-target-id 11304))
             (mk-workers 'probe 30 11320 32.0 32.0)))
-  (define acts-gas11-no-pull
-    (step-layer2-economy!
-     (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss)
-     (mk-live-obs #:race 'Protoss #:enemy-race 'Terran #:frame 7200
-                  #:minerals 80 #:gas 195 #:supply-used 72 #:supply-cap 94 #:army-supply 30
-                  #:mineral-harvesters 30 #:vespene-harvesters 6
-                  #:ally-buildings gas11-bldgs #:ally-units gas11-probes-6g)))
-  (define gas11-no-pull-at-195g?
-    (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals))) acts-gas11-no-pull)))
-  (define acts-gas11-pull
-    (step-layer2-economy!
+  (define res-gas11
+    (step-live-bot-runtime!
      (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss)
      (mk-live-obs #:race 'Protoss #:enemy-race 'Terran #:frame 7200
                   #:minerals 80 #:gas 215 #:supply-used 72 #:supply-cap 94 #:army-supply 30
                   #:mineral-harvesters 30 #:vespene-harvesters 6
                   #:ally-buildings gas11-bldgs #:ally-units gas11-probes-6g)))
-  (define gas11-pulls-at-215g?
-    (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals))) acts-gas11-pull) #t))
-  (check-test "T11d-l87g-wd-gas-mode-restored-210g-safety-valve-and-3w-floor"
-              (and gas11-no-pull-at-195g? gas11-pulls-at-215g?)
-              (format "noPull195g=~a pull215g=~a" gas11-no-pull-at-195g? gas11-pulls-at-215g?))
+  (define gas11-no-dup-rebal?
+    (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals)))
+                (hash-ref res-gas11 'actions '()))))
+  (define gas11-exports-flow-demand?
+    (and (real? (hash-ref res-gas11 'mineral-demand-rate #f))
+         (real? (hash-ref res-gas11 'gas-demand-rate #f))
+         (exact-nonnegative-integer? (hash-ref res-gas11 'desired-gas-workers #f))))
+  (check-test "T11d-l88a-wd-gas-mode-deleted-single-authority-flow-demand-export"
+              (and gas11-no-dup-rebal? gas11-exports-flow-demand?)
+              (format "noDupRebal=~a mDem=~a gDem=~a desG=~a"
+                      gas11-no-dup-rebal?
+                      (hash-ref res-gas11 'mineral-demand-rate #f)
+                      (hash-ref res-gas11 'gas-demand-rate #f)
+                      (hash-ref res-gas11 'desired-gas-workers #f)))
 
   ;; T11e: Cannon Rush 0-supply commit fix: 1 proxy Photon Cannon with 0 combat supply commits
   ;; immediately at 100s, then transitions cleanly into 'follow-up releasing proxy probe, stopping

@@ -1739,17 +1739,72 @@
    (->* (Any Any)
         (#:ally-upgrades Any
          #:enemy-upgrades Any
-         #:defending-home? Any)
+         #:defending-home? Any
+         #:ally-cohesion Any
+         #:enemy-cohesion Any
+         #:elevation-delta Any
+         #:choke-width Any
+         #:upgrade-delta Any)
         (Immutable-HashTable Symbol Any)))
 (define (predict-engagement-outcome ally-units enemy-units
                                     #:ally-upgrades [au '()]
                                     #:enemy-upgrades [eu '()]
-                                    #:defending-home? [def? #f])
+                                    #:defending-home? [def? #f]
+                                    #:ally-cohesion [raw-ally-coh 1.0]
+                                    #:enemy-cohesion [raw-enemy-coh 1.0]
+                                    #:elevation-delta [raw-elev-delta 0.0]
+                                    #:choke-width [raw-choke-w #f]
+                                    #:upgrade-delta [raw-upg-delta 0])
   (define allies (parse-combat-unit-list ally-units))
   (define enemies (parse-combat-unit-list enemy-units))
   (define ally-upgs (parse-combat-upgrades au))
   (define enemy-upgs (parse-combat-upgrades eu))
   (define home? (if def? #t #f))
+  (define ally-coh : Flonum
+    (min 1.0 (max 0.35 (->float (safe-finite-real raw-ally-coh 1.0)))))
+  (define enemy-coh : Flonum
+    (min 1.0 (max 0.35 (->float (safe-finite-real raw-enemy-coh 1.0)))))
+  (define elev-delta : Flonum
+    (->float (safe-finite-real raw-elev-delta 0.0)))
+  (define choke-w : (Option Flonum)
+    (if (and (real? raw-choke-w) (finite-real? raw-choke-w) (> raw-choke-w 0.0))
+        (->float raw-choke-w)
+        #f))
+  (define upg-delta-val : Flonum
+    (min 3.0 (max -3.0 (->float (safe-finite-real raw-upg-delta 0.0)))))
+  (define explicit-upgs-empty? : Boolean
+    (and (or (null? au) (not au))
+         (or (null? eu) (not eu))))
+  ;; Physics modifiers: local cluster cohesion, cliff elevation, choke geometry, upgrade delta
+  (define coh-mult : Flonum
+    (/ (real-expt-nonneg ally-coh 1.35)
+       (max 0.15 (real-expt-nonneg enemy-coh 1.35))))
+  (define elev-mult : Flonum
+    (cond
+      [(< elev-delta 0.0)
+       (define frac : Flonum (min 1.0 (/ (- elev-delta) 1.5)))
+       (/ (- 1.0 (* 0.28 frac))
+          (+ 1.0 (* 0.12 frac)))]
+      [(> elev-delta 0.0)
+       (define frac : Flonum (min 1.0 (/ elev-delta 1.5)))
+       (/ (+ 1.0 (* 0.12 frac))
+          (- 1.0 (* 0.22 frac)))]
+      [else 1.0]))
+  (define choke-mult : Flonum
+    (if (and choke-w (< choke-w 8.0))
+        (let ([narrowness : Flonum (min 1.0 (max 0.0 (/ (- 8.0 choke-w) 5.0)))])
+          (if home?
+              (+ 1.0 (* 0.15 narrowness))
+              (- 1.0 (* 0.28 narrowness))))
+        1.0))
+  (define upg-mult : Flonum
+    (if (and explicit-upgs-empty? (not (= upg-delta-val 0.0)))
+        (real-expt-nonneg 1.12 upg-delta-val)
+        1.0))
+  (define terrain-cohesion-mult : Flonum
+    (* coh-mult elev-mult choke-mult upg-mult))
+  (define uphill-disadvantage? : Boolean
+    (<= elev-delta -1.5))
   (define ally-total-ehp
     (for/fold ([acc : Flonum 0.0]) ([a (in-list allies)])
       (+ acc (* (exact->inexact (norm-combat-unit-count a)) (norm-combat-unit-ehp a)))))
@@ -1853,7 +1908,7 @@
             (* 0.90 enemy-air-dps enemy-air-ehp))))
   (define ally-power (* ally-eff-dps ally-total-ehp))
   (define enemy-power (* enemy-eff-dps enemy-total-ehp))
-  (define predicted-lanchester-ratio : Flonum
+  (define raw-lanchester-ratio : Flonum
     (cond
       [(<= ally-total-ehp 0.0) 0.0]
       [(<= enemy-total-ehp 0.0) 10.0]
@@ -1861,6 +1916,14 @@
        (if (> ally-eff-dps 0.0) 10.0 0.0)]
       [else
        (/ ally-power enemy-power)]))
+  (define predicted-lanchester-ratio : Flonum
+    (cond
+      [(<= ally-total-ehp 0.0) 0.0]
+      [(<= enemy-total-ehp 0.0) 10.0]
+      [(<= enemy-power 0.0)
+       (if (> ally-eff-dps 0.0) 10.0 0.0)]
+      [else
+       (* raw-lanchester-ratio terrain-cohesion-mult)]))
   (define engage-threshold : Flonum (if home? 0.62 0.95))
   (define should-engage? : Boolean
     (and (> ally-total-ehp 0.0)
@@ -1879,6 +1942,9 @@
       [else
        'skirmish-kite]))
   (hasheq 'predicted-lanchester-ratio predicted-lanchester-ratio
+          'raw-lanchester-ratio raw-lanchester-ratio
+          'terrain-cohesion-multiplier terrain-cohesion-mult
+          'uphill-disadvantage? uphill-disadvantage?
           'can-damage-enemy-pct can-damage-enemy-pct
           'anti-air-deficit? anti-air-deficit?
           'should-engage? should-engage?

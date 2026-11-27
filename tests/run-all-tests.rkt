@@ -30,6 +30,16 @@
          "../lib/mirror-mind-predictor.rkt"
          "../lib/opponent-world-model.rkt"
          "../lib/priority-macro-brain.rkt"
+         (only-in "../lib/plan/worker-saturation-policy.rkt"
+                  make-worker-sat-state
+                  sat-worker-info
+                  sat-base-info
+                  sat-gas-info
+                  sat-mineral-info
+                  sat-directive-kind
+                  sat-directive-reason
+                  sat-directive-target-tag
+                  evaluate-worker-saturation-policy!)
          "../lib/bot-runtime.rkt"
          "../bots/Mothman-Z.rkt"
          "../bots/Mothman-P.rkt"
@@ -7599,8 +7609,8 @@
                 "Coalesced mineral-walk command must retain urgent-survival-cmd?=#t and Tier P0 (0)")
   (assert-true! (and mw-rout-cmd (not (urgent-survival-cmd? mw-rout-cmd)) (= (wire-cmd-priority-tier mw-rout-cmd) 3))
                 "Routine harvest-mineral command must remain Tier P3 (3)")
-  (define test-gov (make-wire-apm-governor))
-  ;; Drain governor from initial tokens (24..36) down to P2 floor (4.0 tokens) at loop 640
+  (define test-gov (make-wire-apm-governor #:max-apm 595.0 #:burst-capacity 32.0))
+  ;; Drain the smooth 5s burst damper to 0.0 tokens (16 cmds * 2 ev = 32.0) at loop 640
   (void
    (govern-sc2-wire-actions!
     test-gov
@@ -7614,12 +7624,12 @@
                               (= (sc2-raw-unit-command-target-unit-tag c) 550)
                               (equal? (sc2-raw-unit-command-unit-tags c) '(701 702))))
                        gov-out)
-                "APM governor at 4.0 tokens must emit P0 survival mineral-walk command for '(701 702)")
+                "APM governor on dry 5s damper must emit P0 survival mineral-walk command for '(701 702)")
   (assert-true! (not (ormap (lambda (c)
                               (and (sc2-raw-unit-command? c)
                                    (= (sc2-raw-unit-command-target-unit-tag c) 551)))
                             gov-out))
-                "APM governor at 4.0 tokens (< 8.0 P3 floor) must throttle routine P3 harvest-mineral command")
+                "APM governor on dry 5s damper must throttle routine P3 harvest-mineral command (V < V_macro)")
 
   ;; 33.3 Multi-Pylon `find-verified-building-placement` performance (< 50 ms on 200x200 grid with 8 Pylons)
   (define g200-bytes (make-bytes (* 200 200) 1))
@@ -17525,7 +17535,9 @@
                        (list? (hash-ref step-res 'watchdog-expand-ring-syms)))
                   "L59(2a) Layer 1c MUST record destroyed enemy tech buildings & step-live-bot-runtime! MUST return 'watchdog-expand-ring-syms")
 
-    ;; zero_gas guard (L59C `#1566` Fix #2): 24 Probes, 60 gas (<100G), 0 gas harvesters on alive Assimilator MUST force harvest-gas!
+    ;; Flow-balanced gas saturation single-authority check (L88A replaces deleted duplicate wd-gas-mode):
+    ;; Layer 2 emits zero duplicate gas-valve actions; single-authority worker-saturation-policy saturates
+    ;; alive Assimilator 9203 (0 gas harvesters, 24 Probes, 60G/220M) with zero gas pullbacks!
     (define rt-zg (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
     (define probes-24
       (for/list ([i (in-range 24)])
@@ -17545,9 +17557,29 @@
                                    (hash 'id 9203 'type 'assimilator 'x 30.0 'y 38.0 'hp 900.0
                                          'build-progress 1.0 'vespene-contents 1800 'assigned-harvesters 0))
              'enemy-units '() 'enemy-buildings '())))
-    (assert-true! (and (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'harvest-gas))) zg-acts)))
-                       (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals))) zg-acts)))
-                  "L59(2b) zero_gas guard MUST force-saturate alive geyser at 0 gas harvesters (<100G, >=18W) & never pull-to-minerals"))
+    (define zg-sat-dirs
+      (evaluate-worker-saturation-policy!
+       (make-worker-sat-state)
+       #:loop 6000 #:race 'Protoss #:minerals 220 #:gas 60
+       #:workers (for/list ([i (in-range 24)])
+                   (sat-worker-info (+ 9100 i) 'probe (+ 30.0 (* 0.2 i)) 32.0 298 9299 #f #f #f #f))
+       #:bases (list (sat-base-info 9200 'nexus 32.5 32.5 #t #f 12 16 #f '(9299))
+                     (sat-base-info 9201 'nexus 56.5 32.5 #t #f 12 16 #f '(9298)))
+       #:gas-buildings (list (sat-gas-info 9203 'assimilator 30.0 38.0 #t 1800 0 3 9200 #f))
+       #:minerals-fields (list (sat-mineral-info 9299 26.0 32.5 1200 9200 #t)
+                               (sat-mineral-info 9298 60.0 32.5 1200 9201 #t))
+       #:mineral-demand-rate 1100.0 #:gas-demand-rate 450.0))
+    (assert-true! (and (not (ormap (lambda (a) (and (pair? a) (memq (car a) '(harvest-gas rebalance-gas-to-minerals)))) zg-acts))
+                       (not (not (ormap (lambda (d)
+                                          (and (eq? (sat-directive-kind d) 'harvest-gather)
+                                               (memq (sat-directive-reason d) '(gas-refill gas-refill-carrying))
+                                               (= (sat-directive-target-tag d) 9203)))
+                                        zg-sat-dirs)))
+                       (not (ormap (lambda (d)
+                                     (memq (sat-directive-reason d)
+                                           '(gas-pull-grms-urgent gas-pull-routine gas-pull-early gas-pull-mined-out-evac)))
+                                   zg-sat-dirs)))
+                  "L59(2b) Single-authority flow-balanced saturation MUST refill alive geyser at 0 gas harvesters (60G/220M) with zero duplicate L2 gas-valve actions"))
 
   ;; 3. Pro-Timed 3rd Bases (9:00 Income Cliff Fix across Zerg / Protoss / Terran; L59C ZvP requires RW started)
   (reset-macro-escrow-tracker!)
@@ -18045,8 +18077,9 @@
   (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit) (memv (third a) '(9404 9405)))) acts-live-rk-tower))
                 "L59C(1) Live >=1-TH full match MUST NEVER steal combat units onto Destructible* rocks or Collapsible* towers")
 
-  ;;    (b) Relaxed `zero_gas` guard (`< 100G`, `<= 1` gas harvester): at `260G / 45M` (`GAS_RICH_MIN_STARVED`),
-  ;;        `rebalance-gas-to-minerals` MUST fire instead of locking workers on gas!
+  ;;    (b) Flow-balanced gas pullback (L88A replaces deleted duplicate wd-gas-mode & hardcoded 260G/45M threshold):
+  ;;        When mineral-heavy demand outstrips gas demand at 260G / 45M, single-authority worker-saturation-policy
+  ;;        pulls excess gas workers back to minerals while Layer 2 emits zero duplicate gas-valve actions!
   (let ()
     (define rt-grm (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
     (define probes-grm
@@ -18074,8 +18107,29 @@
                                          'build-progress 1.0 'vespene-contents 1600 'assigned-harvesters 3))
              'mineral-patches (list (hash 'id 9699 'x 26.0 'y 32.5 'mineral-contents 1200))
              'enemy-units '() 'enemy-buildings '())))
-    (assert-true! (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals))) grm-acts)))
-                  "L59C(2) Relaxed zero_gas guard (<100G) MUST allow pull-to-minerals when gas-rich & mineral-starved (260G/45M)"))
+    (define grm-sat-dirs
+      (evaluate-worker-saturation-policy!
+       (make-worker-sat-state)
+       #:loop 8400 #:race 'Protoss #:minerals 45 #:gas 260
+       #:workers (append
+                  (for/list ([i (in-range 18)])
+                    (sat-worker-info (+ 9500 i) 'probe (+ 30.0 (* 0.2 i)) 32.0 298 9699 #f #f #f #f))
+                  (for/list ([i (in-range 6)])
+                    (sat-worker-info (+ 9550 i) 'probe (if (< i 3) 30.0 56.0) 38.0 298 (if (< i 3) 9603 9604) #f #f #f #f)))
+       #:bases (list (sat-base-info 9600 'nexus 32.5 32.5 #t #f 10 16 #f '(9699))
+                     (sat-base-info 9601 'nexus 56.5 32.5 #t #f 8 16 #f '(9698)))
+       #:gas-buildings (list (sat-gas-info 9603 'assimilator 30.0 38.0 #t 1600 3 3 9600 #f)
+                             (sat-gas-info 9604 'assimilator 56.0 38.0 #t 1600 3 3 9601 #f))
+       #:minerals-fields (list (sat-mineral-info 9699 26.0 32.5 1200 9600 #t)
+                               (sat-mineral-info 9698 60.0 32.5 1200 9601 #t))
+       #:mineral-demand-rate 1400.0 #:gas-demand-rate 180.0))
+    (assert-true! (and (not (ormap (lambda (a) (and (pair? a) (memq (car a) '(harvest-gas rebalance-gas-to-minerals)))) grm-acts))
+                       (not (not (ormap (lambda (d)
+                                          (and (eq? (sat-directive-kind d) 'harvest-gather)
+                                               (memq (sat-directive-reason d)
+                                                     '(gas-pull-grms-urgent gas-pull-routine gas-pull-early gas-pull-mined-out-evac))))
+                                        grm-sat-dirs))))
+                  "L59C(2) Single-authority flow-balanced saturation MUST pull excess gas workers to minerals when mineral-heavy demand outstrips gas at 260G/45M"))
 
   ;;    (c) Counter-drop defense tightly gated (`<= 16t` transport-to-TH, `<= 28t` home defenders ONLY — NEVER yank frontline >= 40t away!)
   ;;        and `l59-p7-reserved-harass-tags` strictly empty in live matches!

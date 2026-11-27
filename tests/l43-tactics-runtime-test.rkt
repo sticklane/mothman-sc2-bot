@@ -578,11 +578,11 @@
   (void (run-l34 rt-tvt (mk-live-obs 'Terran 'Terran 9600 #:supply-used 90 #:supply-cap 120
                                      #:ally-units tvt-under-army #:ally-buildings tvt-bldgs
                                      #:enemy-units enemy-tvt-wall)))
-  (define tvt-hold-under? (hash-ref (rt-door-state rt-tvt) 'l43-tvt-tank-viking-parity-hold? #f))
+  (define tvt-hold-under? (hash-ref (rt-door-state rt-tvt) 'l34-mass-staging? #f))
   (void (run-l34 rt-tvt (mk-live-obs 'Terran 'Terran 10200 #:supply-used 110 #:supply-cap 130
                                      #:ally-units tvt-parity-army #:ally-buildings tvt-bldgs
                                      #:enemy-units enemy-tvt-wall)))
-  (define tvt-hold-parity? (hash-ref (rt-door-state rt-tvt) 'l43-tvt-tank-viking-parity-hold? #f))
+  (define tvt-hold-parity? (hash-ref (rt-door-state rt-tvt) 'l34-mass-staging? #f))
   (check-true "L43-T4d-h2h-02-tvt-tank-viking-parity-hold-and-release"
               (and tvt-hold-under? (not tvt-hold-parity?))
               (format "hold-under?=~a hold-parity?=~a" tvt-hold-under? tvt-hold-parity?)))

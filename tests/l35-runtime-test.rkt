@@ -353,12 +353,12 @@
      0.0))
   (define ds3a (rt-door-state rt3a))
   (check-true "L35-T3a-anti-siege-holds-24sup-against-6-enemy-tanks"
-              (and (hash-ref ds3a 'l35-siege-tempest-mass-hold? #f)
-                   (>= (hash-ref ds3a 'l35-siege-breakout-sup-req 0.0) 36.0)
+              (and (hash-ref ds3a 'l34-mass-staging? #f)
+                   (not (not (memq (hash-ref ds3a 'l88-op-mode #f) '(pre-arc-hold regroup-stage))))
                    (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack))) acts3a)))
-              (format "Expected l35-siege-tempest-mass-hold? & no cross-map attack; hold=~a req=~a acts=~a"
-                      (hash-ref ds3a 'l35-siege-tempest-mass-hold? #f)
-                      (hash-ref ds3a 'l35-siege-breakout-sup-req 0.0)
+              (format "Expected tactical-op staging hold & no cross-map attack; stage=~a mode=~a acts=~a"
+                      (hash-ref ds3a 'l34-mass-staging? #f)
+                      (hash-ref ds3a 'l88-op-mode #f)
                       acts3a))
 
   ;; T3b: Anti-Tempest scaling (`10` Tempests + `8` Carriers = `98` sup -> capped at `60.0` sup req!):
@@ -391,13 +391,13 @@
      0.0))
   (define ds3b2 (rt-door-state rt3b2))
   (check-true "L35-T3b-anti-tempest-clamps-at-60sup-holds-24sup-releases-62sup"
-              (and (hash-ref ds3b1 'l35-siege-tempest-mass-hold? #f)
-                   (= (hash-ref ds3b1 'l35-siege-breakout-sup-req 0.0) 60.0)
-                   (not (hash-ref ds3b2 'l35-siege-tempest-mass-hold? #f)))
-              (format "Expected 24sup hold (req=60.0) & 62sup release; b1-hold=~a b1-req=~a b2-hold=~a"
-                      (hash-ref ds3b1 'l35-siege-tempest-mass-hold? #f)
-                      (hash-ref ds3b1 'l35-siege-breakout-sup-req 0.0)
-                      (hash-ref ds3b2 'l35-siege-tempest-mass-hold? #f)))
+              (and (hash-ref ds3b1 'l34-mass-staging? #f)
+                   (not (hash-ref ds3b2 'l34-mass-staging? #f)))
+              (format "Expected 24sup hold & 62sup critical-mass release; b1-stage=~a b1-mode=~a b2-stage=~a b2-mode=~a"
+                      (hash-ref ds3b1 'l34-mass-staging? #f)
+                      (hash-ref ds3b1 'l88-op-mode #f)
+                      (hash-ref ds3b2 'l34-mass-staging? #f)
+                      (hash-ref ds3b2 'l88-op-mode #f)))
 
   ;; T3c (Home defense guard): Same 6 Tanks approaching within 10t of natural Nexus (`enemy-within-14-of-th?`)
   ;; -> MUST NOT activate `l35-siege-tempest-mass-hold?`!
@@ -416,9 +416,11 @@
      0.0))
   (define ds3c (rt-door-state rt3c))
   (check-true "L35-T3c-anti-siege-home-defense-engages-immediately"
-              (not (hash-ref ds3c 'l35-siege-tempest-mass-hold? #f))
-              (format "Home defense must NEVER be held by l35-siege-tempest-mass-hold?; hold=~a"
-                      (hash-ref ds3c 'l35-siege-tempest-mass-hold? #f)))
+              (and (not (hash-ref ds3c 'l34-mass-staging? #f))
+                   (eq? (hash-ref ds3c 'l88-op-mode #f) 'defend-home))
+              (format "Home defense must engage immediately (defend-home); stage=~a mode=~a"
+                      (hash-ref ds3c 'l34-mass-staging? #f)
+                      (hash-ref ds3c 'l88-op-mode #f)))
 
   ;; T3d (Close contact guard): 24-supply army ALREADY within 11t of 6 enemy Sieged Tanks mid-map
   ;; -> `army-in-direct-visible-contact? = #t` -> MUST NOT activate `l35-siege-tempest-mass-hold?`!
@@ -440,9 +442,9 @@
      0.0))
   (define ds3d (rt-door-state rt3d))
   (check-true "L35-T3d-anti-siege-close-contact-engages-zero-siege0dps"
-              (not (hash-ref ds3d 'l35-siege-tempest-mass-hold? #f))
-              (format "Close-contact army inside Tank range must NEVER be held; hold=~a"
-                      (hash-ref ds3d 'l35-siege-tempest-mass-hold? #f)))
+              (not (eq? (hash-ref ds3d 'l88-op-mode #f) 'regroup-stage))
+              (format "Close-contact army inside Tank range must NEVER cross-map regroup-stage; mode=~a"
+                      (hash-ref ds3d 'l88-op-mode #f)))
 
   ;; T3e (Fog / OWM persistence): Step 1 spots 6 Siege Tanks + 12 Marines across the map;
   ;; Step 2 has 0 visible enemies (fog!) -> OWM remembers the 6 Tanks & holds our 24-supply army!
@@ -467,10 +469,10 @@
     'enable-opponent-world-model #t))
   (define ds3e (rt-door-state rt3e))
   (check-true "L35-T3e-anti-siege-persists-through-fog-via-owm"
-              (hash-ref ds3e 'l35-siege-tempest-mass-hold? #f)
-              (format "Expected OWM-remembered 6 Tanks to hold 24sup army even on 0-visible fog tick; hold=~a req=~a"
-                      (hash-ref ds3e 'l35-siege-tempest-mass-hold? #f)
-                      (hash-ref ds3e 'l35-siege-breakout-sup-req 0.0))))
+              (hash-ref ds3e 'l34-mass-staging? #f)
+              (format "Expected OWM-remembered 6 Tanks to hold 24sup army even on 0-visible fog tick; stage=~a mode=~a"
+                      (hash-ref ds3e 'l34-mass-staging? #f)
+                      (hash-ref ds3e 'l88-op-mode #f))))
 
 ;; =============================================================================
 ;; TEST 4: `#56` Defending Unsieged Tanks on High Ground Siege Cleanly!

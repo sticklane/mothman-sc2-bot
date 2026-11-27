@@ -245,6 +245,8 @@
  pick-far-patch-scout-worker
  saturate-workers-and-gas-commands
  translate-bot-actions->sc2-raw-commands
+ drain-wire-placement-refusals!
+ get-last-wire-placement-refusals
  get-last-bot-action-rejects
  get-total-bot-action-reject-count
  get-total-wire-action-drop-count
@@ -10379,7 +10381,10 @@
                                            #:game-info [game-info #f]
                                            #:gas-starvation-boost? [gas-starvation-boost? #f]
                                            #:apm-pressure-backoff? [apm-pressure-backoff? #f]
-                                           #:mineral-override-pressure? [mineral-override-pressure? #f])
+                                           #:mineral-override-pressure? [mineral-override-pressure? #f]
+                                           #:mineral-demand-rate [mineral-demand-rate #f]
+                                           #:gas-demand-rate [gas-demand-rate #f]
+                                           #:desired-gas-workers [desired-gas-workers #f])
   (void reserved-aabbs)
   (define eff-excluded-worker-tags
     (let ([s (mutable-seteqv)])
@@ -10850,7 +10855,10 @@
      #:mules mule-infos
      #:heavy-worker-rush-active? heavy-worker-rush-at-base?
      #:gas-starvation-boost? gas-starvation-boost?
-     #:apm-pressure-backoff? apm-pressure-backoff?))
+     #:apm-pressure-backoff? apm-pressure-backoff?
+     #:mineral-demand-rate mineral-demand-rate
+     #:gas-demand-rate gas-demand-rate
+     #:desired-gas-workers desired-gas-workers))
 
   ;; 1:1 Wire codec translation of `sat-directive` -> `sc2-raw-unit-command`
   (for ([dir (in-list policy-directives)])
@@ -11115,6 +11123,23 @@
    eff-builders
    commanded-combat-tags))
 
+(define SC2-PREV-SELF-BLDG-POS (make-hasheqv))
+(define SC2-RECENT-BLDG-DEATH-PTS (box '()))
+(define SC2-STEP-PLACEMENT-REFUSALS (box '()))
+
+(define (record-wire-placement-refusal! bldg-sym reason cur-loop)
+  (define cur (unbox SC2-STEP-PLACEMENT-REFUSALS))
+  (unless (ormap (lambda (r) (and (eq? (car r) bldg-sym) (eq? (cadr r) reason))) cur)
+    (set-box! SC2-STEP-PLACEMENT-REFUSALS (cons (list bldg-sym reason cur-loop) cur))))
+
+(define (drain-wire-placement-refusals!)
+  (define res (reverse (unbox SC2-STEP-PLACEMENT-REFUSALS)))
+  (set-box! SC2-STEP-PLACEMENT-REFUSALS '())
+  res)
+
+(define (get-last-wire-placement-refusals)
+  (reverse (unbox SC2-STEP-PLACEMENT-REFUSALS)))
+
 (define (get-last-bot-action-rejects)
   (unbox SC2-LAST-BOT-ACTION-REJECTS))
 
@@ -11227,6 +11252,7 @@
           (values (reverse acc-rev) (reverse rej-rev)))
         (filter-valid-bot-actions normalized-raw-actions)))
   (set-box! SC2-LAST-BOT-ACTION-REJECTS step-action-rejects)
+  (set-box! SC2-STEP-PLACEMENT-REFUSALS '())
   (when (pair? step-action-rejects)
     (set-box! SC2-TOTAL-BOT-ACTION-REJECT-COUNT
               (+ (unbox SC2-TOTAL-BOT-ACTION-REJECT-COUNT) (length step-action-rejects))))
@@ -11353,7 +11379,10 @@
       (reset-sc2-nexus-recharge-cooldown!)
       (hash-clear! SC2-CREEP-TUMOR-FIRST-SEEN-LOOP)
       (hash-clear! SC2-CREEP-TUMOR-EMIT-COUNT)
-      (hash-clear! SC2-SUPPLY-DROP-USED-DEPOTS))
+      (hash-clear! SC2-SUPPLY-DROP-USED-DEPOTS)
+      (hash-clear! SC2-PREV-SELF-BLDG-POS)
+      (set-box! SC2-RECENT-BLDG-DEATH-PTS '())
+      (set-box! SC2-STEP-PLACEMENT-REFUSALS '()))
     (when (or (< cur-loop (unbox SC2-NEXUS-RECHARGE-LAST-LOOP))
               (and (<= cur-loop 8) (> (unbox SC2-NEXUS-RECHARGE-LAST-LOOP) 8)))
       (reset-sc2-nexus-recharge-cooldown!))
@@ -11362,6 +11391,7 @@
       (when (pair? rzs)
         (set-box! SC2-ACTIVE-RECALL-ZONES
                   (filter (lambda (z) (< cur-loop (second z))) rzs)))))
+  (define prev-bldg-obs-loop (unbox SC2-ENEMY-POS-LAST-LOOP))
   (when (sc2-observation? obs)
     (when (or (< cur-loop (unbox SC2-ENEMY-POS-LAST-LOOP))
               (and (<= cur-loop 8) (> (unbox SC2-ENEMY-POS-LAST-LOOP) 8)))
@@ -11418,7 +11448,10 @@
       (hash-clear! SC2-SUPPLY-DROP-USED-DEPOTS)
       (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
       (set-box! SC2-TERRITORY-FIELD-CACHE #f)
-      (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
+      (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999)
+      (hash-clear! SC2-PREV-SELF-BLDG-POS)
+      (set-box! SC2-RECENT-BLDG-DEATH-PTS '())
+      (set-box! SC2-STEP-PLACEMENT-REFUSALS '()))
     (set-box! SC2-ENEMY-POS-LAST-LOOP cur-loop)
     (when (< cur-loop (unbox SC2-WARPGATE-LAST-LOOP))
       (hash-clear! SC2-WARPGATE-COOLDOWN-UNTIL)
@@ -11430,12 +11463,21 @@
       (reset-sc2-nexus-recharge-cooldown!)
       (hash-clear! SC2-CREEP-TUMOR-FIRST-SEEN-LOOP)
       (hash-clear! SC2-CREEP-TUMOR-EMIT-COUNT)
-      (hash-clear! SC2-SUPPLY-DROP-USED-DEPOTS))
+      (hash-clear! SC2-SUPPLY-DROP-USED-DEPOTS)
+      (hash-clear! SC2-PREV-SELF-BLDG-POS)
+      (set-box! SC2-RECENT-BLDG-DEATH-PTS '())
+      (set-box! SC2-STEP-PLACEMENT-REFUSALS '()))
     (set-box! SC2-WARPGATE-LAST-LOOP cur-loop)
     (define raw-dead (sc2-observation-dead-unit-tags obs))
     (when (list? raw-dead)
       (for ([dtag (in-list raw-dead)]
             #:when (valid-u64-tag? dtag))
+        (define dead-self-bldg (hash-ref SC2-PREV-SELF-BLDG-POS dtag #f))
+        (when dead-self-bldg
+          (set-box! SC2-RECENT-BLDG-DEATH-PTS
+                    (cons (list (car dead-self-bldg) (cadr dead-self-bldg) cur-loop (caddr dead-self-bldg))
+                          (unbox SC2-RECENT-BLDG-DEATH-PTS)))
+          (hash-remove! SC2-PREV-SELF-BLDG-POS dtag))
         (hash-remove! SC2-LAST-KNOWN-ENEMY-POS dtag)
         (set-remove! SC2-LAST-KNOWN-ENEMY-NON-CAMPERS dtag)
         (hash-remove! SC2-LAST-KNOWN-ENEMY-META dtag)
@@ -11814,6 +11856,51 @@
                          (unit-leased-above? role-leases utag 'army cur-loop))))
       (set! combat-units (cons u combat-units))
       (set! total-combat-supply (+ total-combat-supply (max 1 (sc2-supply-cost usym))))))
+  ;; Track recent friendly building deaths & live air/ground enemy combat proximity
+  ;; so tech structure placement automatically shifts to safe living bases.
+  (when (sc2-observation? obs)
+    (when (and (> cur-loop prev-bldg-obs-loop)
+               (<= (- cur-loop prev-bldg-obs-loop) 64)
+               (> (hash-count SC2-PREV-SELF-BLDG-POS) 0))
+      (for ([ptag (in-list (hash-keys SC2-PREV-SELF-BLDG-POS))]
+            #:unless (hash-has-key? self-unit-by-tag ptag))
+        (define prev-b (hash-ref SC2-PREV-SELF-BLDG-POS ptag #f))
+        (when prev-b
+          (set-box! SC2-RECENT-BLDG-DEATH-PTS
+                    (cons (list (car prev-b) (cadr prev-b) cur-loop (caddr prev-b))
+                          (unbox SC2-RECENT-BLDG-DEATH-PTS))))))
+    (hash-clear! SC2-PREV-SELF-BLDG-POS)
+    (for ([s (in-list self-structures)])
+      (define sp (sc2-unit-pos s))
+      (hash-set! SC2-PREV-SELF-BLDG-POS
+                 (sc2-unit-tag s)
+                 (list (sc2-point3d-x sp)
+                       (sc2-point3d-y sp)
+                       (sc2-id->unit-symbol (sc2-unit-unit-type s) 'unknown))))
+    (let ([deaths (unbox SC2-RECENT-BLDG-DEATH-PTS)])
+      (when (pair? deaths)
+        (set-box! SC2-RECENT-BLDG-DEATH-PTS
+                  (filter (lambda (d)
+                            (and (>= cur-loop (third d))
+                                 (<= (- cur-loop (third d)) 2016))) ; physics: 90s building-death threat memory
+                          deaths)))))
+  (define step-enemy-all-combat-pts
+    (for/list ([e (in-list enemy-units)]
+               #:when (sc2-unit-targetable-enemy-combat? e))
+      (define ep (sc2-unit-pos e))
+      (cons (sc2-point3d-x ep) (sc2-point3d-y ep))))
+  (define step-recent-bldg-deaths (unbox SC2-RECENT-BLDG-DEATH-PTS))
+  (define (base-tech-safety-penalty x y)
+    (define enemy-pen
+      (for/sum ([ep (in-list step-enemy-all-combat-pts)])
+        (define d (pt-dist x y (car ep) (cdr ep)))
+        (if (<= d 22.0) (+ 100.0 (* 10.0 (- 22.0 d))) 0.0)))
+    (define death-pen
+      (for/sum ([dp (in-list step-recent-bldg-deaths)])
+        (define d (pt-dist x y (first dp) (second dp)))
+        (if (<= d 16.0) (+ 250.0 (* 12.0 (- 16.0 d))) 0.0)))
+    (+ enemy-pen death-pen))
+
   (define active-friendly-th-build-pads
     (for*/list ([w (in-list workers)]
                 #:when (not (worker-build-order-stuck? w cur-loop))
@@ -12955,10 +13042,18 @@
                    (exact->inexact (hash-ref eh 'y))))
            '())))
     (define (anchor-uncontested? ax ay)
-      (for/and ([ept (in-list non-worker-enemy-combat-pts)])
-        (> (pt-dist ax ay (car ept) (cdr ept)) 14.0)))
-    (define (sort-by-near pts)
-      (sort pts < #:key (lambda (pt) (pt-dist near-x near-y (car pt) (cdr pt)))))
+      (and (for/and ([ept (in-list non-worker-enemy-combat-pts)])
+             (> (pt-dist ax ay (car ept) (cdr ept)) 14.0))
+           (<= (base-tech-safety-penalty ax ay) 0.0)))
+    (define (sort-by-safe-then-near pts)
+      (sort pts
+            (lambda (a b)
+              (define pa (base-tech-safety-penalty (car a) (cdr a)))
+              (define pb (base-tech-safety-penalty (car b) (cdr b)))
+              (if (not (= pa pb))
+                  (< pa pb)
+                  (< (pt-dist near-x near-y (car a) (cdr a))
+                     (pt-dist near-x near-y (car b) (cdr b)))))))
     (define completed-ths
       (for/list ([u (in-list self-units)]
                  #:when (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
@@ -12979,11 +13074,11 @@
       (partition (lambda (pt) (anchor-uncontested? (car pt) (cdr pt))) completed-tumors))
     (define uncontested-ordered
       (remove-duplicates
-       (append (sort-by-near uncontested-ths)
-               (sort-by-near uncontested-tumors))))
+       (append (sort-by-safe-then-near uncontested-ths)
+               (sort-by-safe-then-near uncontested-tumors))))
     (define contested-ordered
       (remove-duplicates
-       (sort-by-near (append contested-ths contested-tumors))))
+       (sort-by-safe-then-near (append contested-ths contested-tumors))))
     (define ordered
       (remove-duplicates (append uncontested-ordered contested-ordered)))
     (if (null? ordered)
@@ -15735,7 +15830,7 @@
             (define has-unit-map? (or (pair? power-sources) (pair? units)))
             (define has-power-src? (or (pair? power-sources) (pair? completed-pylons)))
             (define skip-unpowered-cannon?
-              (and (eq? norm 'photon-cannon) has-unit-map? (not has-power-src?)))
+              (and has-unit-map? (not has-power-src?)))
             (define raw-pylon-anchors (if skip-unpowered-cannon? '() (pylon-power-anchors req-x req-y)))
             ;; W18-P0-1-wire (`<3:30` early Ling rush `#36 P`): Partition uncontested Pylons FIRST
             ;; (no non-flying enemy combat unit within 6.5t) and extend `req-contested?` to core
@@ -15868,27 +15963,52 @@
                   (memq norm '(gateway cybernetics-core robotics-facility stargate shield-battery
                                forge twilight-council robotics-bay robotics-support-bay
                                templar-archive templar-archives dark-shrine fleet-beacon))))
-            ;; L49 Protoss Protected Tech: Keep fragile tech (`Robo`/`Stargate`/`Twilight`/`RoboBay`/
-            ;; `TemplarArchive`/`DarkShrine`/`FleetBeacon`) OUT of front/PvZ natural wall slots,
-            ;; tucking them inside Main under a safe Main-interior Pylon whenever one exists!
+            ;; L49 + Loop 88A Protoss Safe-Base Tech Placement: Keep fragile tech out of front wall slots
+            ;; and shift automatically to safe living bases when Main has enemy air/ground threats or
+            ;; recent friendly building deaths.
             (define is-fragile-protoss-tech?
               (and (memq norm SC2-PROTOSS-FRAGILE-TECH-SYMS) #t))
-            (define main-safe-pylons
-              (if (and is-fragile-protoss-tech? (pair? uncontested-pylons))
-                  (let* ([in-main
-                          (filter (lambda (pt)
-                                    (<= (pt-dist home-x home-y (car pt) (cdr pt)) 16.0))
-                                  uncontested-pylons)]
-                         [non-wall-main
-                          (filter (lambda (pt) (not (near-any-wall-slot? (car pt) (cdr pt) 4.0)))
-                                  in-main)]
-                         [best-main (if (pair? non-wall-main) non-wall-main in-main)])
-                    (sort best-main < #:key (lambda (pt) (pt-dist home-x home-y (car pt) (cdr pt)))))
+            (define safe-pylons-by-threat
+              (if (and is-fragile-protoss-tech? (pair? pylon-anchors))
+                  (sort pylon-anchors
+                        (lambda (a b)
+                          (define pa (base-tech-safety-penalty (car a) (cdr a)))
+                          (define pb (base-tech-safety-penalty (car b) (cdr b)))
+                          (if (not (= pa pb))
+                              (< pa pb)
+                              (< (pt-dist home-x home-y (car a) (cdr a))
+                                 (pt-dist home-x home-y (car b) (cdr b))))))
                   '()))
+            (define main-safe-pylons
+              (if (and is-fragile-protoss-tech? (pair? safe-pylons-by-threat))
+                  (let* ([zero-threat-pylons
+                          (filter (lambda (pt) (<= (base-tech-safety-penalty (car pt) (cdr pt)) 0.0))
+                                  safe-pylons-by-threat)]
+                         [cand-pool (if (pair? zero-threat-pylons) zero-threat-pylons safe-pylons-by-threat)]
+                         [in-main-safe
+                          (if (<= (base-tech-safety-penalty home-x home-y) 0.0)
+                              (filter (lambda (pt)
+                                        (<= (pt-dist home-x home-y (car pt) (cdr pt)) 16.0))
+                                      cand-pool)
+                              '())]
+                         [non-wall-pool
+                          (filter (lambda (pt) (not (near-any-wall-slot? (car pt) (cdr pt) 4.0)))
+                                  (if (pair? in-main-safe) in-main-safe cand-pool))])
+                    (if (pair? non-wall-pool)
+                        non-wall-pool
+                        (if (pair? in-main-safe) in-main-safe cand-pool)))
+                  '()))
+            (define req-tech-threatened?
+              (and is-fragile-protoss-tech?
+                   (> (base-tech-safety-penalty req-x req-y) 0.0)
+                   (pair? main-safe-pylons)
+                   (< (base-tech-safety-penalty (caar main-safe-pylons) (cdar main-safe-pylons))
+                      (base-tech-safety-penalty req-x req-y))))
             (define fragile-tech-main-protect?
               (and is-fragile-protoss-tech?
                    (pair? main-safe-pylons)
-                   (or (near-any-wall-slot? req-x req-y 4.5)
+                   (or req-tech-threatened?
+                       (near-any-wall-slot? req-x req-y 4.5)
                        (and (eq? step-enemy-race 'Zerg)
                             (> (pt-dist home-x home-y req-x req-y) 13.5))
                        (> (pt-dist home-x home-y req-x req-y) 16.0))))
@@ -16147,10 +16267,12 @@
                  (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999))
                (reserve-step-build-pt! place-pt ab-id)
                (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
-               (when wtag
-                 (record-step-built-structure! norm)
-                 (record-builder-reservation! wtag (sc2-point2d-x place-pt) (sc2-point2d-y place-pt) ab-id)
-                 (emit! (sc2-raw-unit-command ab-id place-pt 0 (list wtag) #f)))]
+               (if wtag
+                   (begin
+                     (record-step-built-structure! norm)
+                     (record-builder-reservation! wtag (sc2-point2d-x place-pt) (sc2-point2d-y place-pt) ab-id)
+                     (emit! (sc2-raw-unit-command ab-id place-pt 0 (list wtag) #f)))
+                   (record-wire-placement-refusal! norm 'no-worker cur-loop))]
               [(and (not tight-deferred-by-budget?)
                     (or (> protoss-budget-before 0)
                         (not ws-conn-open?))
@@ -16243,6 +16365,12 @@
                        #f)))
                (when (not relief-pylon-emitted?)
                  (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm (add1 protoss-bldg-miss-streak)))
+               (record-wire-placement-refusal!
+                norm
+                (if (or skip-unpowered-cannon? (and (null? power-sources) (null? completed-pylons)))
+                    'no-power
+                    'no-safe-placement)
+                cur-loop)
                (set! step-protoss-power-fail? #t)
                (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP
                          (if (sc2-observation? obs)
@@ -16371,49 +16499,61 @@
                     (append on-c off-c))
                   pts))
             (define zerg-main-rear-tech-anchors
-              (if (memq norm '(spawning-pool baneling-nest hydralisk-den spire))
+              (if (memq norm '(spawning-pool roach-warren baneling-nest evolution-chamber
+                               hydralisk-den lurker-den lurker-den-mp spire
+                               infestation-pit ultralisk-cavern nydus-network))
                   (let* ([comp-ths
                           (filter (lambda (u)
                                     (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
                                                '(hatchery lair hive))
                                          (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
                                   self-units)]
-                         [main-th
-                          (and (pair? comp-ths)
-                               (argmin (lambda (u)
-                                         (define p (sc2-unit-pos u))
-                                         (pt-dist home-x home-y (sc2-point3d-x p) (sc2-point3d-y p)))
-                                       comp-ths))])
-                    (if main-th
-                        (let*-values ([(mp) (sc2-unit-pos main-th)]
+                         [ordered-ths
+                          (sort comp-ths
+                                (lambda (a b)
+                                  (define pa (sc2-unit-pos a))
+                                  (define pb (sc2-unit-pos b))
+                                  (define pen-a (base-tech-safety-penalty (sc2-point3d-x pa) (sc2-point3d-y pa)))
+                                  (define pen-b (base-tech-safety-penalty (sc2-point3d-x pb) (sc2-point3d-y pb)))
+                                  (if (not (= pen-a pen-b))
+                                      (< pen-a pen-b)
+                                      (< (pt-dist home-x home-y (sc2-point3d-x pa) (sc2-point3d-y pa))
+                                         (pt-dist home-x home-y (sc2-point3d-x pb) (sc2-point3d-y pb))))))]
+                         [safest-th (and (pair? ordered-ths) (first ordered-ths))])
+                    (if safest-th
+                        (let*-values ([(mp) (sc2-unit-pos safest-th)]
                                       [(hx hy) (values (sc2-point3d-x mp) (sc2-point3d-y mp))]
                                       [(aux auy _mcx _mcy has-m? near-mins) (base-mineral-away-dir hx hy)])
-                          ;; Only pivot to rear/mineral-arc pockets when local minerals are observed
-                          ;; (preserving tight Hatchery-adjacent placement when no minerals are present!).
-                          (if (not has-m?)
-                              '()
-                              (let ([rear-cands
-                                     (filter
-                                      (lambda (pt)
-                                        (for/and ([m (in-list near-mins)])
-                                          (define mpos (sc2-unit-pos m))
-                                          (> (pt-dist (car pt) (cdr pt) (sc2-point3d-x mpos) (sc2-point3d-y mpos)) 2.55)))
-                                      (list
-                                       (let* ([ang 2.007] [ca (cos ang)] [sa (sin ang)])
-                                         (clamp-playable-pt (+ hx (* 5.2 (- (* aux ca) (* auy sa))))
-                                                            (+ hy (* 5.2 (+ (* aux sa) (* auy ca))))))
-                                       (let* ([ang -2.007] [ca (cos ang)] [sa (sin ang)])
-                                         (clamp-playable-pt (+ hx (* 5.2 (- (* aux ca) (* auy sa))))
-                                                            (+ hy (* 5.2 (+ (* aux sa) (* auy ca))))))
-                                       (let* ([ang 2.531] [ca (cos ang)] [sa (sin ang)])
-                                         (clamp-playable-pt (+ hx (* 5.5 (- (* aux ca) (* auy sa))))
-                                                            (+ hy (* 5.5 (+ (* aux sa) (* auy ca))))))
-                                       (let* ([ang -2.531] [ca (cos ang)] [sa (sin ang)])
-                                         (clamp-playable-pt (+ hx (* 5.5 (- (* aux ca) (* auy sa))))
-                                                            (+ hy (* 5.5 (+ (* aux sa) (* auy ca))))))
-                                       (clamp-playable-pt (- hx (* 8.5 aux)) (- hy (* 8.5 auy)))))])
-                                (take (prioritize-on-creep (remove-duplicates rear-cands))
-                                      (min 3 (length (remove-duplicates rear-cands)))))))
+                          (define shifted-from-home?
+                            (> (pt-dist home-x home-y hx hy) 6.0))
+                          (cond
+                            [has-m?
+                             (let ([rear-cands
+                                    (filter
+                                     (lambda (pt)
+                                       (for/and ([m (in-list near-mins)])
+                                         (define mpos (sc2-unit-pos m))
+                                         (> (pt-dist (car pt) (cdr pt) (sc2-point3d-x mpos) (sc2-point3d-y mpos)) 2.55)))
+                                     (list
+                                      (let* ([ang 2.007] [ca (cos ang)] [sa (sin ang)])
+                                        (clamp-playable-pt (+ hx (* 5.2 (- (* aux ca) (* auy sa))))
+                                                           (+ hy (* 5.2 (+ (* aux sa) (* auy ca))))))
+                                      (let* ([ang -2.007] [ca (cos ang)] [sa (sin ang)])
+                                        (clamp-playable-pt (+ hx (* 5.2 (- (* aux ca) (* auy sa))))
+                                                           (+ hy (* 5.2 (+ (* aux sa) (* auy ca))))))
+                                      (let* ([ang 2.531] [ca (cos ang)] [sa (sin ang)])
+                                        (clamp-playable-pt (+ hx (* 5.5 (- (* aux ca) (* auy sa))))
+                                                           (+ hy (* 5.5 (+ (* aux sa) (* auy ca))))))
+                                      (let* ([ang -2.531] [ca (cos ang)] [sa (sin ang)])
+                                        (clamp-playable-pt (+ hx (* 5.5 (- (* aux ca) (* auy sa))))
+                                                           (+ hy (* 5.5 (+ (* aux sa) (* auy ca))))))
+                                      (clamp-playable-pt (- hx (* 8.5 aux)) (- hy (* 8.5 auy)))))])
+                               (take (prioritize-on-creep (remove-duplicates rear-cands))
+                                     (min 3 (length (remove-duplicates rear-cands)))))]
+                            [shifted-from-home?
+                             ;; Safe secondary Hatchery without observed minerals: anchor directly on it
+                             (list (cons hx hy))]
+                            [else '()]))
                         '()))
                   '()))
             (define routine-spore-mineral-anchors
@@ -16486,12 +16626,22 @@
                   [else base-pts])))
             (define cx (caar safe-creep-pts))
             (define cy (cdar safe-creep-pts))
+            (define has-live-creep-source?
+              (or (pair? creep-source-circles)
+                  (and step-creep-grid
+                       (ormap (lambda (pt) (image-grid-pixel-set? step-creep-grid (car pt) (cdr pt)))
+                              safe-creep-pts))))
+            (define zerg-no-creep?
+              (and (sc2-observation? obs)
+                   (pair? units)
+                   (not has-live-creep-source?)))
             (define creep-bud-before (unbox step-placement-rpc-budget))
             (define creep-ws-open? (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))
             ;; For `spine-crawler`, first search tightly (`max-radius = 4.0`) strictly around
             ;; front-of-Hatchery anchors so placement NEVER wraps behind the mineral line!
             (define spine-front-pt
-              (and (eq? norm 'spine-crawler)
+              (and (not zerg-no-creep?)
+                   (eq? norm 'spine-crawler)
                    (pair? front-spine-anchors)
                    (or (find-verified-building-placement ws-conn ab-id
                                                          (caar front-spine-anchors)
@@ -16525,8 +16675,9 @@
                                                               #:rpc-budget step-placement-rpc-budget
                                                               #:cur-loop cur-loop)))))
             (define place-pt0
-              (or spine-front-pt
-                  (find-verified-building-placement ws-conn ab-id cx cy units
+              (and (not zerg-no-creep?)
+                   (or spine-front-pt
+                       (find-verified-building-placement ws-conn ab-id cx cy units
                                                     #:min-spacing (if (pair? routine-spore-mineral-anchors) 0.5 2.0)
                                                     #:max-radius (cond
                                                                    [(or emerg-cloak-spore? (pair? routine-spore-mineral-anchors)) 8.0]
@@ -16540,7 +16691,7 @@
                                                     #:bldg-sym norm
                                                     #:game-info eff-game-info
                                                     #:rpc-budget step-placement-rpc-budget
-                                                    #:cur-loop cur-loop)))
+                                                    #:cur-loop cur-loop))))
             ;; L24-P0-1 + L48-P0-3a + L49 Law 1 Stage-2 (`SpireDrop/ProdStall -> 0`):
             ;; Track `SC2-PROD-PLACEMENT-MISS-STREAK` across ALL Zerg creep buildings; expand multi-Hatchery
             ;; creep-ring fallback for Spire/HydraDen/LurkerDen OR any Zerg building with miss-streak >= 2
@@ -16561,8 +16712,10 @@
                    (or (not creep-ws-open?)
                        (> (unbox step-placement-rpc-budget) 0))))
             (define place-pt
-              (or place-pt0
-                  (and spore-tight-can-run?
+              (if zerg-no-creep?
+                  #f
+                  (or place-pt0
+                      (and spore-tight-can-run?
                        (find-verified-building-placement ws-conn ab-id cx cy units
                                                          #:min-spacing 0.5
                                                          #:max-radius 8.5
@@ -16641,19 +16794,25 @@
                                                            #:game-info eff-game-info
                                                            #:rpc-budget step-placement-rpc-budget
                                                            #:cur-loop cur-loop
-                                                           #:wide-fallback? #t)))))
+                                                           #:wide-fallback? #t))))))
             (cond
               [place-pt
                (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm 0)
                (hash-remove! SC2-WATCHDOG-RING-EXPAND-SYMS (sc2-canonical-structure-sym norm))
                (reserve-step-build-pt! place-pt ab-id)
                (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
-               (when wtag
-                 (record-step-built-structure! norm)
-                 (record-builder-reservation! wtag (sc2-point2d-x place-pt) (sc2-point2d-y place-pt) ab-id)
-                 (emit! (sc2-raw-unit-command ab-id place-pt 0 (list wtag) #f)))]
-              [(or creep-85-tried? (> creep-bud-before 0) (not creep-ws-open?))
-               (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm (add1 zerg-miss-streak))])]
+               (if wtag
+                   (begin
+                     (record-step-built-structure! norm)
+                     (record-builder-reservation! wtag (sc2-point2d-x place-pt) (sc2-point2d-y place-pt) ab-id)
+                     (emit! (sc2-raw-unit-command ab-id place-pt 0 (list wtag) #f)))
+                   (record-wire-placement-refusal! norm 'no-worker cur-loop))]
+              [(or zerg-no-creep? creep-85-tried? (> creep-bud-before 0) (not creep-ws-open?))
+               (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm (add1 zerg-miss-streak))
+               (record-wire-placement-refusal!
+                norm
+                (if has-live-creep-source? 'no-safe-placement 'no-creep)
+                cur-loop)])]
 
            ;; Standard ground building placement (Pylons, Supply Depots, Barracks, Factories, Starports, etc.)
            ;; W16-P1-2-wire (`#17`): Include all grounded maturing/completed TownHalls (>= 0.50),
@@ -16661,6 +16820,8 @@
            ;; overflow cleanly to natural/3rd with 5x3 clearance (falling back to 3x3 only when all 5x3 fail)!
            [else
             (define is-terran-prod-bldg? (memq norm '(barracks factory starport)))
+            (define is-terran-tech-bldg?
+              (memq norm '(factory starport armory engineering-bay ghost-academy fusion-core)))
             (define th-overflow-anchors
               (let* ([raw-ths
                       (for/list ([th (in-list townhalls)]
@@ -16687,22 +16848,31 @@
                          (sort
                           (for/list ([tp (in-list raw-ths)])
                             (define cont?
-                              (ormap (lambda (ep)
-                                       (<= (pt-dist (car tp) (cdr tp) (car ep) (cdr ep)) 10.0))
-                                     enemy-gnd))
+                              (or (ormap (lambda (ep)
+                                           (<= (pt-dist (car tp) (cdr tp) (car ep) (cdr ep)) 10.0))
+                                         enemy-gnd)
+                                  (> (base-tech-safety-penalty (car tp) (cdr tp)) 0.0)))
+                            (define tech-pen (base-tech-safety-penalty (car tp) (cdr tp)))
                             (define crowd
                               (if is-terran-prod-bldg?
                                   (count (lambda (sp)
                                            (<= (pt-dist (car tp) (cdr tp) (car sp) (cdr sp)) 12.0))
                                          struct-pts)
                                   0))
-                            (list tp (if cont? 1 0) crowd (pt-dist req-x req-y (car tp) (cdr tp))))
+                            (list tp (if cont? 1 0) tech-pen crowd (pt-dist req-x req-y (car tp) (cdr tp))))
                           (lambda (a b)
                             (cond
                               [(not (= (second a) (second b))) (< (second a) (second b))]
-                              [(and is-terran-prod-bldg? (not (= (third a) (third b))))
-                               (< (third a) (third b))]
-                              [else (< (fourth a) (fourth b))])))))))
+                              [(not (= (third a) (third b))) (< (third a) (third b))]
+                              [(and is-terran-prod-bldg? (not (= (fourth a) (fourth b))))
+                               (< (fourth a) (fourth b))]
+                              [else (< (fifth a) (fifth b))])))))))
+            (define terran-tech-threat-shift?
+              (and is-terran-tech-bldg?
+                   (> (base-tech-safety-penalty req-x req-y) 0.0)
+                   (pair? th-overflow-anchors)
+                   (< (base-tech-safety-penalty (caar th-overflow-anchors) (cdar th-overflow-anchors))
+                      (base-tech-safety-penalty req-x req-y))))
             ;; W12-P0-3-wire / W16-P1-2-wire: For emergency supply/defense/production structures
             ;; (`pylon`, `supply-depot`, `bunker`, `barracks`, `factory`, `starport`), compute safe
             ;; in-main fallback anchors stepped away from the mineral line; if enemy ground combat units
@@ -17190,8 +17360,8 @@
                 [(pair? terran-back-edge-depot-anchors) (caar terran-back-edge-depot-anchors)]
                 [(and terran-prod-spillover-eligible? terran-5x3-missed? (pair? safe-completed-th-anchors))
                  (caar safe-completed-th-anchors)]
-                [(and (or req-contested-by-rush? terran-5x3-missed?)
-                      is-terran-prod-bldg?
+                [(and (or terran-tech-threat-shift? req-contested-by-rush? terran-5x3-missed?)
+                      (or is-terran-prod-bldg? is-terran-tech-bldg?)
                       (pair? th-overflow-anchors))
                  (caar th-overflow-anchors)]
                 [(and req-contested-by-rush? (pair? inmain-safe-anchors))
@@ -17209,8 +17379,8 @@
                 [(pair? terran-back-edge-depot-anchors) (cdar terran-back-edge-depot-anchors)]
                 [(and terran-prod-spillover-eligible? terran-5x3-missed? (pair? safe-completed-th-anchors))
                  (cdar safe-completed-th-anchors)]
-                [(and (or req-contested-by-rush? terran-5x3-missed?)
-                      is-terran-prod-bldg?
+                [(and (or terran-tech-threat-shift? req-contested-by-rush? terran-5x3-missed?)
+                      (or is-terran-prod-bldg? is-terran-tech-bldg?)
                       (pair? th-overflow-anchors))
                  (cdar th-overflow-anchors)]
                 [(and req-contested-by-rush? (pair? inmain-safe-anchors))
@@ -17392,7 +17562,8 @@
                           (if (>= cur-prod-miss-streak 1)
                               (take secondary-th-perimeter-anchors (min 4 (length secondary-th-perimeter-anchors)))
                               '()))]
-                 [(and (or req-contested-by-rush? terran-5x3-missed?) is-terran-prod-bldg?)
+                 [(or terran-tech-threat-shift?
+                      (and (or req-contested-by-rush? terran-5x3-missed?) is-terran-prod-bldg?))
                   (append th-overflow-anchors
                           inmain-safe-anchors
                           (list (cons home-x home-y) (cons req-x req-y)))]
@@ -17684,10 +17855,12 @@
                  (hash-remove! SC2-WATCHDOG-RING-EXPAND-SYMS (sc2-canonical-structure-sym norm)))
                (reserve-step-build-pt! place-pt ab-id)
                (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
-               (when wtag
-                 (record-step-built-structure! norm)
-                 (record-builder-reservation! wtag (sc2-point2d-x place-pt) (sc2-point2d-y place-pt) ab-id)
-                 (emit! (sc2-raw-unit-command ab-id place-pt 0 (list wtag) #f)))]
+               (if wtag
+                   (begin
+                     (record-step-built-structure! norm)
+                     (record-builder-reservation! wtag (sc2-point2d-x place-pt) (sc2-point2d-y place-pt) ab-id)
+                     (emit! (sc2-raw-unit-command ab-id place-pt 0 (list wtag) #f)))
+                   (record-wire-placement-refusal! norm 'no-worker cur-loop))]
               [(and (not (memq norm '(command-center nexus hatchery)))
                     (or std-tried-0?
                         (> std-bud-before 0)
@@ -17696,7 +17869,8 @@
                         (not std-ws-open?)))
                (when (eq? norm 'pylon)
                  (record-pylon-failed-cell! eff-req-x eff-req-y cur-loop))
-               (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm (add1 cur-bldg-miss-streak))])]))]
+               (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm (add1 cur-bldg-miss-streak))
+               (record-wire-placement-refusal! norm 'no-safe-placement cur-loop)])]))]
 
       ;; 2b. Dedicated Nydus Worm intent: `(build-nydus-worm <x> <y>)` or `(build-nydus-worm <nydus-id> <x> <y>)`
       [(or (list 'build-nydus-worm (? exact-integer? explicit-nid) (? real? raw-x) (? real? raw-y))
@@ -21113,8 +21287,10 @@
        (define tu (sc2-raw-unit-command-target-unit-tag c))
        (define q? (and (sc2-raw-unit-command-queue? c) #t))
        (define c-urg? (urgent-survival-cmd? c))
+       (define repair-tgt-coalesce? (and (memv ab '(316 3685)) (real? tu) (> tu 0)))
        (define tp-k
-         (and (any-point? tp)
+         (and (not repair-tgt-coalesce?)
+              (any-point? tp)
               (if (and (real? q-step)
                        (> q-step 0.0)
                        (equal? tu 0)
@@ -21125,7 +21301,9 @@
                   (cons (inexact->exact (round (/ (any-point-x tp) q-step)))
                         (inexact->exact (round (/ (any-point-y tp) q-step))))
                   (cons (any-point-x tp) (any-point-y tp)))))
-       (define key (list ab tp-k tu q?))
+       (define eff-ab (if repair-tgt-coalesce? 3685 ab))
+       (define eff-tp (if repair-tgt-coalesce? #f tp))
+       (define key (list eff-ab tp-k tu q?))
        (define g (hash-ref groups key #f))
        (define c-tags (sc2-raw-unit-command-unit-tags c))
        (define c-econ? (macro-econ-cmd? c))
@@ -21138,7 +21316,7 @@
           (when (and c-cam (not (vector-ref g 6)))
             (vector-set! g 6 c-cam))]
          [else
-          (define ng (vector ab tp tu q? (reverse c-tags) c-urg? c-cam c-econ?))
+          (define ng (vector eff-ab eff-tp tu q? (reverse c-tags) c-urg? c-cam c-econ?))
           (hash-set! groups key ng)
           (set! rev-slots (cons ng rev-slots))])]
       [else
@@ -21194,24 +21372,32 @@
   #:mutable
   #:transparent)
 
-(define (make-wire-apm-governor #:target-apm [target-apm 530.0]
-                                #:hard-cap-apm [hard-cap-apm 595.0]
+(define (make-wire-apm-governor #:max-apm [max-apm #f]
+                                #:target-apm [target-apm #f]
+                                #:hard-cap-apm [hard-cap-apm #f]
                                 #:burst-capacity [burst-cap #f])
-  (define eff-target (exact->inexact target-apm))
-  (define eff-cap (exact->inexact hard-cap-apm))
-  (define eff-burst (if (real? burst-cap)
-                        (exact->inexact burst-cap)
-                        (if (>= eff-target 450.0) 36.0 28.0)))
-  (define init-tokens
-    (min eff-burst
-         (cond
-           [(>= eff-burst 64.0) 60.0]
-           [(>= eff-burst 44.0) 40.0]
-           [(>= eff-target 450.0) 30.0]
-           [else 24.0])))
-  (wire-apm-governor eff-target
-                     eff-cap
-                     init-tokens
+  ;; Single configurable rolling 60s replay-event cap C (governor-param: 595.0 default, 760.0 ladder).
+  ;; Legacy #:target-apm / #:hard-cap-apm / #:burst-capacity remain ABI-compatible for existing tests.
+  (define cap-apm ; governor-param: single rolling 60s replay-event cap C
+    (exact->inexact
+     (cond
+       [(real? max-apm) max-apm]
+       [(real? hard-cap-apm) hard-cap-apm]
+       [(real? target-apm) target-apm]
+       [else 595.0])))
+  (define damper-rate ; governor-param: smooth 5s burst pacing rate for V < V_macro
+    (exact->inexact
+     (cond
+       [(real? max-apm) cap-apm]
+       [(real? target-apm) (min cap-apm target-apm)]
+       [else cap-apm])))
+  (define eff-burst ; governor-param: 5s smooth burst capacity for V < V_macro
+    (if (real? burst-cap)
+        (exact->inexact burst-cap)
+        (max 8.0 (* damper-rate (/ 5.0 60.0)))))
+  (wire-apm-governor damper-rate
+                     cap-apm
+                     eff-burst
                      eff-burst
                      -1
                      -1000
@@ -21222,8 +21408,6 @@
   (define (ab-tier ab)
     (cond
       ;; P0: Life-or-death survival, tactical spells, cancel, & combat mode-switches
-      ;;     (L33-P0-1: Supply Depot lower/raise 556/558 moved out of P0 -> P2 so a blocked depot
-      ;;      can NEVER saturate the rolling APM cap and starve P1 macro!)
       [(memv ab '(42 314 349 380 382 383 396 407 408 913 1408 1437 1438 1692 1764 1882 2244
                   2368 2370 2371 2387 2546 2594 2596 2704 2706 3659 3675 1442 3687 74 76 140 249 251 399 401
                   1036 1526 1528 1530 1622 1628 1664 1825 1978 1998 2063 2067 2069 2073 2116 2146
@@ -21236,8 +21420,7 @@
        3]
       ;; P2: Combat attack, move, kite, hold-position, patrol, stop, Supply Depot raise (`558`),
       ;;     SCV Repair (`316`/`3685`), Medivac Heal (`386`), Crawler Root/Uproot (`1725..1731`),
-      ;;     & Building Land (`419`/`520`/`522`/`554`/`1524`/`3678`) so tactical support never
-      ;;     starves P1 unit/worker/supply macro!
+      ;;     & Building Land (`419`/`520`/`522`/`554`/`1524`/`3678`)
       [(memv ab '(4 5 6 7 16 17 18 19 20 23 24 25 316 386 419 520 522 554 558 1524
                   1725 1727 1729 1731 2099
                   3665 3674 3678 3685 3771 3793 3794 3795))
@@ -21269,16 +21452,17 @@
        (define-values (hd tl) (split-at rem max-chunk))
        (loop tl (cons hd acc))])))
 
-(define SC2-GOV-LAST-P1-LOOP (make-weak-hasheq))
-(define SC2-GOV-LAST-P1-TRAIN-LOOP (make-weak-hasheq))
-(define SC2-GOV-LAST-P2-LOOP (make-weak-hasheq))
-(define SC2-GOV-LAST-P3-LOOP (make-weak-hasheq))
-(define SC2-GOV-P0-MODE-DEDUP (make-weak-hasheq))
-(define SC2-GOV-URGENT-COMBAT-DEDUP (make-weak-hasheq))
-(define SC2-GOV-P2-COMBAT-DEDUP (make-weak-hasheq))
-(define SC2-GOV-REPAIR-DEDUP (make-weak-hasheq))
-(define SC2-GOV-UNCHANGED-REPEAT (make-weak-hasheq))
+;; Per-governor weak state tables (zero struct ABI change, auto-reset on frame rewind)
+(define SC2-GOV-LAST-CLASS-LOOP (make-weak-hasheq))   ; gov -> #(p1-macro p1-train p2-combat p3-harvest)
+(define SC2-GOV-UNIT-REFRACTORY (make-weak-hasheq))   ; gov -> hash of (unit-tag . ab-class) -> (loop . tgt-sig)
+(define SC2-GOV-UNCHANGED-REPEAT (make-weak-hasheq))  ; gov -> hash of (ab . stags) -> #(streak loop obs-sig)
+(define SC2-GOV-HIGH-EMA (make-weak-hasheq))          ; gov -> #(mu-high var-high last-loop high-ev-list)
 (define SC2-GOV-APM-DROP-STATS (make-weak-hasheq))
+
+(define SC2-GOV-V-MACRO 1600.0) ; governor-param: continuous value boundary for high-value survival/macro
+(define SC2-GOV-EMA-HORIZON-FRAC (/ 20.0 60.0)) ; governor-param: 20s reserve horizon over 60s window
+(define SC2-GOV-EMA-TAU-LOOPS 336.0) ; governor-param: 15s continuous-time EWMA time constant
+
 (struct wire-apm-drop-tracker
   (total
    token-bucket
@@ -21375,102 +21559,79 @@
                                      #:when (> (vector-ref mvec m) 0))
                           (values (string->symbol (number->string m))
                                   (vector-ref mvec m))))]))
+
 (define SC2-GOV-P0-MODE-SWITCH-ABILITIES
   (seteqv 388 390 403 405 556 558 1374 1378 1382 1386 1390 1433 1444 1512
           1725 1727 1729 1731 1978 1998 2014 2095 2097 2108 2110 2340 2362 2364
           2558 2560 3661 3662))
 (define SC2-GOV-SPELL-REJECT-ABILITIES
   (seteqv 1036 1442 1526 2338 2346 3675))
+(define SC2-GOV-LAND-ABILITIES
+  (seteqv 419 520 522 554 1524 3678))
 (define SC2-GOV-P1-ADDON-ABILITIES
   (seteqv 419 421 422 454 455 487 488 520 522 554 1524 3678 3682 3683))
-;; Loop 73 Lane C: Core unit-training & supply-provider P1 abilities isolated from Creep Tumors,
-;; unit morphs, addons, Depot lower, routine buildings/research, and MULE so non-training P1
-;; emissions can never mask overdue unit/supply rescue!
 (define SC2-GOV-P1-TRAIN-SUPPLY-ABILITIES
   (seteqv
-   ;; Zerg Larva train & Queen (1344 = Overlord supply)
    1342 1343 1344 1345 1346 1348 1351 1352 1353 1354 1356 1632
-   ;; Terran Supply Depot & unit train
    319 524 560 561 562 563 591 594 595 596 597 614 620 621 622 623 624 626
-   ;; Protoss Pylon & unit train / Warp-In
    881 110 916 917 919 920 921 922 946 948 950 954 955 976 977 978 979 994 1006
    1413 1414 1416 1417 1418 1419))
-;; Low-priority P1 filler abilities (Creep Tumors, unit morphs, Depot lower, worker rally) sorted behind
-;; core macro (unit training, supply, production buildings, MULE, research) in `p1-cmds`
-;; so tumor/morph/rally bursts never outrank unit training or building construction while preserving
-;; caller rotation among core macro commands (train / supply / build / MULE)!
 (define SC2-GOV-P1-FILLER-ABILITIES
   (seteqv 556 1372 1448 1518 1662 1694 1733 1766 2330 2332 2708 3690 3691 4121))
 
 (define (govern-sc2-wire-actions! gov raw-cmds game-loop [_obs #f])
   (define cur-loop (if (exact-integer? game-loop) (max 0 game-loop) 0))
-  ;; Auto-reset state across sequential matches when game-loop rewinds
+  ;; Auto-reset per-governor state across sequential matches when game-loop rewinds
   (when (and (>= (wire-apm-governor-last-loop gov) 0)
              (< cur-loop (wire-apm-governor-last-loop gov)))
-    (set-wire-apm-governor-tokens!
-     gov
-     (min (wire-apm-governor-burst-capacity gov)
-          (cond
-            [(>= (wire-apm-governor-burst-capacity gov) 64.0) 60.0]
-            [(>= (wire-apm-governor-burst-capacity gov) 44.0) 40.0]
-            [(>= (wire-apm-governor-target-apm gov) 450.0) 30.0]
-            [else 24.0])))
+    (set-wire-apm-governor-tokens! gov (wire-apm-governor-burst-capacity gov))
     (set-wire-apm-governor-last-loop! gov -1)
     (set-wire-apm-governor-last-cam-loop! gov -1000)
     (set-wire-apm-governor-last-selected-tags! gov #f)
     (set-wire-apm-governor-rolling-events! gov '())
     (set-box! SC2-GOV-LAST-CAM-X #f)
     (set-box! SC2-GOV-LAST-CAM-Y #f)
-    (hash-set! SC2-GOV-LAST-P1-LOOP gov -1000)
-    (hash-set! SC2-GOV-LAST-P1-TRAIN-LOOP gov -1000)
-    (hash-set! SC2-GOV-LAST-P2-LOOP gov -1000)
-    (hash-set! SC2-GOV-LAST-P3-LOOP gov -1000)
-    (hash-set! SC2-GOV-P0-MODE-DEDUP gov (make-hash))
-    (hash-set! SC2-GOV-URGENT-COMBAT-DEDUP gov (make-hash))
-    (hash-set! SC2-GOV-P2-COMBAT-DEDUP gov (make-hash))
-    (hash-set! SC2-GOV-REPAIR-DEDUP gov (make-hash))
+    (hash-set! SC2-GOV-LAST-CLASS-LOOP gov (vector -1000 -1000 -1000 -1000))
+    (hash-set! SC2-GOV-UNIT-REFRACTORY gov (make-hash))
     (hash-set! SC2-GOV-UNCHANGED-REPEAT gov (make-hash))
+    (hash-set! SC2-GOV-HIGH-EMA gov (vector 0.0 0.0 -1 '()))
     (hash-remove! SC2-GOV-APM-DROP-STATS gov))
-  (define high-apm-gov? (>= (wire-apm-governor-target-apm gov) 500.0))
-  (define gov-mode-dedup
-    (or (hash-ref SC2-GOV-P0-MODE-DEDUP gov #f)
+  (define cap-apm (wire-apm-governor-hard-cap-apm gov))
+  (define damper-rate (wire-apm-governor-target-apm gov))
+  (define class-loops
+    (or (hash-ref SC2-GOV-LAST-CLASS-LOOP gov #f)
+        (let ([v (vector -1000 -1000 -1000 -1000)])
+          (hash-set! SC2-GOV-LAST-CLASS-LOOP gov v)
+          v)))
+  (define gov-unit-refract
+    (or (hash-ref SC2-GOV-UNIT-REFRACTORY gov #f)
         (let ([ht (make-hash)])
-          (hash-set! SC2-GOV-P0-MODE-DEDUP gov ht)
-          ht)))
-  (define gov-urgent-combat-dedup
-    (or (hash-ref SC2-GOV-URGENT-COMBAT-DEDUP gov #f)
-        (let ([ht (make-hash)])
-          (hash-set! SC2-GOV-URGENT-COMBAT-DEDUP gov ht)
-          ht)))
-  (define gov-p2-combat-dedup
-    (or (hash-ref SC2-GOV-P2-COMBAT-DEDUP gov #f)
-        (let ([ht (make-hash)])
-          (hash-set! SC2-GOV-P2-COMBAT-DEDUP gov ht)
-          ht)))
-  (define gov-repair-dedup
-    (or (hash-ref SC2-GOV-REPAIR-DEDUP gov #f)
-        (let ([ht (make-hash)])
-          (hash-set! SC2-GOV-REPAIR-DEDUP gov ht)
+          (hash-set! SC2-GOV-UNIT-REFRACTORY gov ht)
           ht)))
   (define gov-unchanged-repeat
     (or (hash-ref SC2-GOV-UNCHANGED-REPEAT gov #f)
         (let ([ht (make-hash)])
           (hash-set! SC2-GOV-UNCHANGED-REPEAT gov ht)
           ht)))
+  (define high-ema
+    (or (hash-ref SC2-GOV-HIGH-EMA gov #f)
+        (let ([v (vector 0.0 0.0 -1 '())])
+          (hash-set! SC2-GOV-HIGH-EMA gov v)
+          v)))
 
-  ;; 1. Refill token bucket purely from game-loop delta (22.4 loops/sec = 1344 loops/min)
+  ;; 1. Refill smooth 5s burst damper (applied strictly to V < V_macro) from game-loop delta
   (define prev-loop (wire-apm-governor-last-loop gov))
   (when (>= prev-loop 0)
     (define dloops (max 0 (- cur-loop prev-loop)))
     (define added (* (exact->inexact dloops)
-                     (/ (wire-apm-governor-target-apm gov) SC2-FASTER-LOOPS-PER-MINUTE)))
+                     (/ damper-rate SC2-FASTER-LOOPS-PER-MINUTE)))
     (set-wire-apm-governor-tokens!
      gov
      (min (wire-apm-governor-burst-capacity gov)
           (+ (wire-apm-governor-tokens gov) added))))
   (set-wire-apm-governor-last-loop! gov cur-loop)
 
-  ;; 2. Prune rolling 1344-loop (60.0s) replay event window and compute strict cap headroom
+  ;; 2. Prune rolling 60s (1344-loop) replay event window and compute single-cap headroom
   (define win-floor (- cur-loop 1344))
   (define pruned-events
     (filter (lambda (ev) (> (car ev) win-floor))
@@ -21478,14 +21639,51 @@
   (set-wire-apm-governor-rolling-events! gov pruned-events)
   (define rolling-used
     (for/sum ([ev (in-list pruned-events)]) (cdr ev)))
-  (define rolling-headroom
-    (max 0.0 (- (wire-apm-governor-hard-cap-apm gov) (exact->inexact rolling-used))))
+  (define rem-headroom
+    (max 0.0 (- cap-apm (exact->inexact rolling-used))))
 
-  ;; 3. Strip Raw-mode no-op UI control-group commands, rate-limit camera moves
-  ;;    (L59-W1: >= 18 loops routine Pro base-hotkey / minimap-click cadence, >= 6 loops for
-  ;;     crisis/framing jumps > 14.0t, suppress non-base <= 8.0t scrolling drift, >= 28 loops
-  ;;     for legacy unmarked raw camera moves), coalesce compatible unit commands, canonicalize
-  ;;    sorted tag lists, and chunk to <= 64 tags.
+  ;; Prune high-value event window & update continuous-time EMA (mu_high, var_high)
+  (define pruned-high-evs
+    (filter (lambda (ev) (> (car ev) win-floor))
+            (vector-ref high-ema 3)))
+  (vector-set! high-ema 3 pruned-high-evs)
+  (define (update-high-ema! evs now-loop)
+    (define win10-floor (- now-loop 224))
+    (define win60-sum 0)
+    (define win10-sum 0)
+    (for ([ev (in-list evs)])
+      (define c (cdr ev))
+      (set! win60-sum (+ win60-sum c))
+      (when (> (car ev) win10-floor)
+        (set! win10-sum (+ win10-sum c))))
+    (define sample (max (exact->inexact win60-sum) (* 6.0 (exact->inexact win10-sum))))
+    (define prev-ema-loop (vector-ref high-ema 2))
+    (define mu (vector-ref high-ema 0))
+    (define var (vector-ref high-ema 1))
+    (cond
+      [(< prev-ema-loop 0)
+       (vector-set! high-ema 0 sample)
+       (vector-set! high-ema 1 0.0)
+       (vector-set! high-ema 2 now-loop)]
+      [(> now-loop prev-ema-loop)
+       (define dt (exact->inexact (- now-loop prev-ema-loop)))
+       (define alpha (- 1.0 (exp (- (/ dt SC2-GOV-EMA-TAU-LOOPS)))))
+       (define delta (- sample mu))
+       (define new-mu (+ mu (* alpha delta)))
+       (define new-var (max 0.0 (* (- 1.0 alpha) (+ var (* alpha delta delta)))))
+       (vector-set! high-ema 0 new-mu)
+       (vector-set! high-ema 1 new-var)
+       (vector-set! high-ema 2 now-loop)]
+      [(> sample mu)
+       ;; Same-loop high-value burst: lift instantaneous estimate immediately
+       (define delta (- sample mu))
+       (vector-set! high-ema 0 (+ mu (* 0.35 delta)))
+       (vector-set! high-ema 1 (max var (* 0.25 delta delta)))]))
+  (update-high-ema! pruned-high-evs cur-loop)
+
+  ;; ===========================================================================
+  ;; STAGE 1: Pre-Budget Per-Unit Spam, Noop & Rejection Filter
+  ;; ===========================================================================
   (define (cam-cmd-cooldown-ok? c)
     (define dloop (- cur-loop (wire-apm-governor-last-cam-loop gov)))
     (define gov-cx (unbox SC2-GOV-LAST-CAM-X))
@@ -21521,6 +21719,15 @@
         [else 28]))
     (and (not short-non-base-scroll?)
          (>= dloop needed-cd)))
+
+  (define obs-minerals
+    (if (and (sc2-observation? _obs)
+             (sc2-player-common? (sc2-observation-player-common _obs)))
+        (sc2-player-common-minerals (sc2-observation-player-common _obs))
+        #f))
+  (define low-mineral-suppress-repair?
+    (and (real? obs-minerals) (< obs-minerals 5))) ; physics: SC2 rejects SCV repair with <5 minerals
+
   (define raw-cmd-list (if (list? raw-cmds) raw-cmds '()))
   (define has-allowed-framing-cam?
     (for/or ([c (in-list raw-cmd-list)])
@@ -21539,7 +21746,9 @@
                              (begin (set! cam-seen? #t) #t)
                              #f)]
                         [(sc2-raw-unit-command? c)
-                         (pair? (sc2-raw-unit-command-unit-tags c))]
+                         (and (pair? (sc2-raw-unit-command-unit-tags c))
+                              (not (and low-mineral-suppress-repair?
+                                        (memv (sc2-raw-unit-command-ability-id c) '(316 3685)))))]
                         [else #f]))
       c))
 
@@ -21553,9 +21762,45 @@
         (hash-set! SC2-CMD-FRAMING-CAM cur prev))
       (link-loop (cdr rem) cur)))
 
-  ;; Loop 87B Track C: Suppress noop unit commands before coalescing and token accounting
-  ;; when the observed unit in _obs is ALREADY executing that exact order (eliminates
-  ;; redundant Move/Attack/Hold/Harvest/Heal/Repair Selection+UpdateTarget churn!).
+  (define (clone-trimmed-cmd orig kept-tags)
+    (define nc
+      (sc2-raw-unit-command (sc2-raw-unit-command-ability-id orig)
+                            (sc2-raw-unit-command-target-pos orig)
+                            (sc2-raw-unit-command-target-unit-tag orig)
+                            kept-tags
+                            (sc2-raw-unit-command-queue? orig)))
+    (when (urgent-survival-cmd? orig) (mark-urgent-survival-cmd! nc))
+    (when (macro-econ-cmd? orig) (mark-macro-econ-cmd! nc))
+    (define fcam (hash-ref SC2-CMD-FRAMING-CAM orig #f))
+    (when fcam (hash-set! SC2-CMD-FRAMING-CAM nc fcam))
+    nc)
+
+  ;; Stage 1a: Tag-level obs noop stripping on ALL commands (INCLUDING urgent-survival 23/16,
+  ;; 316/3685 repair target-flip suppression on live damaged allies, & 556/558 already-morphed depots)
+  (define has-repair-cmd?
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (memv (sc2-raw-unit-command-ability-id c) '(316 3685))))
+           filtered0))
+  (define ally-u-by-tag
+    (and has-repair-cmd?
+         (sc2-observation? _obs)
+         (list? (sc2-observation-units _obs))
+         (let ([ht (make-hasheqv)])
+           (for ([u (in-list (sc2-observation-units _obs))]
+                 #:when (and (sc2-unit? u) (= (sc2-unit-alliance u) 1)))
+             (hash-set! ht (sc2-unit-tag u) u))
+           ht)))
+  (define (live-damaged-ally? tag)
+    (and ally-u-by-tag
+         (exact-integer? tag) (> tag 0)
+         (let ([tu-u (hash-ref ally-u-by-tag tag #f)])
+           (and (sc2-unit? tu-u)
+                (let ([hp (sc2-unit-health tu-u)]
+                      [hp-max (sc2-unit-health-max tu-u)])
+                  (and (real? hp) (real? hp-max)
+                       (> hp 0.0) (> hp-max 0.0) (< hp hp-max)))))))
+
   (define filtered-noops
     (if (and (sc2-observation? _obs)
              (list? (sc2-observation-units _obs))
@@ -21565,9 +21810,8 @@
           (for ([c (in-list filtered0)]
                 #:when (and (sc2-raw-unit-command? c)
                             (not (sc2-raw-unit-command-queue? c))
-                            (not (urgent-survival-cmd? c))
                             (memv (sc2-raw-unit-command-ability-id c)
-                                  '(16 17 18 23 295 298 316 386 1183 3666 3685))))
+                                  '(16 17 18 23 295 298 316 386 556 558 1183 3666 3685))))
             (for ([t (in-list (sc2-raw-unit-command-unit-tags c))]
                   #:when (exact-integer? t))
               (set-add! check-tags t)))
@@ -21580,42 +21824,50 @@
                                   (set-member? check-tags (sc2-unit-tag u))))
                   (hash-set! obs-u-by-tag (sc2-unit-tag u) u))
                 (define (unit-already-has-order? u ab tp tu)
-                  (define ords (sc2-unit-orders u))
-                  (and (list? ords)
-                       (pair? ords)
-                       (sc2-unit-order? (car ords))
-                       (let* ([o0 (car ords)]
-                              [o-ab (sc2-unit-order-ability-id o0)]
-                              [o-tu (sc2-unit-order-target-unit-tag o0)]
-                              [o-tp (sc2-unit-order-target-pos o0)])
-                         (cond
-                           [(= ab 18) (equal? o-ab 18)]
-                           [(and (real? tu) (> tu 0))
-                            (and (equal? o-tu tu)
-                                 (cond
-                                   [(memv ab '(295 298 1183 3666))
-                                    (and (memv o-ab '(295 298 1183 3666)) #t)]
-                                   [(memv ab '(316 3685))
-                                    (and (memv o-ab '(316 3685)) #t)]
-                                   [else (equal? o-ab ab)]))]
-                           [(and (any-point? tp) (memv ab '(16 17 23)))
-                            (and (equal? o-ab ab)
-                                 (any-point? o-tp)
-                                 (let ([tx (any-point-x tp)]
-                                       [ty (any-point-y tp)]
-                                       [ox (any-point-x o-tp)]
-                                       [oy (any-point-y o-tp)])
-                                   (and (rational? tx) (rational? ty)
-                                        (rational? ox) (rational? oy)
-                                        (<= (pt-dist tx ty ox oy) 1.0))))]
-                           [else #f]))))
+                  (cond
+                    [(= ab 556) (= (sc2-unit-unit-type u) 47)]
+                    [(= ab 558) (= (sc2-unit-unit-type u) 19)]
+                    [else
+                     (define ords (sc2-unit-orders u))
+                     (and (list? ords)
+                          (pair? ords)
+                          (sc2-unit-order? (car ords))
+                          (let* ([o0 (car ords)]
+                                 [o-ab (sc2-unit-order-ability-id o0)]
+                                 [o-tu (sc2-unit-order-target-unit-tag o0)]
+                                 [o-tp (sc2-unit-order-target-pos o0)])
+                            (cond
+                              [(= ab 18) (equal? o-ab 18)]
+                              [(and (memv ab '(316 3685))
+                                    (memv o-ab '(316 3685))
+                                    (real? o-tu) (> o-tu 0))
+                               (or (equal? o-tu tu)
+                                   (live-damaged-ally? o-tu))]
+                              [(and (real? tu) (> tu 0))
+                               (and (equal? o-tu tu)
+                                    (cond
+                                      [(memv ab '(295 298 1183 3666))
+                                       (and (memv o-ab '(295 298 1183 3666)) #t)]
+                                      [(memv ab '(316 3685))
+                                       (and (memv o-ab '(316 3685)) #t)]
+                                      [else (equal? o-ab ab)]))]
+                              [(and (any-point? tp) (memv ab '(16 17 23)))
+                               (and (equal? o-ab ab)
+                                    (any-point? o-tp)
+                                    (let ([tx (any-point-x tp)]
+                                          [ty (any-point-y tp)]
+                                          [ox (any-point-x o-tp)]
+                                          [oy (any-point-y o-tp)])
+                                      (and (rational? tx) (rational? ty)
+                                           (rational? ox) (rational? oy)
+                                           (<= (pt-dist tx ty ox oy) 1.0))))]
+                              [else #f])))]))
                 (for/fold ([acc '()] #:result (reverse acc)) ([c (in-list filtered0)])
                   (cond
                     [(and (sc2-raw-unit-command? c)
                           (not (sc2-raw-unit-command-queue? c))
-                          (not (urgent-survival-cmd? c))
                           (memv (sc2-raw-unit-command-ability-id c)
-                                '(16 17 18 23 295 298 316 386 1183 3666 3685)))
+                                '(16 17 18 23 295 298 316 386 556 558 1183 3666 3685)))
                      (define ab (sc2-raw-unit-command-ability-id c))
                      (define tp (sc2-raw-unit-command-target-pos c))
                      (define tu (sc2-raw-unit-command-target-unit-tag c))
@@ -21628,105 +21880,113 @@
                      (cond
                        [(null? kept-tags) acc]
                        [(= (length kept-tags) (length orig-tags)) (cons c acc)]
-                       [else
-                        (define nc (sc2-raw-unit-command ab tp tu kept-tags #f))
-                        (when (macro-econ-cmd? c) (mark-macro-econ-cmd! nc))
-                        (define fcam (hash-ref SC2-CMD-FRAMING-CAM c #f))
-                        (when fcam (hash-set! SC2-CMD-FRAMING-CAM nc fcam))
-                        (cons nc acc)])]
+                       [else (cons (clone-trimmed-cmd c kept-tags) acc)])]
                     [else (cons c acc)])))))
         filtered0))
-
-  (define (mode-switch-dedup-key c)
-    (and (sc2-raw-unit-command? c)
-         (not (urgent-survival-cmd? c))
-         (set-member? SC2-GOV-P0-MODE-SWITCH-ABILITIES (sc2-raw-unit-command-ability-id c))
-         (cons (sc2-raw-unit-command-ability-id c)
-               (sort (sc2-raw-unit-command-unit-tags c) <))))
-  (define (mode-switch-dedup-drop? c)
-    (define k (mode-switch-dedup-key c))
-    (and k (< (- cur-loop (hash-ref gov-mode-dedup k -1000)) 10)))
-
-  ;; L34-P0-1: 8-loop repeat dedup on identical `(ab, target, tags)` urgent-survival combat
-  ;; `23`/`16` orders so repeated base-defense dispatches can NEVER saturate the 485 rolling APM cap!
-  (define (urgent-combat-dedup-key c)
-    (and (sc2-raw-unit-command? c)
-         (urgent-survival-cmd? c)
-         (memv (sc2-raw-unit-command-ability-id c) '(23 16))
-         (let* ([tp (sc2-raw-unit-command-target-pos c)]
-                [tgt-k
-                 (cond
-                   [(any-point? tp)
-                    (list 'pt
-                          (inexact->exact (round (* 2.0 (any-point-x tp))))
-                          (inexact->exact (round (* 2.0 (any-point-y tp)))))]
-                   [else
-                    (list 'tag (sc2-raw-unit-command-target-unit-tag c))])])
-           (list (sc2-raw-unit-command-ability-id c)
-                 tgt-k
-                 (sort (sc2-raw-unit-command-unit-tags c) <)))))
-  (define (urgent-combat-dedup-drop? c)
-    (define k (urgent-combat-dedup-key c))
-    (and k (< (- cur-loop (hash-ref gov-urgent-combat-dedup k -1000)) 8)))
-
-  ;; Loop 87B Track C: 8-loop cross-step repeat dedup on identical non-urgent P2 combat
-  ;; `(ab, target, sorted-tags)` orders when high-apm-gov? is active (cuts redundant Selection+Cmd
-  ;; churn without ever delaying target switches, kiting, or >= 1.0t movement changes!).
-  (define (p2-combat-dedup-key c)
-    (and high-apm-gov?
-         (sc2-raw-unit-command? c)
-         (not (urgent-survival-cmd? c))
-         (not (sc2-raw-unit-command-queue? c))
-         (memv (sc2-raw-unit-command-ability-id c) '(16 17 18 23))
-         (let* ([ab (sc2-raw-unit-command-ability-id c)]
-                [tp (sc2-raw-unit-command-target-pos c)]
-                [tu (sc2-raw-unit-command-target-unit-tag c)]
-                [tgt-k
-                 (cond
-                   [(= ab 18) 'hold]
-                   [(and (real? tu) (> tu 0)) (list 'tag tu)]
-                   [(and (any-point? tp)
-                         (rational? (any-point-x tp))
-                         (rational? (any-point-y tp)))
-                    (list 'pt
-                          (inexact->exact (round (any-point-x tp)))
-                          (inexact->exact (round (any-point-y tp))))]
-                   [else 'none])])
-           (list ab tgt-k (sort (sc2-raw-unit-command-unit-tags c) <)))))
-  (define (p2-combat-dedup-drop? c)
-    (and high-apm-gov?
-         (> (hash-count gov-p2-combat-dedup) 0)
-         (let ([k (p2-combat-dedup-key c)])
-           (and k (< (- cur-loop (hash-ref gov-p2-combat-dedup k -1000)) 8)))))
-
-  ;; L60 (`#1580`) + L87B: 12-loop repeat dedup on identical `(ab, target-unit-tag, sorted-tags)`
-  ;; SCV Repair (`316`/`3685`) and Medivac Heal (`386`) orders!
-  (define (repair-dedup-key c)
-    (and (sc2-raw-unit-command? c)
-         (memv (sc2-raw-unit-command-ability-id c) '(316 386 3685))
-         (list (sc2-raw-unit-command-ability-id c)
-               (sc2-raw-unit-command-target-unit-tag c)
-               (sort (sc2-raw-unit-command-unit-tags c) <))))
-  (define (repair-dedup-drop? c)
-    (define k (repair-dedup-key c))
-    (and k (< (- cur-loop (hash-ref gov-repair-dedup k -1000)) 12)))
 
   (define coalesced0
     (coalesce-sc2-raw-commands filtered-noops
                                SC2-WIRE-COALESCABLE-ABILITIES
                                chunk-tag-list
-                               #:quantize-move-grid (and high-apm-gov? 1.0)))
+                               #:quantize-move-grid (and (>= cap-apm 500.0) 1.0)))
 
-  ;; L35-P0-1 (`#44` silent SC2 rejection ping-pong -> 0) + L87B: Track per-`(ab, sorted-tags)` repeat
-  ;; attempts across `obs` (`unit-type`, `add-on-tag`, & `order-ability-ids` unchanged). When a
-  ;; previously emitted `P0` mode switch, active cooldown spell, or `P1` addon/build/tumor command
-  ;; left the unit completely unchanged (silent SC2 reject on creep/cooldown/blocked terrain!),
-  ;; exponentially back off so rejected casters never burn tokens or emit orphan selections!
+  ;; Stage 1b: Per-unit refractory filter keyed by `(cons unit-tag ab-class)`.
+  ;; Adding/losing 1 unit from a squad NEVER busts dedup; >1.5t target shift or new target-tag
+  ;; bypasses immediately with 0 latency!
+  (define (cmd-refractory-spec c)
+    (cond
+      [(not (sc2-raw-unit-command? c)) (values #f 0 #f)]
+      [else
+       (define ab (sc2-raw-unit-command-ability-id c))
+       (cond
+         [(memv ab '(316 3685))
+          (values 'repair 16 (cons 'repair-tgt (sc2-raw-unit-command-target-unit-tag c)))]
+         [(= ab 386)
+          (values 'heal 12 (sc2-raw-unit-command-target-unit-tag c))]
+         [(and (not (sc2-raw-unit-command-queue? c))
+               (memv ab '(16 17 18 23)))
+          (define tp (sc2-raw-unit-command-target-pos c))
+          (define tu (sc2-raw-unit-command-target-unit-tag c))
+          (define tgt-sig
+            (cond
+              [(= ab 18) 'hold]
+              [(and (real? tu) (> tu 0)) (cons 'tag tu)]
+              [(and (any-point? tp)
+                    (rational? (any-point-x tp))
+                    (rational? (any-point-y tp)))
+               (cons 'pt (cons (exact->inexact (any-point-x tp))
+                               (exact->inexact (any-point-y tp))))]
+              [else 'none]))
+          (values ab 8 tgt-sig)]
+         ;; Supply Depot lower/raise (556/558): 24f per-depot refractory EVEN when urgent-survival-cmd?
+         ;; (a physically blocked depot cannot raise faster than 24f; urgent 556 transit lower may still
+         ;; flip once from a prior 558 raise, while repeated 558/556 spam is strictly gated!)
+         [(memv ab '(556 558))
+          (values 'depot 24 (if (and (= ab 556) (urgent-survival-cmd? c)) 'urgent-556 'depot))]
+         [(and (not (urgent-survival-cmd? c))
+               (set-member? SC2-GOV-P0-MODE-SWITCH-ABILITIES ab))
+          (values (cons 'mode ab) 10 #t)]
+         [(set-member? SC2-GOV-LAND-ABILITIES ab)
+          (values 'land 24 #t)]
+         [else (values #f 0 #f)])]))
+
+  (define (refract-target-same? prev-sig cur-sig)
+    (cond
+      ;; Block urgent-556 -> 558 flip-back within 24f while still allowing 558 -> urgent-556 transit!
+      [(and (eq? prev-sig 'urgent-556) (eq? cur-sig 'depot)) #t]
+      [(and (pair? prev-sig) (eq? (car prev-sig) 'repair-tgt)
+            (pair? cur-sig) (eq? (car cur-sig) 'repair-tgt))
+       (or (equal? (cdr prev-sig) (cdr cur-sig))
+           (live-damaged-ally? (cdr prev-sig)))]
+      [(and (pair? prev-sig) (eq? (car prev-sig) 'pt)
+            (pair? cur-sig) (eq? (car cur-sig) 'pt))
+       (<= (pt-dist (cadr prev-sig) (cddr prev-sig)
+                    (cadr cur-sig) (cddr cur-sig))
+           1.5)]
+      [else (equal? prev-sig cur-sig)]))
+
+  (define refract-meta-ht #f)
+  (define (set-refract-meta! cmd spec)
+    (unless refract-meta-ht (set! refract-meta-ht (make-hasheq)))
+    (hash-set! refract-meta-ht cmd spec))
+
+  (define stage1-refract
+    (for/fold ([acc '()] #:result (reverse acc)) ([c (in-list coalesced0)])
+      (define-values (ab-class refract-cd tgt-sig) (cmd-refractory-spec c))
+      (cond
+        [(not ab-class) (cons c acc)]
+        [(zero? (hash-count gov-unit-refract))
+         (set-refract-meta! c (vector ab-class tgt-sig refract-cd))
+         (cons c acc)]
+        [else
+         (define orig-tags (sc2-raw-unit-command-unit-tags c))
+         (define kept-tags
+           (filter (lambda (t)
+                     (define prev (hash-ref gov-unit-refract (cons t ab-class) #f))
+                     (not (and prev
+                               (< (- cur-loop (car prev)) refract-cd)
+                               (refract-target-same? (cdr prev) tgt-sig))))
+                   orig-tags))
+         (cond
+           [(null? kept-tags) acc]
+           [(= (length kept-tags) (length orig-tags))
+            (set-refract-meta! c (vector ab-class tgt-sig refract-cd))
+            (cons c acc)]
+           [else
+            (define nc (clone-trimmed-cmd c kept-tags))
+            (set-refract-meta! nc (vector ab-class tgt-sig refract-cd))
+            (cons nc acc)])])))
+
+  ;; Stage 1c: Unchanged-state exponential backoff (covering 316/3685 SCV Repair, 556/558 Depot,
+  ;; & SC2-GOV-LAND-ABILITIES 3678 per-unit even when urgent-survival-cmd?)
   (define (unchanged-track-kind c)
     (and (sc2-raw-unit-command? c)
-         (not (urgent-survival-cmd? c))
          (let ([ab (sc2-raw-unit-command-ability-id c)])
            (cond
+             [(memv ab '(316 3685)) 'repair]
+             [(memv ab '(556 558)) 'depot]
+             [(set-member? SC2-GOV-LAND-ABILITIES ab) 'land]
+             [(urgent-survival-cmd? c) #f]
              [(set-member? SC2-GOV-P0-MODE-SWITCH-ABILITIES ab) 'p0-mode]
              [(set-member? SC2-GOV-SPELL-REJECT-ABILITIES ab) 'p0-spell]
              [(or (set-member? SC2-GOV-P1-ADDON-ABILITIES ab)
@@ -21735,489 +21995,448 @@
                        (sc2-build-ability-id->struct-sym ab)))
               'p1-build-addon]
              [else #f]))))
-  (define unchanged-cmd-meta (make-hasheq))
-  (define unchanged-demoted-set (make-hasheq))
-  (define unchanged-drop-set (make-hasheq))
-  (when (sc2-observation? _obs)
-    (define track-tags (mutable-seteqv))
-    (define tracked-pairs '())
-    (for ([c (in-list coalesced0)])
-      (define kind (unchanged-track-kind c))
-      (when kind
-        (define stags (sort (sc2-raw-unit-command-unit-tags c) <))
-        (for ([t (in-list stags)]) (set-add! track-tags t))
-        (set! tracked-pairs (cons (list c kind stags) tracked-pairs))))
-    (when (> (set-count track-tags) 0)
-      (define obs-state-by-tag (make-hasheqv))
-      (for ([u (in-list (if (list? (sc2-observation-units _obs))
-                            (sc2-observation-units _obs)
-                            '()))]
-            #:when (and (sc2-unit? u)
-                        (set-member? track-tags (sc2-unit-tag u))))
-        (hash-set! obs-state-by-tag
-                   (sc2-unit-tag u)
-                   (list (sc2-unit-unit-type u)
-                         (sc2-unit-add-on-tag u)
-                         (for/list ([o (in-list (if (list? (sc2-unit-orders u))
-                                                    (sc2-unit-orders u)
-                                                    '()))]
-                                    #:when (sc2-unit-order? o))
-                           (sc2-unit-order-ability-id o)))))
-      (for ([tp (in-list tracked-pairs)])
-        (define c (first tp))
-        (define kind (second tp))
-        (define stags (third tp))
-        (define cur-sig (for/list ([t (in-list stags)]) (hash-ref obs-state-by-tag t #f)))
-        (when (ormap values cur-sig)
-          (define k (cons (sc2-raw-unit-command-ability-id c) stags))
-          (define prev (hash-ref gov-unchanged-repeat k #f))
-          (cond
-            [(and prev
-                  (>= cur-loop (vector-ref prev 1))
-                  (<= (- cur-loop (vector-ref prev 1)) 448)
-                  (equal? cur-sig (vector-ref prev 2)))
-             (define streak (vector-ref prev 0))
-             (define needed-cd
-               (cond
-                 [(eq? kind 'p0-mode)
-                  (cond [(= streak 1) 24] [(= streak 2) 64] [else 168])]
-                 [(eq? kind 'p0-spell)
-                  (cond [(= streak 1) 16] [(= streak 2) 48] [else 120])]
-                 [else
-                  (cond [(= streak 1) 24] [(= streak 2) 96] [else 224])]))
-             (if (< (- cur-loop (vector-ref prev 1)) needed-cd)
-                 (hash-set! unchanged-drop-set c #t)
-                 (begin
-                   (when (eq? kind 'p1-build-addon)
-                     (hash-set! unchanged-demoted-set c #t))
-                   (hash-set! unchanged-cmd-meta c (list k cur-sig (min 4 (add1 streak))))))]
-            [else
-             (hash-set! unchanged-cmd-meta c (list k cur-sig 1))])))))
+  (define unchanged-cmd-meta #f)
+  (define unchanged-demoted-set #f)
+  (define stage1-cmds
+    (if (and (sc2-observation? _obs) (pair? stage1-refract))
+        (let ()
+          (define track-tags #f)
+          (for ([c (in-list stage1-refract)])
+            (when (unchanged-track-kind c)
+              (unless track-tags (set! track-tags (mutable-seteqv)))
+              (for ([t (in-list (sc2-raw-unit-command-unit-tags c))])
+                (set-add! track-tags t))))
+          (if (or (not track-tags) (zero? (set-count track-tags)))
+              stage1-refract
+              (let ()
+                (set! unchanged-cmd-meta (make-hasheq))
+                (set! unchanged-demoted-set (make-hasheq))
+                (define obs-state-by-tag (make-hasheqv))
+                (for ([u (in-list (if (list? (sc2-observation-units _obs))
+                                      (sc2-observation-units _obs)
+                                      '()))]
+                      #:when (and (sc2-unit? u)
+                                  (set-member? track-tags (sc2-unit-tag u))))
+                  (hash-set! obs-state-by-tag
+                             (sc2-unit-tag u)
+                             (list (sc2-unit-unit-type u)
+                                   (sc2-unit-add-on-tag u)
+                                   (for/list ([o (in-list (if (list? (sc2-unit-orders u))
+                                                              (sc2-unit-orders u)
+                                                              '()))]
+                                              #:when (sc2-unit-order? o))
+                                     (sc2-unit-order-ability-id o)))))
+                (for/fold ([acc '()] #:result (reverse acc)) ([c (in-list stage1-refract)])
+                  (define kind (unchanged-track-kind c))
+                  (cond
+                    [(not kind) (cons c acc)]
+                    ;; Per-unit exponential backoff for repair (316/3685), depot (556/558), & land (3678):
+                    ;; adding/losing 1 unit in a batch NEVER resets backoff for blocked units!
+                    [(or (eq? kind 'repair) (eq? kind 'depot) (eq? kind 'land))
+                     (define ab (sc2-raw-unit-command-ability-id c))
+                     (define tu (sc2-raw-unit-command-target-unit-tag c))
+                     (define orig-tags (sc2-raw-unit-command-unit-tags c))
+                     (define kept-rev '())
+                     (define updates-rev '())
+                     (define any-demoted? #f)
+                     (for ([t (in-list orig-tags)])
+                       (define u-sig (hash-ref obs-state-by-tag t #f))
+                       (cond
+                         [(not u-sig)
+                          (set! kept-rev (cons t kept-rev))]
+                         [else
+                          (define uk
+                            (cond
+                              [(eq? kind 'repair) (list 'repair-u t tu)]
+                              [(eq? kind 'land) (cons 'land-u t)]
+                              [else (cons ab t)]))
+                          (define prev (hash-ref gov-unchanged-repeat uk #f))
+                          (cond
+                            [(and prev
+                                  (>= cur-loop (vector-ref prev 1))
+                                  (<= (- cur-loop (vector-ref prev 1)) 448)
+                                  (equal? u-sig (vector-ref prev 2)))
+                             (define streak (vector-ref prev 0))
+                             (define needed-cd
+                               (if (or (eq? kind 'depot) (eq? kind 'land))
+                                   (cond [(= streak 1) 24] [(= streak 2) 64] [else 168])
+                                   (cond [(= streak 1) 16] [(= streak 2) 48] [else 120])))
+                             (when (>= (- cur-loop (vector-ref prev 1)) needed-cd)
+                               (set! any-demoted? #t)
+                               (set! kept-rev (cons t kept-rev))
+                               (set! updates-rev (cons (list uk u-sig (min 4 (add1 streak))) updates-rev)))]
+                            [else
+                             (set! kept-rev (cons t kept-rev))
+                             (set! updates-rev (cons (list uk u-sig 1) updates-rev))])]))
+                     (define kept-tags (reverse kept-rev))
+                     (cond
+                       [(null? kept-tags) acc]
+                       [else
+                        (define out-c
+                          (if (= (length kept-tags) (length orig-tags))
+                              c
+                              (let ([nc (clone-trimmed-cmd c kept-tags)])
+                                (define old-rm (and refract-meta-ht (hash-ref refract-meta-ht c #f)))
+                                (when old-rm (set-refract-meta! nc old-rm))
+                                nc)))
+                        (when any-demoted?
+                          (hash-set! unchanged-demoted-set out-c #t))
+                        (when (pair? updates-rev)
+                          (hash-set! unchanged-cmd-meta out-c (reverse updates-rev)))
+                        (cons out-c acc)])]
+                    [else
+                     (define stags (sort (sc2-raw-unit-command-unit-tags c) <))
+                     (define cur-sig (for/list ([t (in-list stags)]) (hash-ref obs-state-by-tag t #f)))
+                     (cond
+                       [(not (ormap values cur-sig)) (cons c acc)]
+                       [else
+                        (define k (cons (sc2-raw-unit-command-ability-id c) stags))
+                        (define prev (hash-ref gov-unchanged-repeat k #f))
+                        (cond
+                          [(and prev
+                                (>= cur-loop (vector-ref prev 1))
+                                (<= (- cur-loop (vector-ref prev 1)) 448)
+                                (equal? cur-sig (vector-ref prev 2)))
+                           (define streak (vector-ref prev 0))
+                           (define needed-cd
+                             (cond
+                               [(eq? kind 'p0-mode)
+                                (cond [(= streak 1) 24] [(= streak 2) 64] [else 168])]
+                               [(eq? kind 'p0-spell)
+                                (cond [(= streak 1) 16] [(= streak 2) 48] [else 120])]
+                               [else
+                                (cond [(= streak 1) 24] [(= streak 2) 96] [else 224])]))
+                           (if (< (- cur-loop (vector-ref prev 1)) needed-cd)
+                               acc
+                               (begin
+                                 (when (eq? kind 'p1-build-addon)
+                                   (hash-set! unchanged-demoted-set c #t))
+                                 (hash-set! unchanged-cmd-meta c (list (list k cur-sig (min 4 (add1 streak)))))
+                                 (cons c acc)))]
+                          [else
+                           (hash-set! unchanged-cmd-meta c (list (list k cur-sig 1)))
+                           (cons c acc)])])])))))
+        stage1-refract))
+
   (define (unchanged-demoted-cmd? c)
-    (hash-has-key? unchanged-demoted-set c))
+    (and unchanged-demoted-set (hash-has-key? unchanged-demoted-set c)))
 
-  (define coalesced
-    (filter (lambda (c)
-              (and (not (mode-switch-dedup-drop? c))
-                   (not (urgent-combat-dedup-drop? c))
-                   (not (p2-combat-dedup-drop? c))
-                   (not (repair-dedup-drop? c))
-                   (not (hash-has-key? unchanged-drop-set c))))
-            coalesced0))
-
-  ;; 4. Emit by priority tier P0..P4 with tiered QoS reserve floors, selection-affinity grouping,
-  ;;    and exact replay event cost accounting:
-  ;;    - `sc2-raw-unit-command` with `unit-tags == last-selected-tags` costs 1 replay event (`SCmdEvent` only)
-  ;;    - `sc2-raw-unit-command` with a new selection costs 2 replay events (`SSelectionDeltaEvent` + `SCmdEvent`)
-  ;;    - `sc2-raw-camera-move` costs 1 replay event (`SCameraUpdateEvent`)
-  ;;    Low-priority P2/P3/P4 traffic leaves a token + rolling-window reserve so P0 survival/spells
-  ;;    and P1 macro are never starved by prior-frame worker/camera spam, while rolling 60s APM
-  ;;    is strictly bounded by `hard-cap-apm`.
-  (define rem-headroom rolling-headroom)
+  ;; ===========================================================================
+  ;; STAGE 2: Continuous Marginal Value Density V(c)/ev-cost + Live EMA Reserve
+  ;;   Single configurable cap C, ZERO hardcoded % ceilings, ZERO token floors,
+  ;;   ZERO overdue-rescue band-aid loops.
+  ;; ===========================================================================
   (define cur-sel (wire-apm-governor-last-selected-tags gov))
-  (define new-events '())
   (define (opening-worker-split-cmd? c)
     (and (<= cur-loop 12)
          (sc2-raw-unit-command? c)
          (= (sc2-raw-unit-command-ability-id c) 3666)))
   (define (eff-cmd-tier c)
-    (if (opening-worker-split-cmd? c)
-        0
-        (wire-cmd-priority-tier c)))
-  (define emitted '())
-  (define emitted-set (make-hasheq))
-  (define apm-fail-ht #f)
-  (define (record-step-apm-fail! cmd reason)
-    (unless apm-fail-ht
-      (set! apm-fail-ht (make-hasheq)))
-    (hash-set! apm-fail-ht cmd reason))
-  (define hard-cap (wire-apm-governor-hard-cap-apm gov))
-  (define (tier-token-floor tier cmd)
-    (case tier
-      [(0)
-       (cond
-         [(opening-worker-split-cmd? cmd) -4.0]
-         [(and (urgent-survival-cmd? cmd)
-               (sc2-raw-unit-command? cmd)
-               (memv (sc2-raw-unit-command-ability-id cmd) '(23 16)))
-          -2.0]  ;; L60 (`#1580`): cap urgent 23/16 overdraft so P0 spells (251/2338/3675) never starve!
-         [(urgent-survival-cmd? cmd) -4.0]
-         [(and high-apm-gov?
-               (sc2-raw-unit-command? cmd)
-               (memv (sc2-raw-unit-command-ability-id cmd) '(251 399 3755)))
-          -4.0]  ;; L87G: Inject Larva (251), Scan (399), Chrono (3755) survive next-step 1a-post debt!
-         [(and (sc2-raw-unit-command? cmd)
-               (set-member? SC2-GOV-P0-MODE-SWITCH-ABILITIES
-                            (sc2-raw-unit-command-ability-id cmd)))
-          -1.0]  ;; Keep non-urgent P0 mode-switches (388/390/403/405) at -1.0 so they never starve P1 macro
-         [else -3.0])]  ;; L60 (`#1580`): lower non-urgent P0 active spell floor -1.0 -> -3.0
-      [(1)  0.0]  ;; P1 macro executes whenever >= ev-cost tokens remain (core fresh P1 also protected in 1a-post!)
-      [(2)  (if high-apm-gov? 2.0 4.0)]  ;; L87G: P2 leaves >= 2.0 tokens for P0/P1 even at >=500 APM
-      [(3)  (if high-apm-gov? 4.0 8.0)]  ;; P3 harvest/lower reserve for P0/P1/P2
-      [else (if high-apm-gov? 6.0 10.0)]))
-  ;; Loop 87G: Strict tiered rolling APM ceilings inside the hard cap so P2/P3/P4 micro spam can NEVER
-  ;; saturate rolling headroom and drop P0 survival/Inject/Chrono/Scan or core P1 Build/Train/Research/MULE!
-  ;; - P0 & core fresh P1 macro: 100% of hard-cap (hr-floor = 0.0 -> 500/500, 760/760).
-  ;; - Non-core P1 (Tumor/Morph/Rally/Depot-lower) & non-urgent P0 mode-switches: 90% (450/500, 684/760).
-  ;; - P2 / P3 / P4 routine combat micro / harvest / camera: <= 78% (390/500, 592.8/760 -> 22% reserved!).
-  (define (tier-headroom-floor tier)
-    (if (>= hard-cap 100.0)
-        (case tier
-          [(0)  0.0]
-          [(1)  (* 0.10 hard-cap)]
-          [(2)  (* 0.22 hard-cap)]
-          [(3)  (* 0.24 hard-cap)]
-          [else (* 0.26 hard-cap)])
-        (case tier
-          [(0)  0.0]
-          [(1)  2.0]
-          [(2)  (if high-apm-gov? 6.0 12.0)]
-          [(3)  (if high-apm-gov? 16.0 24.0)]
-          [else (if high-apm-gov? 20.0 30.0)])))
+    (cond
+      [(opening-worker-split-cmd? c) 0]
+      ;; Keep Tier 0 strictly for spells/lifts/cancels/mode-switches; defensive 23/16 combat
+      ;; ranks as high-priority combat (V=1500 < V_macro) so its drops never inflate P0/P1!
+      [(and (urgent-survival-cmd? c)
+            (sc2-raw-unit-command? c)
+            (memv (sc2-raw-unit-command-ability-id c) '(23 16)))
+       2]
+      [(and (unchanged-demoted-cmd? c)
+            (sc2-raw-unit-command? c)
+            (or (memv (sc2-raw-unit-command-ability-id c) '(316 3685 556 558))
+                (set-member? SC2-GOV-LAND-ABILITIES (sc2-raw-unit-command-ability-id c))))
+       2]
+      [else (wire-cmd-priority-tier c)]))
   (define (p1-train-or-supply-cmd? c)
     (and (= (eff-cmd-tier c) 1)
          (sc2-raw-unit-command? c)
          (not (unchanged-demoted-cmd? c))
          (set-member? SC2-GOV-P1-TRAIN-SUPPLY-ABILITIES
                       (sc2-raw-unit-command-ability-id c))))
-  (define (run-cmd-list! cmds tok-floor-fn hr-floor-fn #:max-count [max-count #f])
-    (let tier-loop ([rem (filter (lambda (c) (not (hash-has-key? emitted-set c))) cmds)]
-                    [emitted-here 0])
-      (unless (or (null? rem)
-                  (and max-count (>= emitted-here max-count)))
-        ;; Prefer a command in this tier whose unit-tags match `cur-sel` (saves 1 selection-delta event!),
-        ;; but NEVER promote a demoted unchanged-repeat retry ahead of fresh macro commands!
-        (define same-sel-cmd
-          (and cur-sel
-               (for/first ([c (in-list rem)]
-                           #:when (and (sc2-raw-unit-command? c)
-                                       (not (unchanged-demoted-cmd? c))
-                                       (equal? (sc2-raw-unit-command-unit-tags c) cur-sel)))
-                 c)))
-        (define chosen (or same-sel-cmd (car rem)))
-        (define rest-rem
-          (let rem-one ([xs rem])
-            (cond
-              [(null? xs) '()]
-              [(eq? (car xs) chosen) (cdr xs)]
-              [else (cons (car xs) (rem-one (cdr xs)))])))
-        (define ev-cost
-          (cond
-            [(sc2-chat-action? chosen) 0]
-            [(sc2-raw-camera-move? chosen) 1]
-            [(and cur-sel
-                  (sc2-raw-unit-command? chosen)
-                  (equal? (sc2-raw-unit-command-unit-tags chosen) cur-sel))
-             1]
-            [else 2]))
-        (define cost-fl (exact->inexact ev-cost))
-        (define tok-floor (tok-floor-fn chosen))
-        (define hr-floor (hr-floor-fn chosen))
-        (define dedup-blocked?
-          (or (mode-switch-dedup-drop? chosen)
-              (urgent-combat-dedup-drop? chosen)
-              (p2-combat-dedup-drop? chosen)
-              (repair-dedup-drop? chosen)))
-        (define cap-fail?
-          (and (> ev-cost 0)
-               (< (- rem-headroom cost-fl) hr-floor)))
-        (define tok-fail?
-          (and (> ev-cost 0)
-               (< (- (wire-apm-governor-tokens gov) cost-fl) tok-floor)))
-        (define did-emit?
-          (and (not dedup-blocked?)
-               (not cap-fail?)
-               (not tok-fail?)))
-        (unless did-emit?
-          (cond
-            [dedup-blocked?
-             (when apm-fail-ht (hash-remove! apm-fail-ht chosen))]
-            [(or cap-fail? tok-fail?)
-             (record-step-apm-fail!
-              chosen
-              (cond
-                [(and cap-fail? tok-fail?) 'both]
-                [cap-fail? 'rolling_hard_cap]
-                [else 'token_bucket]))]))
-        (when did-emit?
-          (define ms-key (mode-switch-dedup-key chosen))
-          (when ms-key
-            (when (> (hash-count gov-mode-dedup) 512) (hash-clear! gov-mode-dedup))
-            (hash-set! gov-mode-dedup ms-key cur-loop))
-          (define uc-key (urgent-combat-dedup-key chosen))
-          (when uc-key
-            (when (> (hash-count gov-urgent-combat-dedup) 512) (hash-clear! gov-urgent-combat-dedup))
-            (hash-set! gov-urgent-combat-dedup uc-key cur-loop))
-          (define p2c-key (p2-combat-dedup-key chosen))
-          (when p2c-key
-            (when (> (hash-count gov-p2-combat-dedup) 512) (hash-clear! gov-p2-combat-dedup))
-            (hash-set! gov-p2-combat-dedup p2c-key cur-loop))
-          (define rp-key (repair-dedup-key chosen))
-          (when rp-key
-            (when (> (hash-count gov-repair-dedup) 512) (hash-clear! gov-repair-dedup))
-            (hash-set! gov-repair-dedup rp-key cur-loop))
-          (define ur-meta (hash-ref unchanged-cmd-meta chosen #f))
-          (when ur-meta
-            (when (> (hash-count gov-unchanged-repeat) 512) (hash-clear! gov-unchanged-repeat))
-            (hash-set! gov-unchanged-repeat
-                       (first ur-meta)
-                       (vector (third ur-meta) cur-loop (second ur-meta))))
-          (when (> ev-cost 0)
-            (set! rem-headroom (- rem-headroom cost-fl))
-            (set-wire-apm-governor-tokens!
-             gov
-             (max -4.0 (- (wire-apm-governor-tokens gov) cost-fl)))
-            (set! new-events (cons (cons cur-loop ev-cost) new-events)))
-          (cond
-            [(sc2-raw-camera-move? chosen)
-             (set-wire-apm-governor-last-cam-loop! gov cur-loop)
-             (set-box! SC2-GOV-LAST-CAM-X (sc2-raw-camera-move-x chosen))
-             (set-box! SC2-GOV-LAST-CAM-Y (sc2-raw-camera-move-y chosen))]
-            [(sc2-raw-unit-command? chosen)
-             (set! cur-sel (sc2-raw-unit-command-unit-tags chosen))
-             (set-wire-apm-governor-last-selected-tags! gov cur-sel)])
-          (when (and (= (eff-cmd-tier chosen) 1)
-                     (not (sc2-raw-camera-move? chosen))
-                     (not (unchanged-demoted-cmd? chosen)))
-            (hash-set! SC2-GOV-LAST-P1-LOOP gov cur-loop))
-          (when (p1-train-or-supply-cmd? chosen)
-            (hash-set! SC2-GOV-LAST-P1-TRAIN-LOOP gov cur-loop))
-          (when (= (eff-cmd-tier chosen) 2)
-            (hash-set! SC2-GOV-LAST-P2-LOOP gov cur-loop))
-          (when (= (eff-cmd-tier chosen) 3)
-            (hash-set! SC2-GOV-LAST-P3-LOOP gov cur-loop))
-          (hash-set! emitted-set chosen #t)
-          (set! emitted (cons chosen emitted)))
-        (tier-loop rest-rem (if did-emit? (add1 emitted-here) emitted-here)))))
-
-  (define (cmds-for-tier tier)
-    (filter (lambda (c) (= (eff-cmd-tier c) tier)) coalesced))
-
-  ;; 1a-pre. L34-P0-1 + L35-P0-1 + Loop 73 Lane C:
-  ;;         Partition fresh P1 so core macro (unit training, supply, build, MULE, research) always
-  ;;         leads low-priority filler (Creep Tumors/morphs/Depot lower), with demoted retries at the
-  ;;         back. Run general overdue P1 rescue (`>= 12` loops since `SC2-GOV-LAST-P1-LOOP`) OR, when
-  ;;         non-training P1 (e.g. Creep Tumors/morphs) kept `LAST-P1-LOOP` fresh while training/supply
-  ;;         is overdue (`>= 12` loops since `SC2-GOV-LAST-P1-TRAIN-LOOP`), run isolated training/supply
-  ;;         rescue BEFORE `1a` `p0-active-spell-cmds` (`cond` guarantees strictly `<= 3` rescued).
-  (define-values (p1-demoted-cmds p1-fresh-cmds)
-    (partition unchanged-demoted-cmd? (cmds-for-tier 1)))
-  (define-values (p1-filler-fresh-cmds p1-core-fresh-cmds)
-    (partition (lambda (c)
-                 (and (sc2-raw-unit-command? c)
-                      (set-member? SC2-GOV-P1-FILLER-ABILITIES
-                                   (sc2-raw-unit-command-ability-id c))))
-               p1-fresh-cmds))
-  (define p1-train-supply-cmds
-    (filter p1-train-or-supply-cmd? p1-core-fresh-cmds))
-  (define p1-cmds (append p1-core-fresh-cmds p1-filler-fresh-cmds p1-demoted-cmds))
   (define (p1-core-fresh-cmd? c)
-    (and (not (unchanged-demoted-cmd? c))
+    (and (= (eff-cmd-tier c) 1)
+         (not (sc2-raw-camera-move? c))
+         (not (unchanged-demoted-cmd? c))
          (not (and (sc2-raw-unit-command? c)
                    (set-member? SC2-GOV-P1-FILLER-ABILITIES
                                 (sc2-raw-unit-command-ability-id c))))))
-  (define (p1-hr-floor c)
-    (if (p1-core-fresh-cmd? c)
-        0.0
-        (tier-headroom-floor 1)))
-  (define (p1-rescue-hr-floor c)
-    (if (or (p1-core-fresh-cmd? c) (< hard-cap 100.0))
-        0.0
-        (tier-headroom-floor 1)))
-  (define p1-macro-all
-    (filter (lambda (c) (not (sc2-raw-camera-move? c))) p1-cmds))
-  (cond
-    [(and (pair? p1-macro-all)
-          (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 12))
-     (run-cmd-list! p1-macro-all (lambda (_) -4.0) p1-rescue-hr-floor #:max-count 3)]
-    [(and (pair? p1-train-supply-cmds)
-          (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-TRAIN-LOOP gov -1000)) 12))
-     (run-cmd-list! p1-train-supply-cmds (lambda (_) -4.0) (lambda (_) 0.0) #:max-count 3)])
 
-  ;; 1a. Run P0 urgent survival, opening worker splits, and active combat spells first.
-  ;;     Partition out non-urgent P0 mode-switches (388/390/403/405/1978/1998/2095/2097/2108/2110/2362/2364/2558/2560)
-  ;;     so overdue P1 macro rescue runs BEFORE non-urgent P0 mode switches!
-  (define p0-cmds (cmds-for-tier 0))
-  (define-values (p0-mode-switch-cmds p0-urgent-cmds)
-    (partition (lambda (c)
-                 (and (sc2-raw-unit-command? c)
-                      (not (urgent-survival-cmd? c))
-                      (not (opening-worker-split-cmd? c))
-                      (set-member? SC2-GOV-P0-MODE-SWITCH-ABILITIES
-                                   (sc2-raw-unit-command-ability-id c))))
-               p0-cmds))
-  (define-values (p0-urgent-23-16-cmds p0-spells-and-survival-cmds)
-    (partition (lambda (c)
-                 (and (urgent-survival-cmd? c)
-                      (sc2-raw-unit-command? c)
-                      (memv (sc2-raw-unit-command-ability-id c) '(23 16))))
-               p0-urgent-cmds))
-  (define-values (p0-urgent-non23-cmds p0-active-spell-cmds)
-    (partition (lambda (c)
-                 (or (urgent-survival-cmd? c)
-                     (opening-worker-split-cmd? c)))
-               p0-spells-and-survival-cmds))
-  ;; L60 (`#1580`): Execute active P0 spells (251/2338/3675/1036/1628/399, floor -3.0) first,
-  ;; then urgent 23/16 survival (capped at -2.0), then critical non-23/16 survival (407/split, -4.0)
-  ;; so urgent 23/16 bursts never starve P0 spells while 407+23 both clear under tight tokens!
-  (run-cmd-list! p0-active-spell-cmds
-                 (lambda (c) (tier-token-floor 0 c))
-                 (lambda (_) (tier-headroom-floor 0)))
-  (run-cmd-list! p0-urgent-23-16-cmds
-                 (lambda (c) (tier-token-floor 0 c))
-                 (lambda (_) (tier-headroom-floor 0)))
-  (run-cmd-list! p0-urgent-non23-cmds
-                 (lambda (c) (tier-token-floor 0 c))
-                 (lambda (_) (tier-headroom-floor 0)))
+  (define dt-macro (exact->inexact (max 0 (- cur-loop (vector-ref class-loops 0)))))
+  (define dt-train (exact->inexact (max 0 (- cur-loop (vector-ref class-loops 1)))))
+  (define dt-combat (exact->inexact (max 0 (- cur-loop (vector-ref class-loops 2)))))
+  (define dt-harvest (exact->inexact (max 0 (- cur-loop (vector-ref class-loops 3)))))
+  (define dt-cam (exact->inexact (max 0 (- cur-loop (wire-apm-governor-last-cam-loop gov)))))
 
-  ;; 1a-post. Loop 87B Track C: Protect fresh core P1 macro (unit/worker train, supply, buildings,
-  ;;          expand, research, MULE, Chrono) from P0 overdraft starvation! Runs immediately after
-  ;;          P0 urgent/active spells and BEFORE P2 large rescue / P0 mode-switches, bounded strictly
-  ;;          by rolling hard-cap headroom (hr-floor = 0.0) and capping debt-mode dispatch at <= 6
-  ;;          commands/step while keeping tokens clamped at >= -4.0 so P1 never starves P0 either.
-  (when (and high-apm-gov? (pair? p1-core-fresh-cmds))
-    (run-cmd-list! p1-core-fresh-cmds
-                   (lambda (_) -100.0)
-                   (lambda (_) 0.0)
-                   #:max-count (if (< (wire-apm-governor-tokens gov) 2.0) 6 #f)))
+  (define (cmd-marginal-value c tier)
+    (cond
+      [(sc2-chat-action? c) 10000.0]
+      [(opening-worker-split-cmd? c) 4000.0]
+      [(sc2-raw-camera-move? c)
+       ;; Camera moves strictly below combat micro (V_cam < V_micro)
+       (if (or (framing-camera-cmd? c) (pro-camera-jump-cmd? c))
+           (+ 220.0 (min 100.0 (* 3.0 dt-cam)))
+           (+ 100.0 (min 60.0 (* 1.0 dt-cam))))]
+      [(sc2-raw-unit-command? c)
+       (define ab (sc2-raw-unit-command-ability-id c))
+       (define ntags (length (sc2-raw-unit-command-unit-tags c)))
+       (define sz-bonus (/ (log (+ 1.0 (exact->inexact ntags))) 0.6931471805599453))
+       (cond
+         ;; Urgent non-23/16 survival (Bunker load/unload, Lift, Cancel, emergency split;
+         ;; repeatedly-blocked unchanged-demoted depot/repair retries drop out of P0!)
+         [(and (urgent-survival-cmd? c)
+               (not (memv ab '(23 16)))
+               (not (unchanged-demoted-cmd? c)))
+          (+ 3200.0 (* 30.0 sz-bonus))]
+         ;; Active P0 spells (Inject 251, Chrono 3755, Scan 399, Storm, Bile, Stim, Blink, etc.)
+         [(and (= tier 0)
+               (not (urgent-survival-cmd? c))
+               (not (unchanged-demoted-cmd? c))
+               (not (set-member? SC2-GOV-P0-MODE-SWITCH-ABILITIES ab)))
+          (+ 2800.0 (* 40.0 sz-bonus))]
+         ;; Urgent survival attack/move (23/16): high-priority combat strictly below V_macro (1600)
+         ;; so defensive combat beats routine P2 micro without starving P0 spells or Core P1 macro!
+         [(and (urgent-survival-cmd? c) (not (unchanged-demoted-cmd? c)))
+          (min 1550.0 (+ 1500.0 (* 15.0 sz-bonus)))]
+         ;; Core Fresh P1 Training & Supply (continuous staleness automatically lifts overdue train!)
+         [(p1-train-or-supply-cmd? c)
+          (+ 2000.0 (* 30.0 sz-bonus) (min 1000.0 (* 80.0 dt-train)))]
+         ;; Core Fresh P1 Build / Expand / Research / MULE / Addon (same 2000 base preserves caller rotation!)
+         [(p1-core-fresh-cmd? c)
+          (+ 2000.0 (* 30.0 sz-bonus) (min 800.0 (* 60.0 dt-macro)))]
+         ;; Non-urgent P0 mode-switches (Siege/Unsiege/Burrow/Liberator/Viking)
+         [(= tier 0)
+          (+ 1050.0 (* 30.0 sz-bonus))]
+         ;; P1 Filler (Creep Tumor / Morph / Depot lower / Rally) & demoted retries
+         [(= tier 1)
+          (if (unchanged-demoted-cmd? c)
+              (+ 700.0 (* 15.0 sz-bonus))
+              (+ 900.0 (* 25.0 sz-bonus)))]
+         ;; P2 Combat micro, repair, land, depot raise
+         ;; Cohesive multi-unit squads (>=4 tags, 23/16) rise smoothly (strictly < 1150 < V_macro)
+         ;; while keeping sz-bonus monotonic so largest combat squads always emit first!
+         [(= tier 2)
+          (define stale-squad-bonus
+            (if (and (memv ab '(23 16)) (>= ntags 4) (>= dt-combat 8.0))
+                (min 350.0 (* 50.0 dt-combat))
+                (min 160.0 (* 12.0 dt-combat))))
+          (min 1150.0
+               (+ (if (unchanged-demoted-cmd? c) 360.0 500.0)
+                  (* 40.0 sz-bonus)
+                  stale-squad-bonus))]
+         ;; P3 Routine harvest / worker transfer (smooth staleness prevents permanent starvation under micro)
+         [else
+          (+ 260.0 (* 20.0 sz-bonus) (min 440.0 (* 16.0 dt-harvest)))])]
+      [else 100.0]))
 
-  ;; 1b. W7-P0-2-wire: Guaranteed overdue rescue slot for large multi-unit P2 combat march/attack
-  ;;     commands (>= 8 tags, AB 23/16) when >= 8 loops have elapsed since last P2 emission, so
-  ;;     late-game P1 creep-tumor / macro bursts NEVER starve army-wide marches or endgame hunts!
-  ;;     L60 (`#1580`): Tighten overdraft floor `-2.0 -> -1.0` and cap overdraft count to `<= 2`
-  ;;     when tokens < 6.0 so P2 large rescues never starve P0 spells or P1 macro.
-  (define p2-cmds (cmds-for-tier 2))
-  (define p2-combat-move-atk
-    (filter (lambda (c)
-              (and (sc2-raw-unit-command? c)
-                   (memv (sc2-raw-unit-command-ability-id c) '(23 16))
-                   (>= (length (sc2-raw-unit-command-unit-tags c)) 3)))
-            p2-cmds))
-  (define p2-large-base
-    (sort
-     (filter (lambda (c) (>= (length (sc2-raw-unit-command-unit-tags c)) 8))
-             p2-combat-move-atk)
-     >
-     #:key (lambda (c) (length (sc2-raw-unit-command-unit-tags c)))))
-  ;; L65 Lane C (`#1830`): When a simultaneous 2-prong attack targets spatially separated
-  ;; fronts (`>= 25.0t` apart, e.g. Main Army at Base A + >=3-unit Runby at Base B), pair the
-  ;; largest secondary prong right after the primary prong and allow `max-count = 2` under
-  ;; tight tokens (`< 6.0`) so simultaneous prongs never cross-throttle each other!
-  (define p2-second-prong
-    (and (pair? p2-large-base)
-         (any-point? (sc2-raw-unit-command-target-pos (first p2-large-base)))
-         (let* ([p1-cmd (first p2-large-base)]
-                [p1-pt (sc2-raw-unit-command-target-pos p1-cmd)]
-                [p1x (any-point-x p1-pt)]
-                [p1y (any-point-y p1-pt)]
-                [far-cands
-                 (filter (lambda (c)
-                           (define tp (sc2-raw-unit-command-target-pos c))
-                           (and (not (eq? c p1-cmd))
-                                (any-point? tp)
-                                (>= (pt-dist p1x p1y (any-point-x tp) (any-point-y tp)) 25.0)))
-                         p2-combat-move-atk)])
-           (and (pair? far-cands)
-                (argmax (lambda (c) (length (sc2-raw-unit-command-unit-tags c))) far-cands)))))
-  (define p2-large-cmds
-    (if p2-second-prong
-        (cons (first p2-large-base)
-              (cons p2-second-prong
-                    (filter (lambda (c) (not (or (eq? c (first p2-large-base))
-                                                 (eq? c p2-second-prong))))
-                            p2-large-base)))
-        p2-large-base))
-  (when (and (pair? p2-large-cmds)
-             (>= (- cur-loop (hash-ref SC2-GOV-LAST-P2-LOOP gov -1000)) 8))
-    (run-cmd-list! p2-large-cmds
-                   (lambda (_) -1.5)
-                   (lambda (_) (if (>= hard-cap 100.0) (tier-headroom-floor 2) 2.0))
-                   #:max-count (if (>= (wire-apm-governor-tokens gov) 6.0)
-                                   4
-                                   (if p2-second-prong 2 1))))
+  (define (cmd-ev-cost c sel)
+    (cond
+      [(sc2-chat-action? c) 0]
+      [(sc2-raw-camera-move? c) 1]
+      [(and sel
+            (sc2-raw-unit-command? c)
+            (equal? (sc2-raw-unit-command-unit-tags c) sel))
+       1]
+      [else 2]))
 
-  ;; 1c. L33-P0-1 + Loop 73 Lane C: Overdue P1 rescue (`>= 8` loops, `#:max-count 4`, `hr-floor = 0.0`)
-  ;;     runs BEFORE non-urgent P0 mode switches (`1d`), falling back to isolated training/supply rescue
-  ;;     when non-training P1 kept `SC2-GOV-LAST-P1-LOOP` fresh (`cond` caps rescues at `<= 4`).
-  (cond
-    [(and (pair? p1-macro-all)
-          (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 8))
-     (run-cmd-list! p1-macro-all (lambda (_) -3.0) p1-rescue-hr-floor #:max-count 4)]
-    [(and (pair? p1-train-supply-cmds)
-          (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-TRAIN-LOOP gov -1000)) 8))
-     (run-cmd-list! p1-train-supply-cmds (lambda (_) -3.0) (lambda (_) 0.0) #:max-count 4)])
+  ;; Build flat candidate list & compute queued current-step high-value demand Q_high
+  (define rem-q-high 0)
+  (define cands
+    (for/list ([c (in-list stage1-cmds)]
+               [idx (in-naturals)])
+      (define tier (eff-cmd-tier c))
+      (define val (cmd-marginal-value c tier))
+      (define urgent-23-16?
+        (and (urgent-survival-cmd? c)
+             (sc2-raw-unit-command? c)
+             (memv (sc2-raw-unit-command-ability-id c) '(23 16))))
+      (define stale-squad?
+        (and (= tier 2)
+             (sc2-raw-unit-command? c)
+             (memv (sc2-raw-unit-command-ability-id c) '(23 16))
+             (>= (length (sc2-raw-unit-command-unit-tags c)) 4)
+             (>= dt-combat 8.0)))
+      (define high? (and (<= tier 1) (>= val SC2-GOV-V-MACRO)))
+      (when (and high? (not urgent-23-16?))
+        (set! rem-q-high (+ rem-q-high (cmd-ev-cost c cur-sel))))
+      (vector c val high? tier idx urgent-23-16? stale-squad?)))
 
-  ;; 1d. Run remaining non-urgent P0 mode switches (`>= 10`-loop deduped above; capped at 90% on >=100 cap).
-  (run-cmd-list! p0-mode-switch-cmds
-                 (lambda (c) (tier-token-floor 0 c))
-                 (lambda (_) (if (>= hard-cap 100.0) (tier-headroom-floor 1) (tier-headroom-floor 0))))
+  (define mu-high (vector-ref high-ema 0))
+  (define sigma-high (sqrt (max 0.0 (vector-ref high-ema 1))))
+  (define ema-reserve
+    (min cap-apm (* SC2-GOV-EMA-HORIZON-FRAC (+ mu-high (* 2.0 sigma-high)))))
 
-  ;; 2. Run normal P1 macro drain (`train`, `warp-in`, `build`, `expand`, `morph`, `research`, `MULE`)
-  ;;    BEFORE normal P2/P4 drain: core fresh P1 macro gets full 100% cap (`hr-floor = 0.0`), while
-  ;;    filler/demoted P1 obeys the 90% ceiling (`tier-headroom-floor 1`) so P0 never starves!
-  (run-cmd-list! p1-cmds
-                 (lambda (c) (tier-token-floor 1 c))
-                 p1-hr-floor)
-  (define p1-macro-rem
-    (filter (lambda (c) (and (not (hash-has-key? emitted-set c)) (not (sc2-raw-camera-move? c))))
-            p1-cmds))
-  (define p1-train-supply-rem
-    (filter (lambda (c) (not (hash-has-key? emitted-set c))) p1-train-supply-cmds))
-  (cond
-    [(and (pair? p1-macro-rem)
-          (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 8))
-     (run-cmd-list! p1-macro-rem (lambda (_) -3.0) p1-rescue-hr-floor #:max-count 4)]
-    [(and (pair? p1-train-supply-rem)
-          (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-TRAIN-LOOP gov -1000)) 8))
-     (run-cmd-list! p1-train-supply-rem (lambda (_) -3.0) (lambda (_) 0.0) #:max-count 4)])
+  (define new-events '())
+  (define new-high-events '())
+  (define emitted '())
+  (define emitted-set (make-hasheq))
+  (define apm-fail-ht #f)
+  (define p1-damper-bypass-cnt 0)
+  (define p2-stale-bypass-cnt 0)
+  (define urgent-23-bypass-cnt 0)
+  (define (record-step-apm-fail! cmd reason)
+    (unless apm-fail-ht (set! apm-fail-ht (make-hasheq)))
+    (hash-set! apm-fail-ht cmd reason))
 
-  ;; 3. Bounded anti-starvation rescue for overdue P2 combat (>= 12 loops stale), overdue P3 routine
-  ;;    worker/transfer (>= 24 loops stale, W18-P0-2-wire), and 1 overdue routine P4 camera (>= 44 loops),
-  ;;    strictly respecting tiered rolling ceilings (`78%/76%/74%` on >=100 cap) so P0/P1 headroom holds!
-  (when (and (pair? p2-cmds)
-             (>= (- cur-loop (hash-ref SC2-GOV-LAST-P2-LOOP gov -1000)) 12))
-    (run-cmd-list! p2-cmds (lambda (_) 1.5)
-                   (lambda (_) (if (>= hard-cap 100.0) (tier-headroom-floor 2) 6.0))
-                   #:max-count 3))
-  (define p3-cmds (cmds-for-tier 3))
-  (when (and (pair? p3-cmds)
-             (>= (- cur-loop (hash-ref SC2-GOV-LAST-P3-LOOP gov -1000)) 24))
-    (run-cmd-list! p3-cmds (lambda (_) 1.5)
-                   (lambda (_) (if (>= hard-cap 100.0) (tier-headroom-floor 3) 8.0))
-                   #:max-count 1))
-  (define pro-cam-cmds
-    (filter (lambda (c) (or (pro-camera-jump-cmd? c) (framing-camera-cmd? c))) p2-cmds))
-  (when (and (pair? pro-cam-cmds)
-             (>= (- cur-loop (wire-apm-governor-last-cam-loop gov)) 28))
-    (run-cmd-list! pro-cam-cmds (lambda (_) 0.0)
-                   (lambda (_) (if (>= hard-cap 100.0) (tier-headroom-floor 2) 4.0))
-                   #:max-count 1))
-  (define p4-cam-cmds
-    (filter sc2-raw-camera-move? (cmds-for-tier 4)))
-  (when (and (pair? p4-cam-cmds)
-             (>= (- cur-loop (wire-apm-governor-last-cam-loop gov)) 44))
-    (run-cmd-list! p4-cam-cmds (lambda (_) 0.0)
-                   (lambda (_) (if (>= hard-cap 100.0) (tier-headroom-floor 4) 6.0))
-                   #:max-count 1))
+  ;; Greedy value-density dispatch (`V(c) / ev-cost(c, cur-sel)`), unified single-cap + live EMA reserve!
+  (let dispatch-loop ([rem cands])
+    (unless (null? rem)
+      ;; Pick highest V(c) / ev-cost(c, cur-sel), tie-breaking by input index
+      (define best-entry (car rem))
+      (define best-cost (cmd-ev-cost (vector-ref best-entry 0) cur-sel))
+      (define best-dens
+        (if (= best-cost 0)
+            +inf.0
+            (/ (vector-ref best-entry 1) (exact->inexact best-cost))))
+      (for ([e (in-list (cdr rem))])
+        (define ec (cmd-ev-cost (vector-ref e 0) cur-sel))
+        (define ed (if (= ec 0) +inf.0 (/ (vector-ref e 1) (exact->inexact ec))))
+        (when (or (> ed best-dens)
+                  (and (= ed best-dens)
+                       (< (vector-ref e 4) (vector-ref best-entry 4))))
+          (set! best-entry e)
+          (set! best-cost ec)
+          (set! best-dens ed)))
+      (define rest-rem
+        (let rem-one ([xs rem])
+          (cond
+            [(null? xs) '()]
+            [(eq? (car xs) best-entry) (cdr xs)]
+            [else (cons (car xs) (rem-one (cdr xs)))])))
+      (define chosen (vector-ref best-entry 0))
+      (define val (vector-ref best-entry 1))
+      (define high? (vector-ref best-entry 2))
+      (define tier (vector-ref best-entry 3))
+      (define urgent-23-16? (vector-ref best-entry 5))
+      (define stale-squad? (vector-ref best-entry 6))
+      (define ev-cost best-cost)
+      (define cost-fl (exact->inexact ev-cost))
+      (define r-high-now (min cap-apm (max (exact->inexact rem-q-high) ema-reserve)))
+      (define req-reserve
+        (cond
+          [high? 0.0]
+          [urgent-23-16?
+           (* r-high-now (max 0.0 (- 1.0 (/ (min val SC2-GOV-V-MACRO) SC2-GOV-V-MACRO))))]
+          [else
+           (* r-high-now
+              (max (if (>= tier 2) 0.45 0.0)
+                   (- 1.0 (/ (min val SC2-GOV-V-MACRO) SC2-GOV-V-MACRO))))]))
+      (define cap-fail?
+        (and (> ev-cost 0)
+             (< (- rem-headroom cost-fl) req-reserve)))
+      (define cur-toks (wire-apm-governor-tokens gov))
+      (define under-damper? (< (- cur-toks cost-fl) 0.0))
+      (define p0-active-spell? (and high? (= tier 0) (not urgent-23-16?)))
+      (define damper-bypass-ok?
+        (cond
+          ;; P0 survival spells & opening split NEVER drop on or drain the 5s burst damper
+          [p0-active-spell? #t]
+          ;; Own-base defensive urgent 23/16 gets 1 bounded dry-damper bypass/step (never floods 60s cap)
+          [urgent-23-16? (< urgent-23-bypass-cnt 1)]
+          ;; Core P1 macro gets bounded 2-cmd/step bypass when 5s damper is dry (prevents runaway P1 flood)
+          [(and high? (= tier 1)) (< p1-damper-bypass-cnt 2)]
+          ;; Stale multi-unit combat squads (>=4 tags, dt>=8) get 2-squad bypass (supports 2-prong!)
+          [stale-squad? (< p2-stale-bypass-cnt 2)]
+          [else #f]))
+      (define tok-fail?
+        (and (> ev-cost 0)
+             under-damper?
+             (not damper-bypass-ok?)))
+      (cond
+        [(or cap-fail? tok-fail?)
+         (record-step-apm-fail!
+          chosen
+          (cond
+            [(and cap-fail? tok-fail?) 'both]
+            [cap-fail? 'rolling_hard_cap]
+            [else 'token_bucket]))
+         ;; Loop 88D: Stamp a 16f per-unit refractory on Stage 2 drop of repair/depot/land/heal
+         ;; so rolling-cap drops NEVER spin-loop every 4f!
+         (define rmeta-drop (and refract-meta-ht (hash-ref refract-meta-ht chosen #f)))
+         (when (and rmeta-drop
+                    (sc2-raw-unit-command? chosen)
+                    (memq (vector-ref rmeta-drop 0) '(repair depot land heal)))
+           (when (> (hash-count gov-unit-refract) 2048)
+             (hash-clear! gov-unit-refract))
+           (define ab-cls (vector-ref rmeta-drop 0))
+           (define tsig (vector-ref rmeta-drop 1))
+           (define rcd (vector-ref rmeta-drop 2))
+           (define stamp-loop (- cur-loop (max 0 (- rcd 16))))
+           (define rec (cons stamp-loop tsig))
+           (for ([t (in-list (sc2-raw-unit-command-unit-tags chosen))])
+             (hash-set! gov-unit-refract (cons t ab-cls) rec)))]
+        [else
+         (when (and high? (not urgent-23-16?))
+           (set! rem-q-high (max 0 (- rem-q-high ev-cost))))
+         (when (and under-damper? urgent-23-16?)
+           (set! urgent-23-bypass-cnt (add1 urgent-23-bypass-cnt)))
+         (when (and under-damper? high? (= tier 1))
+           (set! p1-damper-bypass-cnt (add1 p1-damper-bypass-cnt)))
+         (when (and under-damper? stale-squad?)
+           (set! p2-stale-bypass-cnt (add1 p2-stale-bypass-cnt)))
+         ;; Record per-unit refractory on actual emission
+         (define rmeta (and refract-meta-ht (hash-ref refract-meta-ht chosen #f)))
+         (when (and rmeta (sc2-raw-unit-command? chosen))
+           (when (> (hash-count gov-unit-refract) 2048)
+             (hash-clear! gov-unit-refract))
+           (define ab-cls (vector-ref rmeta 0))
+           (define tsig (vector-ref rmeta 1))
+           (define rec (cons cur-loop tsig))
+           (for ([t (in-list (sc2-raw-unit-command-unit-tags chosen))])
+             (hash-set! gov-unit-refract (cons t ab-cls) rec)))
+         (define ur-updates (and unchanged-cmd-meta (hash-ref unchanged-cmd-meta chosen #f)))
+         (when (pair? ur-updates)
+           (when (> (hash-count gov-unchanged-repeat) 512) (hash-clear! gov-unchanged-repeat))
+           (for ([ur-meta (in-list ur-updates)])
+             (hash-set! gov-unchanged-repeat
+                        (first ur-meta)
+                        (vector (third ur-meta) cur-loop (second ur-meta)))))
+         (when (> ev-cost 0)
+           (set! rem-headroom (- rem-headroom cost-fl))
+           ;; P0 active spells charge the 60s cap & R_high EMA without starving core P1 on the 5s damper
+           (unless p0-active-spell?
+             (set-wire-apm-governor-tokens!
+              gov
+              (max 0.0 (- cur-toks cost-fl))))
+           (define ev-pair (cons cur-loop ev-cost))
+           (set! new-events (cons ev-pair new-events))
+           (when (and high? (not urgent-23-16?))
+             (set! new-high-events (cons ev-pair new-high-events))))
+         (cond
+           [(sc2-raw-camera-move? chosen)
+            (set-wire-apm-governor-last-cam-loop! gov cur-loop)
+            (set-box! SC2-GOV-LAST-CAM-X (sc2-raw-camera-move-x chosen))
+            (set-box! SC2-GOV-LAST-CAM-Y (sc2-raw-camera-move-y chosen))]
+           [(sc2-raw-unit-command? chosen)
+            (set! cur-sel (sc2-raw-unit-command-unit-tags chosen))
+            (set-wire-apm-governor-last-selected-tags! gov cur-sel)])
+         (when (and (= tier 1)
+                    (not (sc2-raw-camera-move? chosen))
+                    (not (unchanged-demoted-cmd? chosen))
+                    (not (p1-train-or-supply-cmd? chosen)))
+           (vector-set! class-loops 0 cur-loop))
+         (when (p1-train-or-supply-cmd? chosen)
+           (vector-set! class-loops 1 cur-loop))
+         (when (and (= tier 2) (not (sc2-raw-camera-move? chosen)))
+           (vector-set! class-loops 2 cur-loop))
+         (when (= tier 3)
+           (vector-set! class-loops 3 cur-loop))
+         (hash-set! emitted-set chosen #t)
+         (set! emitted (cons chosen emitted))])
+      (dispatch-loop rest-rem)))
 
-  ;; 4. Normal tier drain P2..P4 (`emitted-set` prevents re-emitting rescued P2/P4 commands).
-  (for ([tier (in-range 2 5)])
-    (define hr-floor (tier-headroom-floor tier))
-    (run-cmd-list! (cmds-for-tier tier)
-                   (lambda (c) (tier-token-floor tier c))
-                   (lambda (_) hr-floor)))
+  ;; Update high-value EMA immediately when high-value events emitted this step
+  (when (pair? new-high-events)
+    (define updated-high-evs (append (reverse new-high-events) (vector-ref high-ema 3)))
+    (vector-set! high-ema 3 updated-high-evs)
+    (update-high-ema! updated-high-evs cur-loop))
 
-  ;; L59-APM-LOG (`#1562`): Record every candidate command that was NOT emitted specifically due to
-  ;; APM-cap budget (`rolling_hard_cap` / `token_bucket` / `both`), strictly excluding dedup/cooldown!
+  ;; Record genuine APM-budget drops (strictly excluding Stage 1 noop/refractory/backoff)
   (when apm-fail-ht
     (for ([(c reason) (in-hash apm-fail-ht)]
           #:when (not (hash-has-key? emitted-set c)))
       (record-wire-apm-drop! gov c (eff-cmd-tier c) reason cur-loop)))
 
-  ;; W11-P0-3-wire: If APM throttling dropped any WarpGate warp-in command (1413..1419),
-  ;; immediately release its client-side cooldown lock so it retries on the next step instead
-  ;; of being falsely locked out for 23 seconds!
-  (for ([c (in-list coalesced)]
+  ;; Release WarpGate cooldown lock if APM throttling dropped a Warp-In command
+  (for ([c (in-list stage1-cmds)]
         #:when (and (sc2-raw-unit-command? c)
                     (memv (sc2-raw-unit-command-ability-id c) SC2-WARP-IN-ABILITY-IDS)
                     (not (hash-has-key? emitted-set c))))
@@ -22225,15 +22444,17 @@
       (hash-remove! SC2-WARPGATE-COOLDOWN-UNTIL t)
       (hash-remove! SC2-WARPGATE-WARP-START-LOOP t)))
 
-  ;; L54-W1: If APM throttling or backoff dropped any Supply Depot lower/raise command (556/558),
-  ;; immediately clear SC2-DEPOT-TOGGLE-COOLDOWN so the ramp never locks out for 44 loops!
-  (for ([c (in-list coalesced0)]
-        #:when (and (sc2-raw-unit-command? c)
-                    (memv (sc2-raw-unit-command-ability-id c) '(556 558))
-                    (not (hash-has-key? emitted-set c))))
-    (for ([t (in-list (sc2-raw-unit-command-unit-tags c))])
-      (hash-remove! SC2-DEPOT-TOGGLE-COOLDOWN t)
-      (clear-mode-stealth-depot-cooldown! SC2-DEFAULT-MODE-STEALTH-STATE t)))
+  ;; Release Supply Depot toggle cooldown ONLY on fresh 556 (Lower) APM-budget drop
+  ;; (NEVER on 558 Raise or unchanged-demoted drops, preventing blocked-depot retry spam loops!)
+  (when apm-fail-ht
+    (for ([(c _reason) (in-hash apm-fail-ht)]
+          #:when (and (sc2-raw-unit-command? c)
+                      (= (sc2-raw-unit-command-ability-id c) 556)
+                      (not (unchanged-demoted-cmd? c))
+                      (not (hash-has-key? emitted-set c))))
+      (for ([t (in-list (sc2-raw-unit-command-unit-tags c))])
+        (hash-remove! SC2-DEPOT-TOGGLE-COOLDOWN t)
+        (clear-mode-stealth-depot-cooldown! SC2-DEFAULT-MODE-STEALTH-STATE t))))
 
   (when (not (null? new-events))
     (set-wire-apm-governor-rolling-events!

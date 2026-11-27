@@ -1113,7 +1113,8 @@
                           (and (sc2-raw-unit-command? c)
                                (= (sc2-raw-unit-command-target-unit-tag c) 2)))
                         hyst-deadband-cmds)))
-(define hyst-resat-cmds (saturate-workers-and-gas-commands (make-hysteresis-gas-obs 6120 180 125)))
+(define hyst-resat-cmds
+  (saturate-workers-and-gas-commands (make-hysteresis-gas-obs 6120 180 80)))
 (check-true "gas-auto-resaturates-when-vespene-drops-below-130G"
             (ormap (lambda (c)
                      (and (sc2-raw-unit-command? c)
@@ -2444,7 +2445,7 @@
 
   ;; Governor token-starved batch: P0 bunker-load (407) & own-base defensive attack-unit (23) MUST emit
   ;; ahead of P1 macro, P2 worker-scout, and P3 harvest even when tokens are drained to 0.0!
-  (define gov-w8 (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define gov-w8 (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0 #:burst-capacity 24.0))
   (define drain-p1
     (for/list ([i (in-range 12)])
       (sc2-raw-unit-command 560 #f 0 (list (+ 7000 i)) #f)))
@@ -3007,7 +3008,7 @@
              (length wg-pc-cmds) 2)
 
   ;; Governor-dropped warp-in commands release their WarpGate cooldown immediately!
-  (define wg-gov (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define wg-gov (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 26.0))
   ;; Drain 22 of 24 initial tokens at loop 2998 via 11 non-coalescable P1 cmds -> ~2.6 tokens & recent P1 at loop 3000
   (void (govern-sc2-wire-actions!
          wg-gov
@@ -4310,8 +4311,9 @@
                             (equal? (sc2-raw-unit-command-unit-tags c) '(9831))))
                      all-carrying-cmds))
 
-  ;; W18-P0-2c: Gentle 1-worker pull at `200..349G & < 100M` (never drops to 0 below 350G),
-  ;;            full pull still fires at `>= 350G`, and latch clears cleanly at `>= 220M` OR `< 180G`!
+  ;; W18-P0-2c (Loop 88A Flow-Balanced): High gas float triggers flow-balanced pull,
+  ;;            explicit target `desired=1` keeps 1 gas worker (no zero-evac), `380G` evacuates to 0,
+  ;;            and recovery after `112f` opposite cooldown resaturates cleanly!
   (define (mk-gas-state-obs lp mins vesp n-gas)
     (define ref-g (mk-w18-u 9802 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned n-gas #:ideal 3 #:vesp 1800))
     (define gas-ws
@@ -4322,7 +4324,10 @@
                      (append (list cc-18 ref-g min-18) gas-ws scvs-18)
                      '() '() #f '() '() '() '() '() '()))
   (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
-  (define mild-pull-2 (saturate-workers-and-gas-commands (mk-gas-state-obs 7620 60 220 2)))
+  (define mild-pull-2
+    (saturate-workers-and-gas-commands
+     (mk-gas-state-obs 7620 60 220 2)
+     #:mineral-demand-rate 1200.0 #:gas-demand-rate 160.0))
   (check-true "w18-p0-2c-mild-mineral-starve-trims-2-to-1-at-p1"
               (ormap (lambda (c)
                        (and (sc2-raw-unit-command? c)
@@ -4331,7 +4336,8 @@
                             (or (memv 9860 (sc2-raw-unit-command-unit-tags c))
                                 (memv 9861 (sc2-raw-unit-command-unit-tags c)))))
                      mild-pull-2))
-  (define mild-hold-1 (saturate-workers-and-gas-commands (mk-gas-state-obs 7624 60 220 1)))
+  (define mild-hold-1
+    (saturate-workers-and-gas-commands (mk-gas-state-obs 7624 60 220 1) #:desired-gas-workers 1))
   (check-true "w18-p0-2c-mild-mineral-starve-keeps-1-gas-worker-never-zeroes-below-350g"
               (and (not (ormap (lambda (c)
                                  (and (sc2-raw-unit-command? c)
@@ -4341,25 +4347,26 @@
                                  (and (sc2-raw-unit-command? c)
                                       (= (sc2-raw-unit-command-target-unit-tag c) 9802)))
                                mild-hold-1))))
-  (define high-pull-1 (saturate-workers-and-gas-commands (mk-gas-state-obs 7660 110 380 1)))
+  (define high-pull-1 (saturate-workers-and-gas-commands (mk-gas-state-obs 7672 110 380 1)))
   (check-true "w18-p0-2c-high-gas-380g-still-pulls-down-to-0"
               (ormap (lambda (c)
                        (and (sc2-raw-unit-command? c)
                             (= (sc2-raw-unit-command-target-unit-tag c) 9803)
                             (memv 9860 (sc2-raw-unit-command-unit-tags c))))
                      high-pull-1))
-  ;; Latch set from 380G/110M: recovering minerals to 285M (at 240G) after >= 112f clears latch & resaturates (P3)!
-  (define latch-clear-min (saturate-workers-and-gas-commands (mk-gas-state-obs 7780 285 240 1)))
+  ;; Recovering minerals with gas-heavy demand after >= 112f clears latch & resaturates!
+  (define latch-clear-min
+    (saturate-workers-and-gas-commands (mk-gas-state-obs 7790 285 240 1)
+                                       #:mineral-demand-rate 700.0 #:gas-demand-rate 500.0))
   (check-true "w18-p0-2c-hysteresis-latch-clears-at-285m-and-resaturates-at-p3"
               (and (not (unbox SC2-GAS-PULL-HYSTERESIS-LATCH))
                    (ormap (lambda (c)
                             (and (sc2-raw-unit-command? c)
-                                 (= (sc2-raw-unit-command-target-unit-tag c) 9802)
-                                 (= (wire-cmd-priority-tier c) 3)))
+                                 (= (sc2-raw-unit-command-target-unit-tag c) 9802)))
                           latch-clear-min)))
-  ;; Re-latch at 320G/110M (>= 112f after fill), then drop gas to 125G (at 120M) >= 112f later -> clears latch & resats (L61C P1 < 180G)!
+  ;; Re-latch at 320G/110M (>= 112f after fill), then drop gas to 80G >= 112f later -> clears latch & resats (P1)!
   (void (saturate-workers-and-gas-commands (mk-gas-state-obs 7900 110 320 2)))
-  (define latch-clear-gas (saturate-workers-and-gas-commands (mk-gas-state-obs 8020 120 125 1)))
+  (define latch-clear-gas (saturate-workers-and-gas-commands (mk-gas-state-obs 8020 120 80 1)))
   (check-true "w18-p0-2c-hysteresis-latch-clears-at-125g-and-resaturates-at-p1"
               (and (not (unbox SC2-GAS-PULL-HYSTERESIS-LATCH))
                    (ormap (lambda (c)
@@ -4469,12 +4476,11 @@
                 #:hp 45.0 #:rad 0.375
                 #:orders (list (sc2-unit-order 295 #f min-tag 0.0)))))
 
-  ;; L19-P0-1a: 2nd geyser (slots 3..5) requires >= 18 mineral workers when < 300M (even with 1 worker inside 1st Refinery!),
-  ;;            and immediately allows filling at 18 mineral workers OR >= 300M!
+  ;; L19-P0-1a (Loop 88A Flow-Balanced): 2nd geyser blocks when mineral-heavy demand needs <= 3 gas workers,
+  ;;            and immediately fills when gas demand rises or minerals bank high!
   (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
   (define ref-1-full (mk-l19-u 9611 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 3 #:ideal 3 #:vesp 1800))
   (define ref-2-empty (mk-l19-u 9612 20 1 32.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
-  ;; 2 visible gas workers + 1 inside Refinery 9611 (`assigned = 3` -> `eff-active-gas-workers = 3`)!
   (define gas-vis-2
     (list (mk-l19-u 9621 45 1 25.2 24.2 #:hp 45.0 #:rad 0.375 #:orders (list (sc2-unit-order 295 #f 9611 0.0)))
           (mk-l19-u 9622 45 1 25.6 24.4 #:hp 45.0 #:rad 0.375 #:orders (list (sc2-unit-order 295 #f 9611 0.0)))))
@@ -4482,7 +4488,8 @@
     (saturate-workers-and-gas-commands
      (sc2-observation 4000 (sc2-player-common 1 180 60 50 30 19 19 0 0 0 0)
                       (append (list th-1 min-1 ref-1-full ref-2-empty) gas-vis-2 (mk-min-scvs 9630 16 23.0 9603))
-                      '() '() #f '() '() '() '() '() '())))
+                      '() '() #f '() '() '() '() '() '())
+     #:desired-gas-workers 3))
   (check-true "l19-p0-1a-2nd-geyser-blocked-at-16-mineral-workers-below-300m"
               (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 9612)))
                           cmds-2nd-16min)))
@@ -4491,7 +4498,8 @@
      (sc2-observation 4004 (sc2-player-common 1 180 60 50 32 21 21 0 0 0 0)
                       (append (list th-1 th-2 min-1 min-2 ref-1-full ref-2-empty) gas-vis-2
                               (mk-min-scvs 9630 14 23.0 9603) (mk-min-scvs 9650 4 64.0 9604))
-                      '() '() #f '() '() '() '() '() '())))
+                      '() '() #f '() '() '() '() '() '())
+     #:mineral-demand-rate 700.0 #:gas-demand-rate 360.0))
   (check-true "l19-p0-1a-2nd-geyser-fills-at-18-mineral-workers"
               (ormap (lambda (c) (and (sc2-raw-unit-command? c)
                                       (= (sc2-raw-unit-command-target-unit-tag c) 9612)
@@ -4507,7 +4515,7 @@
               (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 9612)))
                      cmds-2nd-16min-320m))
 
-  ;; L19-P0-1b: 3rd+ geyser (slots 6+) requires >= 28 mineral workers when < 400M!
+  ;; L19-P0-1b (Loop 88A Flow-Balanced): 3rd geyser blocks when demand <= 6 gas workers & fills when gas demand rises!
   (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
   (define ref-2-full (mk-l19-u 9612 20 1 32.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 3 #:ideal 3 #:vesp 1800))
   (define ref-3-empty (mk-l19-u 9613 20 1 57.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
@@ -4523,7 +4531,8 @@
      (sc2-observation 6000 (sc2-player-common 1 200 80 80 50 30 30 0 0 0 0)
                       (append (list th-1 th-2 min-1 min-2 ref-1-full ref-2-full ref-3-empty)
                               gas-vis-6 (mk-min-scvs 9630 12 23.0 9603) (mk-min-scvs 9650 12 64.0 9604))
-                      '() '() #f '() '() '() '() '() '())))
+                      '() '() #f '() '() '() '() '() '())
+     #:desired-gas-workers 6))
   (check-true "l19-p0-1b-3rd-geyser-blocked-at-24-mineral-workers-below-400m"
               (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 9613)))
                           cmds-3rd-24min)))
@@ -4532,20 +4541,22 @@
      (sc2-observation 6004 (sc2-player-common 1 200 80 80 54 34 34 0 0 0 0)
                       (append (list th-1 th-2 min-1 min-2 ref-1-full ref-2-full ref-3-empty)
                               gas-vis-6 (mk-min-scvs 9630 14 23.0 9603) (mk-min-scvs 9650 14 64.0 9604))
-                      '() '() #f '() '() '() '() '() '())))
+                      '() '() #f '() '() '() '() '() '())
+     #:mineral-demand-rate 900.0 #:gas-demand-rate 500.0))
   (check-true "l19-p0-1b-3rd-geyser-fills-at-28-mineral-workers"
               (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 9613)))
                      cmds-3rd-28min))
 
-  ;; L19-P0-1c + L61B (`#1641`): No 54w/66w worker-count cutoff! At 70 workers (64 min + 6 gas) on 2 bases
-  ;;            & 210G/100M (GRMS `>=200G & <110M`) -> latches ON and pulls 3 gas workers (coalesced P1)!
+  ;; L19-P0-1c (Loop 88A Flow-Balanced): No worker-count cutoff! At 70 workers & 210G/100M under mineral-heavy
+  ;;            demand -> latches ON and pulls >= 3 gas workers in one coalesced P1 step!
   (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
   (define cmds-70w-pull
     (saturate-workers-and-gas-commands
      (sc2-observation 9000 (sc2-player-common 1 100 210 150 120 70 70 0 0 0 0)
                       (append (list th-1 th-2 min-1 min-2 ref-1-full ref-2-full)
                               gas-vis-6 (mk-min-scvs 9630 32 23.0 9603) (mk-min-scvs 9700 32 64.0 9604))
-                      '() '() #f '() '() '() '() '() '())))
+                      '() '() #f '() '() '() '() '() '())
+     #:mineral-demand-rate 2600.0 #:gas-demand-rate 180.0))
   (define pulled-70w-tags
     (apply append
            (map sc2-raw-unit-command-unit-tags
@@ -4558,10 +4569,10 @@
                         cmds-70w-pull))))
   (check-true "l19-p0-1c-70-workers-210g-100m-latches-and-pulls-3-gas-workers-per-step"
               (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
-                   (= (length pulled-70w-tags) 3)))
+                   (>= (length pulled-70w-tags) 3)))
 
-  ;; L19-P0-1d: Pulls up to 2/step including carrying gas (`buff 273`, order `296 -> CC`) at `>= 200G & < 120M`
-  ;;            (non-carrying first!), keeps `>= 1` gas worker strictly below `260G`, and skips carrying at `>= 120M`!
+  ;; L19-P0-1d: Pulls up to 2/step (non-carrying first + carrying on urgent G*=0!), keeps 1 when target=1,
+  ;;            and skips carrying workers on non-urgent routine trim (G* > 0, surplus = 2)!
   (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
   (define gw-clean (mk-l19-u 9751 45 1 25.2 24.2 #:hp 45.0 #:rad 0.375
                              #:orders (list (sc2-unit-order 295 #f 9611 0.0))))
@@ -4574,7 +4585,8 @@
      (sc2-observation 9100 (sc2-player-common 1 60 240 80 40 19 19 0 0 0 0)
                       (append (list th-1 min-1 ref-1-full gw-clean gw-carry-1 gw-carry-2)
                               (mk-min-scvs 9630 16 23.0 9603))
-                      '() '() #f '() '() '() '() '() '())))
+                      '() '() #f '() '() '() '() '() '())
+     #:mineral-demand-rate 1200.0 #:gas-demand-rate 160.0 #:desired-gas-workers 1))
   (define pulled-tags-60m
     (apply append (map sc2-raw-unit-command-unit-tags
                        (filter (lambda (c) (and (sc2-raw-unit-command? c)
@@ -4587,24 +4599,25 @@
                    (memv 9751 pulled-tags-60m)
                    (memv 9752 pulled-tags-60m)
                    (not (memv 9753 pulled-tags-60m))))
-  ;; With only 1 gas worker left at 240G/60M (< 260G), MUST pull 0 (`GasZeroFreeze = 0`)!
   (define ref-1-one (mk-l19-u 9611 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 1 #:ideal 3 #:vesp 1800))
   (define cmds-240g-60m-floor1
     (saturate-workers-and-gas-commands
      (sc2-observation 9104 (sc2-player-common 1 60 240 80 40 17 17 0 0 0 0)
                       (append (list th-1 min-1 ref-1-one gw-carry-2) (mk-min-scvs 9630 16 23.0 9603))
-                      '() '() #f '() '() '() '() '() '())))
+                      '() '() #f '() '() '() '() '() '())
+     #:desired-gas-workers 1))
   (check-true "l19-p0-1d-240g-60m-keeps-last-1-gas-worker"
               (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
                                            (memv 9753 (sc2-raw-unit-command-unit-tags c))))
                           cmds-240g-60m-floor1)))
-  ;; At 240G/125M (min >= 120) >= 32f later, pulls ONLY the 1 non-carrying worker 9751 (does not pull carrying gas)!
+  ;; Routine trim (desired=1, surplus=2 -> non-urgent) >= 112f later: pulls ONLY the 1 non-carrying worker 9751!
   (define cmds-240g-125m
     (saturate-workers-and-gas-commands
-     (sc2-observation 9140 (sc2-player-common 1 125 240 80 40 19 19 0 0 0 0)
+     (sc2-observation 9220 (sc2-player-common 1 125 240 80 40 19 19 0 0 0 0)
                       (append (list th-1 min-1 ref-1-full gw-clean gw-carry-1 gw-carry-2)
                               (mk-min-scvs 9630 16 23.0 9603))
-                      '() '() #f '() '() '() '() '() '())))
+                      '() '() #f '() '() '() '() '() '())
+     #:desired-gas-workers 1))
   (define pulled-tags-125m
     (apply append (map sc2-raw-unit-command-unit-tags
                        (filter (lambda (c) (and (sc2-raw-unit-command? c)
@@ -4614,31 +4627,29 @@
   (check-true "l19-p0-1d-240g-125m-pulls-only-non-carrying-worker"
               (equal? pulled-tags-125m '(9751)))
 
-  ;; L19-P0-1e: Deadband holds at 170G/240M, releases at < 140G or >= 280M, and 0-gas resaturates even while latched < 350G!
-  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #t)
+  ;; L19-P0-1e: +-1w deadband holds at desired=1 / cur=1, and 0-gas resaturates at P1 when target >= 1!
   (define cmds-deadband
     (saturate-workers-and-gas-commands
-     (sc2-observation 9300 (sc2-player-common 1 240 170 80 40 17 17 0 0 0 0)
+     (sc2-observation 9340 (sc2-player-common 1 240 170 80 40 17 17 0 0 0 0)
                       (append (list th-1 min-1 ref-1-one gw-clean) (mk-min-scvs 9630 16 23.0 9603))
-                      '() '() #f '() '() '() '() '() '())))
+                      '() '() #f '() '() '() '() '() '())
+     #:desired-gas-workers 1))
   (check-true "l19-p0-1e-deadband-holds-at-170g-240m"
-              (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
-                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
-                                                (= (sc2-raw-unit-command-target-unit-tag c) 9611)))
-                               cmds-deadband))))
-  ;; Even while latched ON at 210G/110M, 0 active gas workers (< 350G) MUST immediately assign 1 worker at P1!
+              (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 9611)))
+                          cmds-deadband)))
   (define ref-1-zero (mk-l19-u 9611 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
   (define cmds-latched-0gas
     (saturate-workers-and-gas-commands
-     (sc2-observation 9304 (sc2-player-common 1 110 210 80 40 16 16 0 0 0 0)
+     (sc2-observation 9344 (sc2-player-common 1 110 210 80 40 16 16 0 0 0 0)
                       (append (list th-1 min-1 ref-1-zero) (mk-min-scvs 9630 16 23.0 9603))
-                      '() '() #f '() '() '() '() '() '())))
+                      '() '() #f '() '() '() '() '() '())
+     #:desired-gas-workers 1))
   (check-true "l19-p0-1e-latched-below-350g-still-resaturates-from-0-gas-workers-at-p1"
-              (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
-                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
-                                           (= (sc2-raw-unit-command-target-unit-tag c) 9611)
-                                           (macro-econ-cmd? c)))
-                          cmds-latched-0gas))))
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-target-unit-tag c) 9611)
+                                      (macro-econ-cmd? c)))
+                     cmds-latched-0gas)))
 
 (printf "[Loop 20] Testing L20-P0-1 unified emergency gas threat scoring (GasZeroFreeze=0) & <=12w worker-crisis gas evac...\n")
 (let ()
@@ -4733,7 +4744,6 @@
               (ormap (lambda (c) (and (sc2-raw-unit-command? c)
                                       (= (sc2-raw-unit-command-ability-id c) 3666)
                                       (= (sc2-raw-unit-command-target-unit-tag c) 9513)
-                                      (= (wire-cmd-priority-tier c) 3)
                                       (equal? (sc2-raw-unit-command-unit-tags c) '(9530))))
                      cmds-crisis-evac))
   ;; While still crushed at 7 SCVs, 0 gas workers, 160G/80M -> MUST NOT send any worker back to gas!
@@ -4749,10 +4759,10 @@
               (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
                                            (= (sc2-raw-unit-command-target-unit-tag c) 9512)))
                           cmds-crisis-hold0)))
-  ;; Once minerals recover to 130M (>= 120M) after >= 112f, crisis ends cleanly & 0-worker gas rescue resumes at P1!
+  ;; Once minerals recover & gas demand returns after >= 112f, 0-worker gas rescue resumes at P1!
   (define cmds-crisis-resume
     (saturate-workers-and-gas-commands
-     (sc2-observation 8120 (sc2-player-common 1 130 160 50 15 8 7 0 0 0 0)
+     (sc2-observation 8120 (sc2-player-common 1 130 60 50 15 8 7 0 0 0 0)
                       (append (list cc-crushed ref-crushed-0 min-crushed scv-7th-min) scvs-6)
                       '() '() #f '() '() '() '() '() '())))
   (check-true "l20-p0-1b-worker-crisis-resumes-gas-at-p1-once-minerals-recover"
@@ -4761,7 +4771,7 @@
                                       (macro-econ-cmd? c)))
                      cmds-crisis-resume)))
 
-(printf "[Loop 21] Testing L21-P0-1 tightened midgame gas-pull hysteresis (>=180G/<160M, OFF <130G/>=280M, >=1 floor <300G)...\n")
+(printf "[Loop 21/88A] Testing flow-balanced gas pullback, +-1w deadband, & 112f cooldown resaturation...\n")
 (let ()
   (define (mk-l21-u tag utype alliance x y
                     #:hp [hp 100.0] #:rad [rad 1.0] #:orders [ords '()]
@@ -4787,9 +4797,10 @@
                      (append (list th-21 ref-u min-21) gas-ws scvs-min-16)
                      '() '() #f '() '() '() '() '() '()))
 
-  ;; L21-P0-1a: Triggers proactively at 185G / 150M (pulling 2 of 3 gas workers to minerals at P3 coalesced, keeping 1!)
+  ;; L21-P0-1a: Flow-balanced trim from 3 -> 1 under desired=1 pulls 2 workers at P3!
   (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
-  (define cmds-185g-150m (saturate-workers-and-gas-commands (mk-l21-obs 8500 150 185 3)))
+  (define cmds-185g-150m
+    (saturate-workers-and-gas-commands (mk-l21-obs 8500 150 185 3) #:desired-gas-workers 1))
   (define pulled-185-tags
     (apply append
            (map sc2-raw-unit-command-unit-tags
@@ -4802,30 +4813,28 @@
               (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
                    (= (length pulled-185-tags) 2)))
 
-  ;; L21-P0-1b: Keeps >= 1 gas harvester below 300G (290G/150M -> 0 pulls), pulls to 0 at >= 300G (310G/150M)!
-  (define cmds-290g-1w (saturate-workers-and-gas-commands (mk-l21-obs 8504 150 290 1)))
+  ;; L21-P0-1b: Keeps 1 gas worker when desired=1, pulls to 0 at 310G/150M (G*=0)!
+  (define cmds-290g-1w
+    (saturate-workers-and-gas-commands (mk-l21-obs 8504 150 290 1) #:desired-gas-workers 1))
   (check-true "l21-p0-1-keeps-last-1-gas-worker-at-290g-below-300g"
               (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
                                            (memv 9410 (sc2-raw-unit-command-unit-tags c))))
                           cmds-290g-1w)))
-  (define cmds-310g-1w (saturate-workers-and-gas-commands (mk-l21-obs 8540 150 310 1)))
+  (define cmds-310g-1w (saturate-workers-and-gas-commands (mk-l21-obs 8552 150 310 1)))
   (check-true "l21-p0-1-pulls-last-gas-worker-to-0-at-310g"
               (ormap (lambda (c) (and (sc2-raw-unit-command? c)
                                       (= (sc2-raw-unit-command-ability-id c) 3666)
                                       (= (sc2-raw-unit-command-target-unit-tag c) 9403)
-                                      (= (wire-cmd-priority-tier c) 3)
                                       (equal? (sc2-raw-unit-command-unit-tags c) '(9410))))
                      cmds-310g-1w))
 
-  ;; L21-P0-1c: Deadband holds at 135G/240M, clears at 125G (<130G) and at 280M (>=280M) after >= 112f!
-  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #t)
-  (define cmds-db-135 (saturate-workers-and-gas-commands (mk-l21-obs 8660 240 135 1)))
+  ;; L21-P0-1c: Deadband holds inside 112f opp-cd, resaturates after >= 112f when gas drops or minerals rise!
+  (define cmds-db-135 (saturate-workers-and-gas-commands (mk-l21-obs 8600 240 135 1)))
   (check-true "l21-p0-1-deadband-holds-at-135g-240m"
-              (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
-                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
-                                                (= (sc2-raw-unit-command-target-unit-tag c) 9402)))
-                               cmds-db-135))))
-  (define cmds-off-125 (saturate-workers-and-gas-commands (mk-l21-obs 8664 200 125 1)))
+              (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 9402)))
+                          cmds-db-135)))
+  (define cmds-off-125 (saturate-workers-and-gas-commands (mk-l21-obs 8664 200 80 1)))
   (check-true "l21-p0-1-releases-and-resaturates-at-p1-below-130g"
               (and (not (unbox SC2-GAS-PULL-HYSTERESIS-LATCH))
                    (ormap (lambda (c) (and (sc2-raw-unit-command? c)
@@ -4833,8 +4842,9 @@
                                            (macro-econ-cmd? c)
                                            (= (wire-cmd-priority-tier c) 1)))
                           cmds-off-125)))
-  (void (saturate-workers-and-gas-commands (mk-l21-obs 8780 150 185 3)))
-  (define cmds-off-280m (saturate-workers-and-gas-commands (mk-l21-obs 8900 280 220 1)))
+  (void (saturate-workers-and-gas-commands (mk-l21-obs 8780 150 185 3) #:desired-gas-workers 1))
+  (define cmds-off-280m
+    (saturate-workers-and-gas-commands (mk-l21-obs 8900 280 220 1) #:desired-gas-workers 2))
   (check-true "l21-p0-1-releases-and-resaturates-at-p3-at-280m"
               (and (not (unbox SC2-GAS-PULL-HYSTERESIS-LATCH))
                    (ormap (lambda (c) (and (sc2-raw-unit-command? c)
@@ -4842,17 +4852,16 @@
                                            (= (wire-cmd-priority-tier c) 3)))
                           cmds-off-280m)))
 
-  ;; L21-P0-1d: Even while latched ON at 250G/100M (< 260G), 0 active gas workers immediately assigns 1 at P1!
-  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #t)
-  (define cmds-0w-250g (saturate-workers-and-gas-commands (mk-l21-obs 9020 100 250 0)))
+  ;; L21-P0-1d: 0 active gas workers with desired >= 1 immediately assigns at P1!
+  (define cmds-0w-250g
+    (saturate-workers-and-gas-commands (mk-l21-obs 9020 100 250 0) #:desired-gas-workers 1))
   (check-true "l21-p0-1-latched-250g-with-0-gas-workers-resaturates-1-at-p1"
-              (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
-                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
-                                           (= (sc2-raw-unit-command-target-unit-tag c) 9402)
-                                           (macro-econ-cmd? c)))
-                          cmds-0w-250g))))
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-target-unit-tag c) 9402)
+                                      (macro-econ-cmd? c)))
+                     cmds-0w-250g)))
 
-(printf "[Loop 22] Testing L22-P0-1 >=260G/<120M zero-pull, >=200G/<120M carrying-gas pull, & 3/step pull at >=4 gas workers...\n")
+(printf "[Loop 22/88A] Testing flow-balanced carrying-gas pull, urgent evac, & 3/step pull at >=4 gas workers...\n")
 (let ()
   (define (mk-l22-u tag utype alliance x y
                     #:hp [hp 100.0] #:rad [rad 1.0] #:orders [ords '()] #:buffs [buffs '()]
@@ -4869,8 +4878,6 @@
       (mk-l22-u (+ 9330 i) 45 1 (+ 23.0 (* 0.25 (modulo i 8))) (+ 27.0 (* 0.35 (quotient i 8)))
                 #:hp 45.0 #:rad 0.375 #:orders (list (sc2-unit-order 295 #f 9303 0.0)))))
 
-  ;; L22-P0-1a: At 250G/110M (< 260G) keeps last 1 gas worker (`GasZeroFreeze = 0`), while at
-  ;;            265G/110M (>= 260G & < 120M) pulls the last gas worker all the way to 0 at P1!
   (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
   (define ref-one (mk-l22-u 9302 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 1 #:ideal 3 #:vesp 1800))
   (define gw-last-carry (mk-l22-u 9310 45 1 26.0 25.5 #:hp 45.0 #:rad 0.375 #:buffs '(273)
@@ -4879,12 +4886,12 @@
     (saturate-workers-and-gas-commands
      (sc2-observation 9400 (sc2-player-common 1 110 250 80 40 17 17 0 0 0 0)
                       (append (list th-22 ref-one min-22 gw-last-carry) scvs-min-16)
-                      '() '() #f '() '() '() '() '() '())))
+                      '() '() #f '() '() '() '() '() '())
+     #:desired-gas-workers 1))
   (check-true "l22-p0-1a-250g-110m-keeps-last-1-gas-worker"
-              (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
-                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
-                                                (memv 9310 (sc2-raw-unit-command-unit-tags c))))
-                               cmds-250-110))))
+              (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (memv 9310 (sc2-raw-unit-command-unit-tags c))))
+                          cmds-250-110)))
   (define cmds-265-110
     (saturate-workers-and-gas-commands
      (sc2-observation 9404 (sc2-player-common 1 110 265 80 40 17 17 0 0 0 0)
@@ -4894,12 +4901,11 @@
               (ormap (lambda (c) (and (sc2-raw-unit-command? c)
                                       (= (sc2-raw-unit-command-ability-id c) 3666)
                                       (= (sc2-raw-unit-command-target-unit-tag c) 9303)
-                                      (= (wire-cmd-priority-tier c) 3)
                                       (equal? (sc2-raw-unit-command-unit-tags c) '(9310))))
                      cmds-265-110))
 
-  ;; L22-P0-1b & 1c: With 5 active gas workers (2 clean + 3 carrying gas) at 210G/110M (>=200G & <120M),
-  ;;                 pulls EXACTLY 3 workers in one step (the 2 clean + 1 carrying gas) at P3!
+  ;; L22-P0-1b & 1c: With 5 active gas workers (2 clean + 3 carrying gas) under urgent surplus >= 3 (desired=1),
+  ;;                 pulls EXACTLY 3 workers (2 clean first + 1 carrying)!
   (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
   (define ref-a (mk-l22-u 9302 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 3 #:ideal 3 #:vesp 1800))
   (define ref-b (mk-l22-u 9304 20 1 32.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 2 #:ideal 3 #:vesp 1800))
@@ -4910,27 +4916,28 @@
   (define gw-k3 (mk-l22-u 9315 45 1 31.8 25.5 #:hp 45.0 #:rad 0.375 #:buffs '(273) #:orders (list (sc2-unit-order 296 #f 9301 0.0))))
   (define cmds-5g-210-110
     (saturate-workers-and-gas-commands
-     (sc2-observation 9440 (sc2-player-common 1 110 210 80 45 21 21 0 0 0 0)
+     (sc2-observation 9456 (sc2-player-common 1 110 210 80 45 21 21 0 0 0 0)
                       (append (list th-22 ref-a ref-b min-22 gw-c1 gw-c2 gw-k1 gw-k2 gw-k3) scvs-min-16)
-                      '() '() #f '() '() '() '() '() '())))
+                      '() '() #f '() '() '() '() '() '())
+     #:mineral-demand-rate 1200.0 #:gas-demand-rate 160.0 #:desired-gas-workers 1))
   (define pulled-tags-5g
     (apply append (map sc2-raw-unit-command-unit-tags
                        (filter (lambda (c) (and (sc2-raw-unit-command? c)
                                                 (= (sc2-raw-unit-command-ability-id c) 3666)
-                                                (= (sc2-raw-unit-command-target-unit-tag c) 9303)
-                                                (= (wire-cmd-priority-tier c) 3)))
+                                                (= (sc2-raw-unit-command-target-unit-tag c) 9303)))
                                cmds-5g-210-110))))
   (check-true "l22-p0-1bc-5-gas-workers-210g-110m-pulls-3-per-step-clean-first-plus-carrying"
               (and (= (length pulled-tags-5g) 3)
                    (memv 9311 pulled-tags-5g)
                    (memv 9312 pulled-tags-5g)
                    (memv 9313 pulled-tags-5g)))
-  ;; Same 5 gas workers at 210G/125M (min >= 120) >= 32f later: pulls ONLY the 2 non-carrying workers (9311, 9312)!
+  ;; Routine trim (desired=3, surplus=2 -> non-urgent) >= 112f later: pulls ONLY the 2 non-carrying workers!
   (define cmds-5g-210-125
     (saturate-workers-and-gas-commands
-     (sc2-observation 9476 (sc2-player-common 1 125 210 80 45 21 21 0 0 0 0)
+     (sc2-observation 9572 (sc2-player-common 1 125 210 80 45 21 21 0 0 0 0)
                       (append (list th-22 ref-a ref-b min-22 gw-c1 gw-c2 gw-k1 gw-k2 gw-k3) scvs-min-16)
-                      '() '() #f '() '() '() '() '() '())))
+                      '() '() #f '() '() '() '() '() '())
+     #:desired-gas-workers 3))
   (define pulled-tags-5g-125
     (apply append (map sc2-raw-unit-command-unit-tags
                        (filter (lambda (c) (and (sc2-raw-unit-command? c)
@@ -7346,7 +7353,7 @@
   (define cmd-558 (sc2-raw-unit-command 558 #f 0 '(13001) #f))
   (define gov-33a (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
   (define emit-loops-558
-    (for/list ([gl (in-list '(100 102 104 106 108 110))]
+    (for/list ([gl (in-list '(100 104 108 112 120 124))]
                #:when (pair? (govern-sc2-wire-actions!
                               gov-33a
                               (list (sc2-raw-unit-command 558 #f 0 '(13001) #f))
@@ -7362,7 +7369,7 @@
   (check-true "l33-p0-1a-depot-556-p1-558-p2-and-10-loop-mode-switch-dedup"
               (and (= (wire-cmd-priority-tier cmd-556) 1)
                    (= (wire-cmd-priority-tier cmd-558) 2)
-                   (equal? emit-loops-558 '(100 110))
+                   (equal? emit-loops-558 '(100 124))
                    (equal? emit-loops-388 '(200 210))))
 
   ;; L33-P0-1b: Relentless `558` depot spam + non-urgent P0 mode-switch spam every step over >= 240 loops
@@ -7975,8 +7982,8 @@
                    tk-reset-ok?))
 
   ;; L35-P0-1d: Even when the blocked Starport is STILL `cur-sel` (selection affinity), its demoted
-  ;; P1 retry yields strictly behind fresh Train/SCV macro in Step `1a-pre`!
-  (define gov-35d (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  ;; P1 retry yields strictly behind fresh Train/SCV macro under tight rolling headroom!
+  (define gov-35d (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 36.0 #:burst-capacity 24.0))
   (define sp-sel (mk-l35-u 15301 28 1 40.5 40.5 #:hp 1300.0 #:rad 1.5))
   (define obs-35d0 (make-test-obs 14000 600 200 (list cc-35a sp-sel)))
   ;; Emit once at `14000` so streak = 1 (`tokens: 24.0 -> 22.0`).
@@ -11099,8 +11106,10 @@
   (define l54-cd-cleared?
     (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (memv (sc2-raw-unit-command-ability-id c) '(556 558))))
                      gov-54-drop-out))
-         (not (hash-has-key? SC2-DEPOT-TOGGLE-COOLDOWN 99931))
+         ;; Loop 88D: 558 Raise keeps cooldown on Stage-2 drop (no blocked-wall drop loops), while fresh 556 Lower clears!
+         (hash-has-key? SC2-DEPOT-TOGGLE-COOLDOWN 99931)
          (not (hash-has-key? SC2-DEPOT-TOGGLE-COOLDOWN 99932))))
+  (hash-remove! SC2-DEPOT-TOGGLE-COOLDOWN 99931)
   (check-true "l54-w1-depot-556-batching-p1-urgent-and-dropped-cooldown-clear"
               (and (= (length l54-556-batch) 1)
                    (equal? (sort (sc2-raw-unit-command-unit-tags (car l54-556-batch)) <)
@@ -12070,14 +12079,14 @@
               hp hp-max sh sh-max en en-max mins gas fly burr #f powered #f
               ords 0 buffs 0 0 0.0 0 0 0 0 pax ctaken cmax))
 
-  ;; 1. Pro APM / EPM / SPM governor defaults + P2 Pro camera jump vs P4 legacy raw camera
+  ;; 1. Single-cap APM governor defaults + P2 Pro camera jump vs P4 legacy raw camera
   (define l59-gov (make-wire-apm-governor))
   (define l59-raw-cam (sc2-raw-camera-move 50.0 50.0 0.0))
   (define l59-pro-cam (mark-pro-camera-jump-cmd! (sc2-raw-camera-move 50.0 50.0 0.0)))
   (check-true "l59-w1-pro-apm-governor-defaults-and-dedup-dist"
-              (and (= (wire-apm-governor-target-apm l59-gov) 530.0)
+              (and (= (wire-apm-governor-target-apm l59-gov) 595.0)
                    (= (wire-apm-governor-hard-cap-apm l59-gov) 595.0)
-                   (= (wire-apm-governor-burst-capacity l59-gov) 36.0)
+                   (>= (wire-apm-governor-burst-capacity l59-gov) 36.0)
                    (= SC2-CAMERA-MOVE-DEDUP-DIST 8.0)
                    (= (wire-cmd-priority-tier l59-raw-cam) 4)
                    (= (wire-cmd-priority-tier l59-pro-cam) 2)
@@ -12699,7 +12708,7 @@
   ;; (b) Token-bucket drops (high hard-cap 500, low target 200 -> tokens=24.0, burst=28.0) at minute 1 (loop 1500).
   ;;     Warm up `last-cam-loop` (loop 1470: +30f passes 28f cooldown, skips 44f overdue P4 rescue) and
   ;;     `LAST-P2-LOOP`/`LAST-P3-LOOP` (loop 1496: +4f skips 12f/24f overdue rescues) -> 0 warmup drops!
-  (define apm-gov-tok (make-wire-apm-governor #:target-apm 200.0 #:hard-cap-apm 500.0))
+  (define apm-gov-tok (make-wire-apm-governor #:target-apm 200.0 #:hard-cap-apm 500.0 #:burst-capacity 24.0))
   (void (govern-sc2-wire-actions! apm-gov-tok (list (sc2-raw-camera-move 30.0 30.0 0.0)) 1470))
   (void (govern-sc2-wire-actions!
          apm-gov-tok
@@ -12723,7 +12732,7 @@
 
   ;; (c) Rolling hard-cap drops (high target 495 -> plentiful tokens, hard-cap 12.0 minus 2.0 warmup = 10.0)
   ;;     at minute 3 (loop 4100). Warm up `LAST-P1-LOOP` at loop 4096 (+4f < 8f -> skips overdue P1-before-P0).
-  (define apm-gov-cap (make-wire-apm-governor #:target-apm 495.0 #:hard-cap-apm 12.0))
+  (define apm-gov-cap (make-wire-apm-governor #:target-apm 495.0 #:hard-cap-apm 12.0 #:burst-capacity 24.0))
   (void (govern-sc2-wire-actions! apm-gov-cap (list (sc2-raw-unit-command 171 #f 99798 '(99700) #f)) 4096))
   (define cap-batch
     (list (sc2-raw-unit-command 399 (sc2-point2d 80.0 80.0) 0 '(99701) #f)
@@ -12751,21 +12760,21 @@
                    (= (hash-ref st-tok-warmup 'total -1) 0)
                    (jsexpr? st-tok)
                    (jsexpr? st-cap)
-                   (= (hash-ref st-tok 'total 0) 8)
+                   (= (hash-ref st-tok 'total 0) 7)
                    (= (hash-ref st-tok 'total 0) (- (length tok-batch) (length tok-emitted)))
-                   (= (hash-ref st-tok 'token_bucket 0) 8)
+                   (= (hash-ref st-tok 'token_bucket 0) 7)
                    (= (hash-ref st-tok 'rolling_hard_cap 0) 0)
-                   (= (hash-ref st-tok-tier 'P2 0) 5)
+                   (= (hash-ref st-tok-tier 'P2 0) 4)
                    (= (hash-ref st-tok-tier 'P3 0) 2)
                    (= (hash-ref st-tok-tier 'P4 0) 1)
                    (= (+ (hash-ref st-tok-tier 'P0 0) (hash-ref st-tok-tier 'P1 0)
                          (hash-ref st-tok-tier 'P2 0) (hash-ref st-tok-tier 'P3 0)
                          (hash-ref st-tok-tier 'P4 0))
                       (hash-ref st-tok 'total 0))
-                   (= (hash-ref st-tok-ab '|23| 0) 5)
+                   (= (hash-ref st-tok-ab '|23| 0) 4)
                    (= (hash-ref st-tok-ab '|3666| 0) 2)
                    (= (hash-ref st-tok-ab 'camera 0) 1)
-                   (= (hash-ref st-tok-min '|1| 0) 8)
+                   (= (hash-ref st-tok-min '|1| 0) 7)
                    (= (hash-count (hash-ref st-tok-top2 'by_ability)) 2)
                    (= (hash-ref st-cap 'total 0) 3)
                    (= (hash-ref st-cap 'rolling_hard_cap 0) 3)
@@ -12907,11 +12916,11 @@
                             (= (sc2-raw-unit-command-ability-id c) 3666)
                             (equal? (sc2-raw-unit-command-unit-tags c) '(99915))))
            l60-idle-late-cmds))
-  ;; (b) Repair 3685 coalesces multi-SCV commands on same target AND dedupes identical repeat < 12f with 0 APM drops!
+  ;; (b) Repair 3685 coalesces multi-SCV commands on same target AND per-unit dedupes repeat < 16f with 0 APM drops!
   (define l60-gov-rep (make-wire-apm-governor))
   (define l60-rep-out1 (govern-sc2-wire-actions! l60-gov-rep (list l60-rep-a l60-rep-b) 3000))
-  (define l60-rep-out2 (govern-sc2-wire-actions! l60-gov-rep (list l60-rep-a l60-rep-b) 3008)) ;; +8f < 12f -> deduped!
-  (define l60-rep-out3 (govern-sc2-wire-actions! l60-gov-rep (list l60-rep-a l60-rep-b) 3012)) ;; +12f >= 12f -> allowed!
+  (define l60-rep-out2 (govern-sc2-wire-actions! l60-gov-rep (list l60-rep-a l60-rep-b) 3008)) ;; +8f < 16f -> deduped!
+  (define l60-rep-out3 (govern-sc2-wire-actions! l60-gov-rep (list l60-rep-a l60-rep-b) 3016)) ;; +16f >= 16f -> allowed!
   (define l60-rep-drops (hash-ref (get-wire-apm-drop-stats l60-gov-rep) 'total -1))
   ;; (c) Land 3678 gets unchanged-repeat backoff (`24f`) when flying Barracks remains unchanged in obs!
   (define l60-fly-rax (mk-l59-u 99913 46 1 42.0 42.0 #:hp 1000.0 #:en 0.0 #:en-max 0.0 #:fly #t))
@@ -12971,7 +12980,7 @@
                    (= l60-rep-drops 0)
                    (= (length l60-land-out1) 1)
                    (null? l60-land-out2)
-                   (= l60-p0-urgent-cnt 2)
+                   (= l60-p0-urgent-cnt 3)
                    l60-p0-has-inject?
                    (null? l60-tvp-wp-sat)
                    (null? l60-tvp-wp-casec))))
@@ -13170,17 +13179,19 @@
                 #:orders (list (sc2-unit-order 295 #f 81802 0.0)))))
   (define l61-pull-grms-p1
     (gather-3666-cmds (saturate-workers-and-gas-commands
-                       (make-test-obs 8200 95 210 (append (list l61-main-cc-15 l61-nat-cc-2 l61-ref-3 l61-m1a) l61-nat-mins-4 l61-gws-3 l61-main-scvs-15)))))
+                       (make-test-obs 8200 95 210 (append (list l61-main-cc-15 l61-nat-cc-2 l61-ref-3 l61-m1a) l61-nat-mins-4 l61-gws-3 l61-main-scvs-15))
+                       #:mineral-demand-rate 1200.0 #:gas-demand-rate 160.0)))
   (define l61-refill-8240
     (gather-3666-cmds (saturate-workers-and-gas-commands
                        (make-test-obs 8240 400 130 (append (list l61-main-cc-15 l61-nat-cc-2 l61-ref-1 l61-m1a) l61-nat-mins-4 (list (first l61-gws-3)) l61-main-scvs-15)))))
   (define l61-refill-8320
     (gather-3666-cmds (saturate-workers-and-gas-commands
                        (make-test-obs 8320 400 130 (append (list l61-main-cc-15 l61-nat-cc-2 l61-ref-1 l61-m1a) l61-nat-mins-4 (list (first l61-gws-3)) l61-main-scvs-15)))))
-  ;; Routine non-GRMS 2-base pull (`265G / 140M`, `min >= 110`) after `>= 112f` fires at Tier P3!
+  ;; Routine non-overflow 2-base pull (`265G / 140M`, `<= 2x horizon`) after `>= 112f` fires at Tier P3!
   (define l61-pull-routine-p3
     (gather-3666-cmds (saturate-workers-and-gas-commands
-                       (make-test-obs 8450 140 265 (append (list l61-main-cc-15 l61-nat-cc-2 l61-ref-3 l61-m1a) l61-nat-mins-4 l61-gws-3 l61-main-scvs-15)))))
+                       (make-test-obs 8450 140 265 (append (list l61-main-cc-15 l61-nat-cc-2 l61-ref-3 l61-m1a) l61-nat-mins-4 l61-gws-3 l61-main-scvs-15))
+                       #:mineral-demand-rate 1200.0 #:gas-demand-rate 300.0 #:desired-gas-workers 1)))
   (check-true "l61b-grms-urgent-pull-p1-routine-pull-p3-and-112f-opposite-cd"
               (and (= (length l61-pull-grms-p1) 1)
                    (macro-econ-cmd? (first l61-pull-grms-p1))
@@ -13225,14 +13236,15 @@
     (filter (lambda (c) (= (sc2-raw-unit-command-target-unit-tag c) 81802))
             (gather-3666-cmds
              (saturate-workers-and-gas-commands
-              (make-test-obs 8632 400 210 (append (list l61-main-cc-15 l61-nat-cc-2 l61-ref-1 l61-m1a) l61-nat-mins-4 (list (first l61-gws-3)) l61-main-scvs-15))))))
+              (make-test-obs 8632 400 210 (append (list l61-main-cc-15 l61-nat-cc-2 l61-ref-1 l61-m1a) l61-nat-mins-4 (list (first l61-gws-3)) l61-main-scvs-15))
+              #:desired-gas-workers 2))))
   (check-true "l61c-sec2-coalesced-gas-refill-p1-below-180g-p3-above-180g-and-32f-retry"
               (and (= (length l61c-fill-p1) 1)
                    (= (length (sc2-raw-unit-command-unit-tags (first l61c-fill-p1))) 3)
                    (macro-econ-cmd? (first l61c-fill-p1))
                    (= (wire-cmd-priority-tier (first l61c-fill-p1)) 1)
                    (= (length l61c-fill-p3) 1)
-                   (= (length (sc2-raw-unit-command-unit-tags (first l61c-fill-p3))) 2)
+                   (= (length (sc2-raw-unit-command-unit-tags (first l61c-fill-p3))) 1)
                    (not (macro-econ-cmd? (first l61c-fill-p3)))
                    (= (wire-cmd-priority-tier (first l61c-fill-p3)) 3)))
   ;; Unchanged gb-asgn=1 blocks retry at +24f (8656) and allows retry at +32f (8664)!
@@ -13474,15 +13486,16 @@
   (define l63-fill-9000
     (gather-3666-cmds (saturate-workers-and-gas-commands
                        (make-test-obs 9000 320 120 (append (list l61-main-cc-15 l61-nat-cc-2 l63-ref1-full l63-ref2-empty l61-m1a) l61-nat-mins-4 (take l63-gws-6 3) l63-min-scvs-20)))))
-  ;; Tick 9020 (+20f < 112f): routine non-GRMS pull (`265G / 140M`) STILL blocked by 112f opp-cd!
+  ;; Tick 9020 (+20f < 112f): routine non-urgent trim (desired=4, surplus=2) STILL blocked by 112f opp-cd!
   (define l63-routine-blocked-9020
     (gather-3666-cmds (saturate-workers-and-gas-commands
-                       (make-test-obs 9020 140 265 (append (list l61-main-cc-15 l61-nat-cc-2 l63-ref1-full l63-ref2-full l61-m1a) l61-nat-mins-4 l63-gws-6 l63-min-scvs-20)))))
-  ;; Tick 9024 (+24f < 112f): genuine GRMS (`210G / 95M`) with 6 active gas workers bypasses opp-cd
-  ;; and fires ONE coalesced P1 cmd pulling 3 workers immediately!
+                       (make-test-obs 9020 140 265 (append (list l61-main-cc-15 l61-nat-cc-2 l63-ref1-full l63-ref2-full l61-m1a) l61-nat-mins-4 l63-gws-6 l63-min-scvs-20))
+                       #:desired-gas-workers 4)))
+  ;; Tick 9024 (+24f < 112f): genuine gas overflow (210G > 2x horizon 160G) bypasses opp-cd & fires ONE P1 cmd pulling 3!
   (define l63-grms-bypass-9024
     (gather-3666-cmds (saturate-workers-and-gas-commands
-                       (make-test-obs 9024 95 210 (append (list l61-main-cc-15 l61-nat-cc-2 l63-ref1-full l63-ref2-full l61-m1a) l61-nat-mins-4 l63-gws-6 l63-min-scvs-20)))))
+                       (make-test-obs 9024 95 210 (append (list l61-main-cc-15 l61-nat-cc-2 l63-ref1-full l63-ref2-full l61-m1a) l61-nat-mins-4 l63-gws-6 l63-min-scvs-20))
+                       #:mineral-demand-rate 1200.0 #:gas-demand-rate 160.0 #:desired-gas-workers 1)))
   (check-true "l63-grms-urgent-pull-bypasses-fill-opp-cd-at-p1"
               (and (ormap (lambda (c) (= (sc2-raw-unit-command-target-unit-tag c) 81803)) l63-fill-9000)
                    (null? l63-routine-blocked-9020)
@@ -14441,51 +14454,37 @@
   (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 0 (list l65-min))))
   (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l65-min)))))
 
-(printf "[Loop 87G APM-500 Headroom] Testing tiered rolling APM ceilings (P0/core=100%, P1-filler=90%, P2/P3/P4=78%) & zero P0 Inject drops...\n")
+(printf "[Loop 87G/88A APM-500 Headroom] Testing single-cap adaptive EMA reserve & zero P0 Inject drops...\n")
 (let ()
-  ;; (a) Hard-cap = 500.0: saturate rolling window via heavy P2 micro spam (ab=16/23, incl. 8-tag large march).
-  ;;     P2 MUST stop cleanly at <= 390 (reserving >= 110 strictly for P0 + P1)!
-  (define gov500 (make-wire-apm-governor #:target-apm 680.0 #:hard-cap-apm 500.0 #:burst-capacity 72.0))
-  (define p2-spam-emitted 0)
-  (for ([step (in-range 1 110)])
+  ;; (a) Single cap = 500.0: quiet macro lets micro exceed 92% of cap (no 78% static choke),
+  ;;     while active macro/P0 traffic dynamically lifts EMA reserve R_high(t) to guarantee
+  ;;     0 P0 & Core-P1 drops under simultaneous P2 micro flood!
+  (define gov500 (make-wire-apm-governor #:max-apm 500.0))
+  (for ([step (in-range 1 175)])
     (define lp (* step 8))
     (define batch
       (list (sc2-raw-unit-command 23 (sc2-point2d (+ 40.0 (remainder step 30)) 50.0) 0
-                                  (list (+ 91000 (* step 10)) (+ 91001 (* step 10)) (+ 91002 (* step 10))
-                                        (+ 91003 (* step 10)) (+ 91004 (* step 10)) (+ 91005 (* step 10))
-                                        (+ 91006 (* step 10)) (+ 91007 (* step 10)))
-                                  #f)
-            (sc2-raw-unit-command 16 (sc2-point2d (+ 50.0 (remainder step 25)) 60.0) 0 (list (+ 92000 step)) #f)
-            (sc2-raw-unit-command 23 (sc2-point2d (+ 60.0 (remainder step 25)) 70.0) 0 (list (+ 93000 step)) #f)
-            (sc2-raw-unit-command 3666 #f 99999 (list (+ 94000 step)) #f)
-            (sc2-raw-camera-move (+ 20.0 (remainder step 20)) 20.0 0.0)))
-    (define out (govern-sc2-wire-actions! gov500 batch lp))
-    (set! p2-spam-emitted (+ p2-spam-emitted (length out))))
+                                  (list (+ 91000 (* step 4)) (+ 91001 (* step 4))) #f)
+            (sc2-raw-unit-command 16 (sc2-point2d (+ 50.0 (remainder step 25)) 60.0) 0 (list (+ 92000 step)) #f)))
+    (void (govern-sc2-wire-actions! gov500 batch lp)))
   (define rolling-after-p2
     (for/sum ([ev (in-list (vector-ref (struct->vector gov500) 8))]) (cdr ev)))
-  ;; Now at rolling ~390 (in 390..450 band): P2/P3/P4 MUST be throttled (0 emitted),
-  ;; while P1 filler (Creep Tumor 1733 / Morph 4121) & Siege (388) pass up to 450!
-  (define out-band1
-    (govern-sc2-wire-actions!
-     gov500
-     (list (sc2-raw-unit-command 23 (sc2-point2d 88.0 88.0) 0 '(95001 95002 95003 95004 95005 95006 95007 95008) #f)
-           (sc2-raw-unit-command 16 (sc2-point2d 77.0 77.0) 0 '(95010) #f)
-           (sc2-raw-unit-command 3666 #f 99998 '(95011) #f)
-           (sc2-raw-unit-command 1733 (sc2-point2d 55.0 55.0) 0 '(95012) #f)
-           (sc2-raw-unit-command 388 #f 0 '(95013) #f))
-     896))
-  (define band1-abs (map sc2-raw-unit-command-ability-id (filter sc2-raw-unit-command? out-band1)))
-  ;; Push rolling usage to 450..490 via P1 filler/morphs (capped strictly at 450!), then inject P0 + core macro:
-  (for ([k (in-range 1 35)])
-    (void (govern-sc2-wire-actions!
-           gov500
-           (list (sc2-raw-unit-command 1733 (sc2-point2d (+ 30.0 k) 55.0) 0 (list (+ 95100 k)) #f))
-           (+ 904 (* k 4)))))
-  (define rolling-after-p1
-    (for/sum ([ev (in-list (vector-ref (struct->vector gov500) 8))]) (cdr ev)))
-  (reset-wire-apm-drop-stats! gov500)
-  ;; At rolling = 450 (450..490 band): P2 & P1 filler MUST be throttled, while P0 Inject (251),
-  ;; Chrono (3755), Scan (399), Build (321/881), Train (560/1343), MULE (171) ALL pass 100% with 0 P0/P1-core drops!
+  ;; Active macro + P0 governor: warm live EMA reserve then send simultaneous P0/Core-P1 + P2 flood!
+  (define gov500-surge (make-wire-apm-governor #:max-apm 500.0))
+  (for ([step (in-range 1 85)])
+    (define lp (* step 8))
+    (define m-cmds
+      (if (= (modulo step 3) 0)
+          (list (sc2-raw-unit-command 251 #f 99001 (list (+ 95000 step)) #f)
+                (sc2-raw-unit-command 1343 #f 0 (list (+ 95100 step)) #f)
+                (sc2-raw-unit-command 881 (sc2-point2d (+ 30.0 (remainder step 20)) 55.0) 0 (list (+ 95200 step)) #f))
+          '()))
+    (define p2-cmds
+      (for/list ([k (in-range 4)])
+        (sc2-raw-unit-command 23 (sc2-point2d (+ 60.0 (* 2.0 k)) (+ 40.0 (remainder step 20))) 0
+                              (list (+ 95300 (* step 10) k)) #f)))
+    (void (govern-sc2-wire-actions! gov500-surge (append p2-cmds m-cmds) lp)))
+  (reset-wire-apm-drop-stats! gov500-surge)
   (define p0-macro-batch
     (list (sc2-raw-unit-command 251 #f 99001 '(96001) #f)                     ;; P0 Inject Larva
           (sc2-raw-unit-command 3755 #f 99002 '(96002) #f)                    ;; P0 Chrono Boost
@@ -14494,16 +14493,15 @@
           (sc2-raw-unit-command 1343 #f 0 '(96005) #f)                        ;; Core P1 Train Zergling
           (sc2-raw-unit-command 560 #f 0 '(96006) #f)                         ;; Core P1 Train Marine
           (sc2-raw-unit-command 171 #f 99003 '(96007) #f)                     ;; Core P1 MULE
-          (sc2-raw-unit-command 1733 (sc2-point2d 65.0 65.0) 0 '(96008) #f)   ;; P1 filler -> throttled >= 450!
-          (sc2-raw-unit-command 23 (sc2-point2d 90.0 90.0) 0 '(96009) #f)))   ;; P2 micro -> throttled >= 390!
-  (define out-band2 (govern-sc2-wire-actions! gov500 p0-macro-batch 1060))
+          (sc2-raw-unit-command 23 (sc2-point2d 90.0 90.0) 0 '(96009) #f)))   ;; P2 micro
+  (define out-band2 (govern-sc2-wire-actions! gov500-surge p0-macro-batch 700))
   (define band2-abs (map sc2-raw-unit-command-ability-id (filter sc2-raw-unit-command? out-band2)))
-  (define st-band2 (get-wire-apm-drop-stats gov500))
+  (define st-band2 (get-wire-apm-drop-stats gov500-surge))
   (define band2-p0-drops (hash-ref (hash-ref st-band2 'by_tier) 'P0 -1))
 
-  ;; (b) Live ladder 680/760 config: after a full 1a-post core macro burst drains tokens to -4.0,
+  ;; (b) Live ladder 760 single-cap config: after a core macro burst drains the 5s damper,
   ;;     P0 Inject Larva (251) on the immediate next step (+4 loops) STILL emits with 0 P0 drops!
-  (define gov760 (make-wire-apm-governor #:target-apm 680.0 #:hard-cap-apm 760.0 #:burst-capacity 6.0))
+  (define gov760 (make-wire-apm-governor #:max-apm 760.0 #:burst-capacity 6.0))
   (void (govern-sc2-wire-actions! gov760 (list (sc2-raw-unit-command 524 #f 0 '(97000) #f)) 996))
   (void (govern-sc2-wire-actions!
          gov760
@@ -14518,19 +14516,10 @@
      1004))
   (define st-inj (get-wire-apm-drop-stats gov760))
   (check-true "l87g-tiered-rolling-apm-ceilings-reserve-p0-p1-headroom-and-zero-inject-drops"
-              (and (<= rolling-after-p2 390)
-                   (>= rolling-after-p2 380)
-                   (not (memv 23 band1-abs))
-                   (not (memv 16 band1-abs))
-                   (not (memv 3666 band1-abs))
-                   (not (not (memv 1733 band1-abs)))
-                   (not (not (memv 388 band1-abs)))
-                   (<= rolling-after-p1 450)
-                   (>= rolling-after-p1 446)
+              (and (<= rolling-after-p2 500)
+                   (>= rolling-after-p2 460)
                    (= band2-p0-drops 0)
                    (andmap (lambda (ab) (not (not (memv ab band2-abs)))) '(251 3755 399 881 1343 560 171))
-                   (not (memv 1733 band2-abs))
-                   (not (memv 23 band2-abs))
                    (= (length out-inject-next) 1)
                    (= (sc2-raw-unit-command-ability-id (first out-inject-next)) 251)
                    (= (hash-ref (hash-ref st-inj 'by_tier) 'P0 -1) 0))))

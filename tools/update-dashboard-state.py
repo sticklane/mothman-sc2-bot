@@ -18,6 +18,7 @@ from typing import Any
 REPO_ROOT = Path("/home/sjaconette/repos/mothman-sc2-bot")
 DEFAULT_OUT = REPO_ROOT / "scratch" / "dashboard_state.json"
 RUNS_DIR = Path("/home/sjaconette/sc2-local-arena/runs")
+CONTINUOUS_EVAL_DIR = Path("/home/sjaconette/sc2-local-arena/continuous_eval")
 BRAIN_SCRATCH = Path("/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch")
 AIARENA_GLOB = "/tmp/aiarena_v1_v2_fetch*"
 ARENA_LOOP_DIR = BRAIN_SCRATCH / "loop"
@@ -807,6 +808,48 @@ def build_benchmark_snapshot(batch_meta: dict[str, Any]) -> dict[str, Any] | Non
     }
 
 
+def collect_continuous_eval(ce_dir: Path = CONTINUOUS_EVAL_DIR) -> dict[str, Any] | None:
+    """Fail-safe read-only reader for continuous_eval/latest_status.json and latest_alerts.json."""
+    try:
+        status_doc = load_json_safe(ce_dir / "latest_status.json")
+        if not isinstance(status_doc, dict):
+            return None
+        alerts_doc = load_json_safe(ce_dir / "latest_alerts.json")
+        recent_alerts: list[dict[str, Any]] = []
+        if isinstance(alerts_doc, dict) and isinstance(alerts_doc.get("alerts"), list):
+            for al in alerts_doc["alerts"][:10]:
+                if not isinstance(al, dict):
+                    continue
+                recent_alerts.append({
+                    "id": al.get("id"),
+                    "kind": al.get("kind"),
+                    "severity": al.get("severity"),
+                    "scope": al.get("scope"),
+                    "metric": al.get("metric"),
+                    "rev_value": al.get("rev_value"),
+                    "baseline_value": al.get("baseline_value"),
+                    "sample_n": al.get("sample_n"),
+                    "detail": al.get("detail"),
+                    "created_at": al.get("created_at"),
+                })
+        return _compact_floats({
+            "updated_at": status_doc.get("updated_at"),
+            "daemon": status_doc.get("daemon") or {},
+            "active_rev": status_doc.get("active_rev"),
+            "baseline_rev": status_doc.get("baseline_rev"),
+            "workers": status_doc.get("workers") or {},
+            "ladder_summary": status_doc.get("ladder_summary") or {},
+            "matched_vs_baseline": status_doc.get("matched_vs_baseline") or {},
+            "tactics_summary": status_doc.get("tactics_summary") or {},
+            "ladder_tiers": status_doc.get("ladder_tiers") or {},
+            "tactics_tiers": status_doc.get("tactics_tiers") or {},
+            "alerts": status_doc.get("alerts") or {},
+            "recent_alerts": recent_alerts,
+        })
+    except Exception:
+        return None
+
+
 def deep_merge(dst: dict[str, Any], src: dict[str, Any]) -> dict[str, Any]:
     out = dict(dst)
     for k, v in src.items():
@@ -849,6 +892,9 @@ def main() -> None:
         curves = collect_curves_vs_pro()
         if curves:
             state["curves_vs_pro"] = curves
+        ce = collect_continuous_eval()
+        if ce:
+            state["continuous_eval"] = ce
 
     if args.patch_file:
         p = load_json_safe(Path(args.patch_file))

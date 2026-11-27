@@ -499,14 +499,14 @@
 (let ()
   (define (gov-tokens g) (vector-ref (struct->vector g) 3))
 
-  ;; 5a. Live ladder 500-SC2-UI-APM config: target=680.0 fast-min (~486 SC2-UI), cap=760.0 (~543 peak),
-  ;;     burst=72.0, init tokens=60.0!
-  (define gov680 (make-wire-apm-governor #:target-apm 680.0 #:hard-cap-apm 760.0 #:burst-capacity 72.0))
-  (check-true "l87b-5a-ladder-gov-680-cap-760-burst-72-init-60"
-              (and (= (wire-apm-governor-target-apm gov680) 680.0)
+  ;; 5a. Live ladder single-cap 500-SC2-UI-APM config: max-apm=760.0 fast-min (~500 SC2-UI),
+  ;;     single unified cap (target-apm == hard-cap-apm == 760.0), explicit burst=72.0, init tokens=72.0!
+  (define gov680 (make-wire-apm-governor #:max-apm 760.0 #:burst-capacity 72.0))
+  (check-true "l87b-5a-ladder-gov-single-cap-760-burst-72-init-72"
+              (and (= (wire-apm-governor-target-apm gov680) 760.0)
                    (= (wire-apm-governor-hard-cap-apm gov680) 760.0)
                    (= (wire-apm-governor-burst-capacity gov680) 72.0)
-                   (= (gov-tokens gov680) 60.0)))
+                   (= (gov-tokens gov680) 72.0)))
 
   ;; 5b. P0 overdraft NEVER starves core fresh P1 macro (train/worker/supply/build)!
   ;;     Drain tokens to -4.0 via urgent P0 burst; 3 core P1 macro cmds MUST still emit with 0 P1 drops
@@ -536,9 +536,10 @@
               (format "emittedP1=~a p1Drops=~a tok=~a"
                       emitted-p1-abs (hash-ref (hash-ref st-p1-prot 'by_tier) 'P1 -1) (gov-tokens gov-p1)))
 
-  ;; 5c. Relaxed P2 token floor (0.0 vs 4.0) & headroom floor (6.0 vs 12.0) at >= 500 APM!
-  (define gov-hi (make-wire-apm-governor #:target-apm 680.0 #:hard-cap-apm 760.0 #:burst-capacity 10.0))
-  (define gov-lo (make-wire-apm-governor #:target-apm 495.0 #:hard-cap-apm 760.0 #:burst-capacity 10.0))
+  ;; 5c. Zero hardcoded APM headroom tiers: with R_high = 0, P2 uses full 60s rolling headroom (no static 6/12 floor),
+  ;;     while queued high-value macro (Q_high) reserves headroom ahead of P2 micro on tight caps!
+  (define gov-hi (make-wire-apm-governor #:max-apm 760.0 #:burst-capacity 10.0))
+  (define gov-lo (make-wire-apm-governor #:max-apm 495.0 #:burst-capacity 10.0))
   (void (govern-sc2-wire-actions! gov-hi (list (sc2-raw-unit-command 23 (sc2-point2d 40.0 40.0) 0 '(5001) #f)) 996))
   (void (govern-sc2-wire-actions! gov-lo (list (sc2-raw-unit-command 23 (sc2-point2d 40.0 40.0) 0 '(5001) #f)) 996))
   (define p2-burst
@@ -546,24 +547,30 @@
       (sc2-raw-unit-command 23 (sc2-point2d (+ 50.0 (* 2.0 i)) 50.0) 0 (list (+ 5010 i)) #f)))
   (define out-hi (govern-sc2-wire-actions! gov-hi p2-burst 1000))
   (define out-lo (govern-sc2-wire-actions! gov-lo p2-burst 1000))
-  (define gov-hr-hi (make-wire-apm-governor #:target-apm 680.0 #:hard-cap-apm 14.0 #:burst-capacity 72.0))
-  (define gov-hr-lo (make-wire-apm-governor #:target-apm 495.0 #:hard-cap-apm 14.0 #:burst-capacity 72.0))
-  (void (govern-sc2-wire-actions! gov-hr-hi (list (sc2-raw-unit-command 23 (sc2-point2d 40.0 40.0) 0 '(5101) #f)) 1996))
-  (void (govern-sc2-wire-actions! gov-hr-lo (list (sc2-raw-unit-command 23 (sc2-point2d 40.0 40.0) 0 '(5101) #f)) 1996))
-  ;; Remaining headroom = 12.0: high-APM P2 floor 6.0 admits 3 cmds (6 events -> 6.0 rem), 495 floor 12.0 admits 0!
-  (define out-hr-hi (govern-sc2-wire-actions! gov-hr-hi p2-burst 2000))
-  (define out-hr-lo (govern-sc2-wire-actions! gov-hr-lo p2-burst 2000))
-  (check-true "l87b-5c-high-apm-p2-token-0-and-headroom-6-floors"
-              (and (> (length out-hi) (length out-lo))
+  ;; Tight 14-event rolling cap with 0 high-value demand: ALL 6 P2 cmds (12 ev) fit cleanly!
+  (define gov-hr-open (make-wire-apm-governor #:max-apm 14.0 #:burst-capacity 72.0))
+  (void (govern-sc2-wire-actions! gov-hr-open (list (sc2-raw-unit-command 23 (sc2-point2d 40.0 40.0) 0 '(5101) #f)) 1996))
+  (define out-hr-open (govern-sc2-wire-actions! gov-hr-open p2-burst 2000))
+  ;; Tight 4-event cap with queued P1 macro (560) + P2 burst: Q_high reserves headroom for 560 ahead of P2!
+  (define gov-hr-q (make-wire-apm-governor #:max-apm 4.0 #:burst-capacity 72.0))
+  (void (govern-sc2-wire-actions! gov-hr-q (list (sc2-raw-unit-command 23 (sc2-point2d 40.0 40.0) 0 '(5102) #f)) 1996))
+  (define out-hr-q
+    (govern-sc2-wire-actions!
+     gov-hr-q
+     (append p2-burst (list (sc2-raw-unit-command 560 #f 0 '(5199) #f)))
+     2000))
+  (check-true "l87b-5c-zero-hardcoded-floors-full-idle-p2-and-qhigh-reserve"
+              (and (>= (length out-hi) (length out-lo))
                    (>= (gov-tokens gov-hi) 0.0)
-                   (= (length out-hr-hi) 3)
-                   (= (length out-hr-lo) 0))
-              (format "tokHi=~a tokLo=~a hrHi=~a hrLo=~a"
-                      (length out-hi) (length out-lo) (length out-hr-hi) (length out-hr-lo)))
+                   (= (length out-hr-open) 6)
+                   (= (length out-hr-q) 1)
+                   (= (sc2-raw-unit-command-ability-id (first out-hr-q)) 560))
+              (format "tokHi=~a tokLo=~a hrOpen=~a hrQ=~a"
+                      (length out-hi) (length out-lo) (length out-hr-open) out-hr-q))
 
   ;; 5d. Pre-governor _obs noop suppression eliminates redundant Attack/Move Selection+UpdateTarget churn
   ;;     with ZERO tokens spent and ZERO APM drops, while preserving kiting & target switches!
-  (define gov-noop (make-wire-apm-governor #:target-apm 680.0 #:hard-cap-apm 760.0 #:burst-capacity 72.0))
+  (define gov-noop (make-wire-apm-governor #:max-apm 760.0 #:burst-capacity 72.0))
   (define stk1 (mk-unit 5201 74 1 50.0 50.0 #:orders (list (sc2-unit-order 23 #f 9001 0.0))))
   (define stk2 (mk-unit 5202 74 1 51.0 50.0 #:orders (list (sc2-unit-order 16 (sc2-point3d 60.0 60.0 10.0) 0 0.0))))
   (define noop-obs (mk-obs 3000 60 90 (list stk1 stk2)))
@@ -575,6 +582,7 @@
      (list (sc2-raw-unit-command 23 #f 9001 '(5201) #f)
            (sc2-raw-unit-command 16 (sc2-point2d 60.4 60.3) 0 '(5202) #f))
      3000 noop-obs))
+  (define tok-after-noop (gov-tokens gov-noop))
   ;; Partial tag filter: attack 9001 on (5201 5202) emits ONLY for 5202!
   ;; Target switch / kite: move (45.0, 45.0) on 5201 fires immediately!
   (define out-real
@@ -585,12 +593,14 @@
      3004 noop-obs))
   (check-true "l87b-5d-obs-noop-suppression-zero-tokens-and-preserves-kite-switch"
               (and (null? out-noop)
-                   (= (gov-tokens gov-noop) (- tok-before-noop 4.0 (- (* 4.0 (/ 680.0 1344.0)))))
+                   (= tok-after-noop tok-before-noop)
+                   (= (gov-tokens gov-noop) (- tok-before-noop 4.0))
                    (= (hash-ref (get-wire-apm-drop-stats gov-noop) 'total -1) 0)
                    (= (length out-real) 2)
                    (equal? (sc2-raw-unit-command-unit-tags (first out-real)) '(5202))
                    (equal? (sc2-raw-unit-command-unit-tags (second out-real)) '(5201)))
-              (format "outNoop=~a outReal=~a drops=~a" out-noop out-real (get-wire-apm-drop-stats gov-noop)))
+              (format "outNoop=~a tokAfterNoop=~a tokNow=~a outReal=~a drops=~a"
+                      out-noop tok-after-noop (gov-tokens gov-noop) out-real (get-wire-apm-drop-stats gov-noop)))
 
   ;; 5e. Spatial 1.0t micro coalescing + 8f cross-step P2 combat repeat dedup!
   (define gov-coal (make-wire-apm-governor #:target-apm 680.0 #:hard-cap-apm 760.0 #:burst-capacity 72.0))
@@ -632,13 +642,13 @@
                    (= (length h3) 2))
               (format "h1=~a h2=~a h3=~a" (length h1) (length h2) (length h3)))
 
-  ;; 5g. Default make-wire-apm-governor preserves 530 / 595 / 36.0 / init 30.0 defaults cleanly!
+  ;; 5g. Default make-wire-apm-governor preserves single-cap 595.0 & smooth 5s burst-capacity default!
   (define gov-def (make-wire-apm-governor))
   (check-true "l87b-5g-default-governor-defaults-preserved"
-              (and (= (wire-apm-governor-target-apm gov-def) 530.0)
+              (and (= (wire-apm-governor-target-apm gov-def) 595.0)
                    (= (wire-apm-governor-hard-cap-apm gov-def) 595.0)
-                   (= (wire-apm-governor-burst-capacity gov-def) 36.0)
-                   (= (gov-tokens gov-def) 30.0)))
+                   (< (abs (- (wire-apm-governor-burst-capacity gov-def) (* 595.0 (/ 5.0 60.0)))) 0.01)
+                   (= (gov-tokens gov-def) (wire-apm-governor-burst-capacity gov-def))))
 
   ;; 5h. Fuzz-resilience: malformed non-unit entries ('not-a-unit) & NaN target coords in _obs/cmds never throw!
   (define gov-fuzz (make-wire-apm-governor #:target-apm 680.0 #:hard-cap-apm 760.0 #:burst-capacity 72.0))

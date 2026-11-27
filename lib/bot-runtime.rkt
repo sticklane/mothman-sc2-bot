@@ -77,6 +77,7 @@
          "tactics/staging-groups.rkt"
          "tactics/multiprong-coordinator.rkt"
          "tactics/concave-positioning.rkt"
+         "tactics/operation-controller.rkt"
          (only-in "tactics/mode-and-stealth-safety.rkt"
                   plan-mobile-detector-army-escort))
 
@@ -163,6 +164,12 @@
  rt-cheese-committed?
  rt-cheese-proxy-xy
  rt-cheese-proxy-worker-tags
+ rt-record-physical-refusal!
+ rt-clear-physical-refusal!
+ rt-active-physical-refusals
+ rt-macro-demand-state
+ rt-tactical-op-state
+ l2-execute-macro-decision!
  reset-wave3-tactical-state!
  bayesian-posterior-from-likelihoods
  compute-bayesian-pad-camped-posterior
@@ -266,6 +273,45 @@
 ;; Loop 84 (Version C "C is for Cheese"): Per-runtime weak state preserving exact 19-field
 ;; `(struct live-bot-runtime ...)` arity with 100% ZERO diff when `cheese-mode? = #f`.
 (define-rt-weak-state rt-cheese-state (make-hasheq))
+(define-rt-weak-state rt-physical-refusals-ht (make-hasheq))
+(define-rt-weak-state rt-macro-demand-state (make-hasheq))
+(define-rt-weak-state rt-tactical-op-state (make-tactical-op-state))
+
+;; Closed-loop physical-refusal feedback (`rt` <-> Wire <-> Brain).
+(define (rt-record-physical-refusal! rt sym reason frame [ttl-frames 64])
+  (when (and (live-bot-runtime? rt) (symbol? sym))
+    (define fr (if (exact-integer? frame) frame 0))
+    (hash-set! (rt-physical-refusals-ht rt) sym (list reason fr (+ fr (max 1 ttl-frames))))))
+
+(define (rt-clear-physical-refusal! rt sym)
+  (when (and (live-bot-runtime? rt) (symbol? sym))
+    (hash-remove! (rt-physical-refusals-ht rt) sym)))
+
+(define (rt-active-physical-refusals rt frame [wire-refusals #f])
+  (define fr (if (exact-integer? frame) frame 0))
+  (define out (make-hasheq))
+  (when (live-bot-runtime? rt)
+    (define ht (rt-physical-refusals-ht rt))
+    (for ([sym (in-list (hash-keys ht))])
+      (define entry (hash-ref ht sym #f))
+      (if (and (list? entry) (>= (length entry) 3) (<= (second entry) fr) (< fr (third entry)))
+          (hash-set! out sym (cons (first entry) (third entry)))
+          (hash-remove! ht sym))))
+  (cond
+    [(hash? wire-refusals)
+     (for ([(sym val) (in-hash wire-refusals)] #:when (symbol? sym))
+       (define-values (reason exp-f)
+         (cond [(and (pair? val) (real? (cdr val))) (values (car val) (inexact->exact (round (cdr val))))]
+               [(real? val) (values 'wire-refusal (inexact->exact (round val)))]
+               [(symbol? val) (values val (+ fr 64))]
+               [else (values 'wire-refusal (+ fr 64))]))
+       (hash-set! out sym (cons reason exp-f))
+       (when (live-bot-runtime? rt) (rt-record-physical-refusal! rt sym reason fr (max 1 (- exp-f fr)))))]
+    [(list? wire-refusals)
+     (for ([rec (in-list wire-refusals)] #:when (and (list? rec) (>= (length rec) 2) (symbol? (first rec))))
+       (hash-set! out (first rec) (cons (second rec) (+ fr 64)))
+       (when (live-bot-runtime? rt) (rt-record-physical-refusal! rt (first rec) (second rec) fr 64)))])
+  (for/hasheq ([(k v) (in-hash out)]) (values k v)))
 
 (define (rt-cheese-mode? rt)
   (and (live-bot-runtime? rt)
@@ -891,6 +937,10 @@
   (reset-arbiter-ledger! (rt-arbiter-ledger rt))
   (multiprong-state-reset! (rt-multiprong-state rt))
   (reset-choke-attrition-state! (rt-choke-attrition-state rt))
+  (let ([pr (rt-physical-refusals-ht rt)]) (when (hash? pr) (hash-clear! pr)))
+  (let ([md (rt-macro-demand-state rt)]) (when (hash? md) (hash-clear! md)))
+  (reset-tactical-op-state! (rt-tactical-op-state rt))
+  (reset-macro-escrow-tracker!)
   (let ([pe (rt-prev-unit-ehp rt)]) (when (hash? pe) (hash-clear! pe)))
   (let ([st (rt-splash-state rt)])
     (when (hash? st)
@@ -1918,6 +1968,7 @@
      (hash)
      (make-order-ledger)
      (make-tactical-mirror-brain)))
+  (reset-macro-escrow-tracker!)
   (when skip-build-order?
     (set-rt-skip-build-order?! rt #t))
   (define norm-cprof (coerce-cheese-profile-arg cheese-profile))
@@ -4630,7 +4681,10 @@
     (define new-rec (vector fx fy frame near-strikes))
     (hash-set! tbl (list 'contested-cancel-site canon-sym) new-rec)
     (hash-set! tbl 'contested-cancel-sites
-               (cons new-rec (take old-sites (min 14 (length old-sites)))))))
+               (cons new-rec (take old-sites (min 14 (length old-sites)))))
+    (when (and (l2-ctx-rt ctx)
+               (memq canon-sym '(barracks-techlab barracks-reactor factory-techlab factory-reactor starport-techlab starport-reactor)))
+      (rt-record-physical-refusal! (l2-ctx-rt ctx) canon-sym 'site-contested frame 64))))
 
 (define (l2-site-recently-contested? ctx x y [radius 10.0])
   (define cd-tracker (l2-ctx-cd-tracker ctx))
@@ -5775,10 +5829,12 @@
                   (not ebay-ready?)
                   (not (l2-building-present-or-pending? ctx 'engineering-bay))
                   rax-ready?
+                  (or active-cloak-emergency?
+                      (not (l2-brain-reserves-for-higher? ctx 'engineering-bay (sc2-min-cost 'engineering-bay))))
                   (>= (l2-ctx-minerals ctx) (+ (sc2-min-cost 'engineering-bay) (if active-cloak-emergency? 0 50)))
                   (l2-save-cancel-rebuild-ready? ctx 'engineering-bay 60))
          (let-values ([(ex ey) (l2-interior-offset ctx 5.5 -2.5)])
-           (l2-emit-build-verified! ctx 'engineering-bay ex ey #:bypass-escrow? #t)))
+           (l2-emit-build-verified! ctx 'engineering-bay ex ey)))
        (define sd-cur-marines (l2-unit-count ctx 'marine))
        (define sd-enemy-reapers
          (max (count (lambda (e)
@@ -5848,7 +5904,8 @@
                     (l2-ctx-early-survival-crisis? ctx)
                     (l2-ctx-under-early-cheese? ctx)
                     (l2-ctx-under-base-attack? ctx)
-                    (and (>= (l2-ctx-live-enemy-threat-supply ctx) 4.0)
+                    (and (not (l2-brain-reserves-for-higher? ctx 'bunker (sc2-min-cost 'bunker)))
+                         (>= (l2-ctx-live-enemy-threat-supply ctx) 4.0)
                          (> (l2-ctx-live-enemy-threat-supply ctx)
                             (* 1.15 (l2-ctx-live-army-supply ctx)))))
                 (try-sd! 'bunker rax-ready? sd-bunker-cap)))]))
@@ -6776,6 +6833,55 @@
              [csym (sc2-canonical-structure-sym sym)])
          (and (or (memq sym sids) (memq csym sids)) #t))))
 
+;; Single-authority Brain escrow/schedule reader.
+(define (l2-brain-reserves-for-higher? ctx sym m-cost [g-cost 0])
+  (define md (l2-ctx-macro-decision ctx))
+  (and (macro-brain-decision? md)
+       (let* ([csym (sc2-canonical-structure-sym sym)]
+              [rem-m (- (l2-ctx-minerals ctx) m-cost)]
+              [rem-g (- (l2-ctx-gas ctx) g-cost)]
+              [sids (macro-brain-decision-scheduled-ids md)]
+              [sf (l2-ctx-prio-saving-for-sym ctx)]
+              [res-m (max 0 (or (l2-ctx-bo-reserved-min ctx) 0))]
+              [res-g (max 0 (or (l2-ctx-bo-reserved-gas ctx) 0))]
+              [sched-res (macro-brain-decision-priority-schedule md)]
+              [sched-cands (if (priority-schedule-result? sched-res)
+                               (or (priority-schedule-result-scheduled-candidates sched-res) '())
+                               '())])
+         (and (not (or (memq sym sids) (memq csym sids)))
+              (or (and sf (not (memq sf (list 'none sym csym)))
+                       (or (and (> res-m 0) (> m-cost 0) (< rem-m res-m))
+                           (and (> res-g 0) (> g-cost 0) (< rem-g res-g))))
+                  (for/or ([c (in-list sched-cands)] #:when (priority-candidate? c))
+                    (define eid (priority-candidate-id c))
+                    (and (not (eq? eid sym)) (not (eq? eid csym))
+                         (or (and (> (priority-candidate-min-cost c) 0) (> m-cost 0) (< rem-m (priority-candidate-min-cost c)))
+                             (and (> (priority-candidate-gas-cost c) 0) (> g-cost 0) (< rem-g (priority-candidate-gas-cost c)))))))))))
+
+;; Pick safest living TownHall anchor farthest from live enemy threats & contested sites.
+(define (l2-safe-living-townhall-anchors ctx danger-r)
+  (define enemy-units (or (l2-ctx-enemy-units ctx) '()))
+  (define enemy-pts
+    (for/list ([e (in-list enemy-units)]
+               #:when (and (hash? e) (combat-unit-record? e) (not (eq? (hash-ref e 'snapshot? #f) #t))
+                           (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))))
+      (cons (exact->inexact (hash-ref e 'x 9999.0)) (exact->inexact (hash-ref e 'y 9999.0)))))
+  (sort (for/list ([b (in-list (or (l2-ctx-ally-bldgs ctx) '()))]
+                   #:when (and (hash? b) (real? (hash-ref b 'x #f)) (real? (hash-ref b 'y #f))
+                               (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                               (memq (fast-canonical-structure-sym (unit-type-sym b))
+                                     '(hatchery lair hive nexus command-center orbital-command planetary-fortress))
+                               (let ([tx (exact->inexact (hash-ref b 'x 0.0))] [ty (exact->inexact (hash-ref b 'y 0.0))])
+                                 (and (not (l2-active-enemy-combat-within? enemy-units tx ty danger-r))
+                                      (not (l2-site-recently-contested? ctx tx ty 10.0))))))
+          (define tx (exact->inexact (hash-ref b 'x 0.0)))
+          (define ty (exact->inexact (hash-ref b 'y 0.0)))
+          (list (if (null? enemy-pts) 100.0
+                    (for/fold ([best +inf.0]) ([ep (in-list enemy-pts)])
+                      (min best (fast-dist2d tx ty (car ep) (cdr ep)))))
+                tx ty))
+        > #:key car))
+
 (define (l2-emit-build-verified! ctx bldg-sym raw-x raw-y
                                 [clearance SC2-BUILD-SITE-MIN-CLEARANCE]
                                 #:exact-wall-slot? [exact-wall-slot? #f]
@@ -6817,22 +6923,24 @@
           (eq? canon-sym (l2-ctx-prio-saving-for-sym ctx))
           (and (memq canon-sym (or (l2-ctx-repaired-prereqs ctx) '())) #t)
           (l2-brain-scheduled-now? ctx canon-sym)))
-    (unless (or (l2-build-issue-blocked? ctx canon-sym)
-                ;; W6-P0-2-rt / L36-P0-3 (`#5138232`) / L38-P0-1c (`#5138250`): Strict singleton
-                ;; Cybernetics Core guard across all callers, including Probes with queued 894 orders!
-                (and (eq? canon-sym 'cybernetics-core)
-                     (or (> (l2-cur-ally-canon-bldg-count ctx 'cybernetics-core) 0)
-                         (l2-building-present-or-pending? ctx 'cybernetics-core)
-                         (l2-worker-carrying-build-ability? ctx 894 'cybernetics-core)))
-                (l2-crisis-tech-bldg-deferred? ctx canon-sym)
-                (and (not waive-worker-reserve?)
-                     (> w-res-min 0)
-                     (< (- (l2-ctx-minerals ctx) w-res-min) (sc2-min-cost bldg-sym)))
-                (not (l2-arbiter-authorize-spend!
-                      ctx canon-sym 'macro (if bldg-essential? 780.0 600.0)
-                      #:minerals (sc2-min-cost bldg-sym)
-                      #:gas (sc2-gas-cost bldg-sym)
-                      #:essential? bldg-essential?)))
+    (if (or (l2-build-issue-blocked? ctx canon-sym)
+            ;; W6-P0-2-rt / L36-P0-3 (`#5138232`) / L38-P0-1c (`#5138250`): Strict singleton
+            ;; Cybernetics Core guard across all callers, including Probes with queued 894 orders!
+            (and (eq? canon-sym 'cybernetics-core)
+                 (or (> (l2-cur-ally-canon-bldg-count ctx 'cybernetics-core) 0)
+                     (l2-building-present-or-pending? ctx 'cybernetics-core)
+                     (l2-worker-carrying-build-ability? ctx 894 'cybernetics-core)))
+            (l2-crisis-tech-bldg-deferred? ctx canon-sym)
+            (and (not waive-worker-reserve?)
+                 (> w-res-min 0)
+                 (< (- (l2-ctx-minerals ctx) w-res-min) (sc2-min-cost bldg-sym)))
+            (not (l2-arbiter-authorize-spend!
+                  ctx canon-sym 'macro (if bldg-essential? 780.0 600.0)
+                  #:minerals (sc2-min-cost bldg-sym)
+                  #:gas (sc2-gas-cost bldg-sym)
+                  #:essential? bldg-essential?)))
+        #f
+        (let ()
       ;; Never let `solve-pro-simcity-layout-placement` relocate a 1-base high-ground static
       ;; defense anchor (`raw-x, raw-y` near `base-x, base-y`) down to the unowned natural front!
       (define keep-1base-inmain-sd?
@@ -6956,41 +7064,67 @@
       (define-values (sx sy emit-ok? used-exact-wall?)
         (if (not site-contested?)
             (values sx0 sy0 #t exact-wall-slot?)
-            (let loop ([retry-i 0])
-              (cond
-                [(>= retry-i 7)
-                 (values sx0 sy0 #f #f)]
-                [else
-                 (define-values (cand-ax cand-ay)
-                   (if zerg-creep-tech-bldg?
-                       (l2-zerg-creep-ring-anchor ctx raw-x raw-y (+ retry-i 1))
-                       (l2-emergency-inmain-supply-anchor ctx retry-i)))
-                 (define-values (rx ry)
-                   (order-ledger-resolve-build-coords!
-                    oledger bldg-sym cand-ax cand-ay ally-bldgs frame clearance
-                    #:expansion-pads expansion-pads
-                    #:exact-wall-slot? #f
-                    #:reserved-aabbs (l2-wall-aabbs-for-build ctx #f)))
-                 (define csx (safe-coord rx cand-ax))
-                 (define csy (safe-coord ry cand-ay))
-                 (if (and (not (l2-active-enemy-combat-within? enemy-units-cur csx csy site-danger-r))
-                          (not (l2-site-recently-contested? ctx csx csy 10.0)))
-                     (values csx csy #t #f)
-                     (loop (add1 retry-i)))]))))
-      (when emit-ok?
-        (l2-emit! ctx (list 'build bldg-sym sx sy))
-        (l2-record-build-issue-lock! ctx canon-sym)
-        (when (and used-exact-wall?
-                   live-game-obs?
-                   (refractory-cooldown-tracker? cd-tracker)
-                   (hash? (refractory-cooldown-tracker-table cd-tracker)))
-          (hash-set! (refractory-cooldown-tracker-table cd-tracker)
-                     (list 'build-issue-exact-wall canon-sym)
-                     frame))
-        (order-ledger-record-issued! oledger (+ 820000 (modulo frame 10000) (length (l2-ctx-actions ctx)))
-                                     'build bldg-sym sx sy frame)
-        (set-l2-ctx-bldg-types! ctx (cons canon-sym (l2-ctx-bldg-types ctx)))
-        (l2-spend-resources-and-supply! ctx (sc2-min-cost bldg-sym) (sc2-gas-cost bldg-sym) 0))))
+            (let* ([safe-th-list (l2-safe-living-townhall-anchors ctx site-danger-r)]
+                   [th-cand
+                    (for/or ([th (in-list safe-th-list)])
+                      (define tx (second th))
+                      (define ty (third th))
+                      (for/or ([off (in-list '((4.5 . 3.0) (-4.5 . 3.0) (4.5 . -3.0) (-4.5 . -3.0)))])
+                        (define-values (rx ry)
+                          (order-ledger-resolve-build-coords!
+                           oledger bldg-sym (+ tx (car off)) (+ ty (cdr off)) ally-bldgs frame clearance
+                           #:expansion-pads expansion-pads
+                           #:exact-wall-slot? #f
+                           #:reserved-aabbs (l2-wall-aabbs-for-build ctx #f)))
+                        (define csx (safe-coord rx (+ tx (car off))))
+                        (define csy (safe-coord ry (+ ty (cdr off))))
+                        (and (not (l2-active-enemy-combat-within? enemy-units-cur csx csy site-danger-r))
+                             (not (l2-site-recently-contested? ctx csx csy 10.0))
+                             (cons csx csy))))])
+              (if th-cand
+                  (values (car th-cand) (cdr th-cand) #t #f)
+                  (let loop ([retry-i 0])
+                    (cond
+                      [(>= retry-i 7)
+                       (values sx0 sy0 #f #f)]
+                      [else
+                       (define-values (cand-ax cand-ay)
+                         (if zerg-creep-tech-bldg?
+                             (l2-zerg-creep-ring-anchor ctx raw-x raw-y (+ retry-i 1))
+                             (l2-emergency-inmain-supply-anchor ctx retry-i)))
+                       (define-values (rx ry)
+                         (order-ledger-resolve-build-coords!
+                          oledger bldg-sym cand-ax cand-ay ally-bldgs frame clearance
+                          #:expansion-pads expansion-pads
+                          #:exact-wall-slot? #f
+                          #:reserved-aabbs (l2-wall-aabbs-for-build ctx #f)))
+                       (define csx (safe-coord rx cand-ax))
+                       (define csy (safe-coord ry cand-ay))
+                       (if (and (not (l2-active-enemy-combat-within? enemy-units-cur csx csy site-danger-r))
+                                (not (l2-site-recently-contested? ctx csx csy 10.0)))
+                           (values csx csy #t #f)
+                           (loop (add1 retry-i)))]))))))
+      (cond
+        [emit-ok?
+         (l2-emit! ctx (list 'build bldg-sym sx sy))
+         (l2-record-build-issue-lock! ctx canon-sym)
+         (when rt (rt-clear-physical-refusal! rt canon-sym))
+         (when (and used-exact-wall?
+                    live-game-obs?
+                    (refractory-cooldown-tracker? cd-tracker)
+                    (hash? (refractory-cooldown-tracker-table cd-tracker)))
+           (hash-set! (refractory-cooldown-tracker-table cd-tracker)
+                      (list 'build-issue-exact-wall canon-sym)
+                      frame))
+         (order-ledger-record-issued! oledger (+ 820000 (modulo frame 10000) (length (l2-ctx-actions ctx)))
+                                      'build bldg-sym sx sy frame)
+         (set-l2-ctx-bldg-types! ctx (cons canon-sym (l2-ctx-bldg-types ctx)))
+         (l2-spend-resources-and-supply! ctx (sc2-min-cost bldg-sym) (sc2-gas-cost bldg-sym) 0)
+         #t]
+        [else
+         (when (and rt live-game-obs?)
+           (rt-record-physical-refusal! rt canon-sym 'no-safe-placement frame))
+         #f]))))
 
 (define (l2-emit-gas-build-verified! ctx gas-sym raw-x raw-y [cost-sym gas-sym])
   (define base-x (l2-ctx-base-x ctx))
@@ -7893,7 +8027,10 @@
     (case race
       [(Zerg)
        (and (>= eff-phase-supply 30)
-            (memq 'spawning-pool ready-bldg-types))]
+            (memq 'spawning-pool ready-bldg-types)
+            (not (and live-game? (memq 'roach-warren ready-bldg-types) (< (l2-unit-count ctx 'roach) 4)
+                      (ormap (lambda (e) (and (hash? e) (combat-unit-record? e) (not (fast-unit-is-flying-sym? (unit-type-sym e)))))
+                             (or (l2-ctx-enemy-units ctx) '())))))]
       [(Protoss)
        (and (>= eff-phase-supply 46)
             (>= live-army-supply 10)
@@ -8464,69 +8601,57 @@
                                       (< (abs (- (exact->inexact gx0) ax)) 2.10)
                                       (< (abs (- (exact->inexact gy0) ay)) 2.10))))))))))))
 
+(define (l2-addon-pad-safe? ctx fac addon-sym)
+  (define fx (exact->inexact (hash-ref fac 'x (l2-ctx-base-x ctx))))
+  (define fy (exact->inexact (hash-ref fac 'y (l2-ctx-base-y ctx))))
+  (define ax (+ fx SC2-TERRAN-ADDON-OFFSET-X))
+  (define ay (+ fy SC2-TERRAN-ADDON-OFFSET-Y))
+  (define enemies (or (l2-ctx-enemy-units ctx) '()))
+  (and (l2-save-cancel-rebuild-ready? ctx addon-sym)
+       (not (l2-addon-pad-blocked? ctx fac))
+       (not (eq? (hash-ref fac 'under-attack #f) #t))
+       (not (and (l2-site-recently-contested? ctx ax ay 8.0)
+                 (l2-active-enemy-combat-within? enemies ax ay 12.0)))
+       (not (l2-enemy-weapon-attacker-within? ax ay 8.0 enemies))))
+
 (define (l2-addon-retry-ready? ctx fac addon-sym)
-  (define live-game? (l2-ctx-live-obs-harvesters? ctx))
   (cond
-    [(not live-game?) #t]
-    [(l2-addon-pad-blocked? ctx fac) #f]
+    [(not (l2-ctx-live-obs-harvesters? ctx)) #t]
+    [(not (l2-addon-pad-safe? ctx fac addon-sym)) #f]
     [else
-     (define rt (l2-ctx-rt ctx))
-     (define frame (l2-ctx-frame ctx))
+     (define rt (l2-ctx-rt ctx)) (define frame (l2-ctx-frame ctx))
      (define st (and rt (rt-l2-addon-fail-state rt)))
-     (when (and st (<= frame 4))
-       (hash-clear! st))
+     (when (and st (<= frame 4)) (hash-clear! st))
      (define fid (hash-ref fac 'id -1))
-     (define rec (and st (exact-integer? fid) (> fid 0)
-                      (hash-ref st (cons fid addon-sym) #f)))
-     (if (not (vector? rec))
-         #t
-         (let* ([last-f (vector-ref rec 0)]
-                [fails (vector-ref rec 1)]
-                [dt (- frame last-f)]
-                [req-cd (cond
-                          [(>= fails 3) 1344]
-                          [(= fails 2) 448]
-                          [(= fails 1) 160]
-                          [else 36])])
+     (define rec (and st (exact-integer? fid) (> fid 0) (hash-ref st (cons fid addon-sym) #f)))
+     (or (not (vector? rec))
+         (let* ([dt (- frame (vector-ref rec 0))] [fails (vector-ref rec 1)]
+                [req-cd (cond [(>= fails 3) 1344] [(= fails 2) 448] [(= fails 1) 160] [else 36])])
            (or (< dt 0) (>= dt req-cd))))]))
 
 (define (l2-addon-record-emit! ctx fac addon-sym)
-  (define live-game? (l2-ctx-live-obs-harvesters? ctx))
-  (when live-game?
-    (define rt (l2-ctx-rt ctx))
-    (define frame (l2-ctx-frame ctx))
-    (define st (and rt (rt-l2-addon-fail-state rt)))
-    (define fid (hash-ref fac 'id -1))
+  (when (l2-ctx-live-obs-harvesters? ctx)
+    (define rt (l2-ctx-rt ctx)) (define frame (l2-ctx-frame ctx))
+    (define st (and rt (rt-l2-addon-fail-state rt))) (define fid (hash-ref fac 'id -1))
     (when (and st (exact-integer? fid) (> fid 0))
-      (define key (cons fid addon-sym))
-      (define prev (hash-ref st key #f))
+      (define key (cons fid addon-sym)) (define prev (hash-ref st key #f))
       (define next-fails
-        (if (and (vector? prev)
-                 (>= (- frame (vector-ref prev 0)) 0)
-                 (< (- frame (vector-ref prev 0)) 2000))
-            (min 4 (add1 (vector-ref prev 1)))
-            0))
+        (if (and (vector? prev) (<= 0 (- frame (vector-ref prev 0)) 1999))
+            (min 4 (add1 (vector-ref prev 1))) 0))
       (hash-set! st key (vector frame next-fails)))))
 
 (define (l2-grounded-bare-facility ctx sym [addon-sym #f])
-  (define ally-bldgs (l2-ctx-ally-bldgs ctx))
-  (define claimed-addon-fac-ids (l2-ctx-claimed-addon-fac-ids ctx))
-  (define frame (l2-ctx-frame ctx))
-  (define live-game? (l2-ctx-live-obs-harvesters? ctx))
-  (define oledger (l2-ctx-oledger ctx))
-       (for/first ([b (in-list ally-bldgs)]
-                   #:when (and (eq? (unit-type-sym b) sym)
-                               (l2-building-grounded-and-powered? ctx b)
-                               (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
-                               (or (not live-game?) (= (hash-ref b 'order-count 0) 0))
-                               (not (l2-terran-facility-has-addon? ctx b))
-                               (not (l2-facility-being-swapped? ctx b))
-                               (not (set-member? claimed-addon-fac-ids (hash-ref b 'id -1)))
-                               (or (not live-game?)
-                                   (not (order-ledger-facility-busy? oledger b frame)))
-                               (or (not addon-sym)
-                                   (l2-addon-retry-ready? ctx b addon-sym))))
-         b))
+  (define claimed (l2-ctx-claimed-addon-fac-ids ctx)) (define frame (l2-ctx-frame ctx))
+  (define live-game? (l2-ctx-live-obs-harvesters? ctx)) (define oledger (l2-ctx-oledger ctx))
+  (for/first ([b (in-list (l2-ctx-ally-bldgs ctx))]
+              #:when (and (eq? (unit-type-sym b) sym) (l2-building-grounded-and-powered? ctx b)
+                          (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                          (or (not live-game?) (= (hash-ref b 'order-count 0) 0))
+                          (not (l2-terran-facility-has-addon? ctx b)) (not (l2-facility-being-swapped? ctx b))
+                          (not (set-member? claimed (hash-ref b 'id -1)))
+                          (or (not live-game?) (not (order-ledger-facility-busy? oledger b frame)))
+                          (or (not addon-sym) (l2-addon-retry-ready? ctx b addon-sym))))
+    b))
 
 ;; Estimate 3-second mineral and gas income so priority escrows pause idle production only when < 3s away.
 (define (l2-income-3s-minerals-gas ctx)
@@ -10050,6 +10175,7 @@
                                   (loop (cdr rem) best best-score)))
                             (loop (cdr rem) best best-score))))))))
         ;; Pass A: safe disengaging SCVs mutual-repair each other instead of idling at evacuation patch
+        (define rep-ol (l2-ctx-oledger ctx))
         (for ([dc (in-list (reverse disengage-cands))]
               #:break (>= total-repairers max-repairers))
           (match-define (list rw rwid near-comb? rwhp) dc)
@@ -10066,7 +10192,10 @@
               (hash-set! repair-busy-ht rwid #t)
               (hash-update! repair-tgt-counts tid add1 0)
               (set! total-repairers (add1 total-repairers))
-              (l2-emit! ctx (list 'repair rwid tid)))))
+              (unless (and rep-ol (order-ledger-order-equivalent? rep-ol rw 'repair tid 0.0 0.0 frame))
+                (when rep-ol
+                  (order-ledger-record-issued! rep-ol rwid 'repair 'repair #:target-id tid #:frame frame))
+                (l2-emit! ctx (list 'repair rwid tid))))))
         ;; Pass B: healthy pocket SCVs repair badly injured frontline SCVs (< 36 HP) during >= 6-SCV brawl
         (when (and (>= (length scv-defenders) 6)
                    (< total-repairers max-repairers)
@@ -10095,7 +10224,10 @@
                 (hash-update! repair-tgt-counts tid add1 0)
                 (set! total-repairers (add1 total-repairers))
                 (set-l2-ctx-cur-rush-disengaging-wids! ctx (cons rwid (l2-ctx-cur-rush-disengaging-wids ctx)))
-                (l2-emit! ctx (list 'repair rwid tid))))))))
+                (unless (and rep-ol (order-ledger-order-equivalent? rep-ol rw 'repair tid 0.0 0.0 frame))
+                  (when rep-ol
+                    (order-ledger-record-issued! rep-ol rwid 'repair 'repair #:target-id tid #:frame frame))
+                  (l2-emit! ctx (list 'repair rwid tid)))))))))
 
     (for ([dc (in-list (reverse disengage-cands))])
       (define wid (second dc))
@@ -13850,153 +13982,25 @@
                 #:when (let ([cs (fast-canonical-structure-sym (unit-type-sym b))])
                          (or (eq? cs 'extractor) (eq? cs 'assimilator) (eq? cs 'refinery))))
       b))
-  ;; L49-W1 (Watchdog Law 2 — Dynamic Gas Valve & Zero-Income Recovery):
+  ;; Watchdog state handle (live gas saturation owned exclusively by `worker-saturation-policy.rkt`
+  ;; driven by Brain/Escrow Engine flow demand rates; keep only synthetic non-live fallback here).
   (define wd-st-l2 (rt-stall-watchdog-state rt))
-  (define ready-gas-bldgs-wd
-    (filter (lambda (b)
-              (and (hash? b)
-                   (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
-                   (> (hash-ref b 'vespene-contents 2000) 0)))
-            gas-bldgs))
-  (define wd-vesp-rate
-    (let ([raw (hash-ref obs 'collection-rate-vespene
-                         (hash-ref obs 'vespene-rate
-                                   (hash-ref obs 'vesp-rate #f)))])
-      (cond
-        [(real? raw) raw]
-        [(l2-ctx-has-gas-harvesters? ctx)
-         (* 55 (or (l2-ctx-live-gas-harvesters ctx) 0))]
-        [else
-         (* 55 (for/sum ([gb (in-list ready-gas-bldgs-wd)])
-                 (safe-nonneg-int (hash-ref gb 'assigned-harvesters 3) 3)))])))
-  (define wd-cur-gas-harv
-    (if (l2-ctx-has-gas-harvesters? ctx)
-        (safe-nonneg-int (or (l2-ctx-live-gas-harvesters ctx) 0) 0)
-        (for/sum ([gb (in-list ready-gas-bldgs-wd)])
-          (safe-nonneg-int (hash-ref gb 'assigned-harvesters 0) 0))))
-  (define wd-gas-mode-raw
-    (wd-gas-valve-mode (l2-ctx-minerals ctx)
-                       (l2-ctx-gas ctx)
-                       wd-vesp-rate
-                       total-workers
-                       (length ready-gas-bldgs-wd)
-                       supply-used
-                       (/ (exact->inexact frame) 22.4)))
-  ;; L59 (`#1514`/`#1516`) + L59C (`#1566` Fix #2 `GAS_RICH_MIN_STARVED 5/12`):
-  ;; Only block `'pull-to-minerals` when `gas < 100` (NOT `< 300`!) AND `wd-cur-gas-harv <= 1`,
-  ;; and only force `'force-saturate-gas` at `0` gas harvesters when `gas < 100`!
-  (define wd-min-keep-gas-ws
-    (if (and (< (l2-ctx-gas ctx) 100) (>= total-workers 18) (pair? ready-gas-bldgs-wd))
-        1
-        0))
-  (define wd-gas-mode
-    (cond
-      [(and live-obs-harvesters?
-            (pair? ready-gas-bldgs-wd)
-            (not worker-rush-active?)
-            (>= total-workers 18)
-            (< (l2-ctx-gas ctx) 100)
-            (= wd-cur-gas-harv 0))
-       'force-saturate-gas]
-      [(and (eq? wd-gas-mode-raw 'pull-to-minerals)
-            (> wd-min-keep-gas-ws 0)
-            (<= wd-cur-gas-harv wd-min-keep-gas-ws))
-       'normal]
-      ;; Loop 61B + Loop 87G: Keep `112f` (`5.0s`) opposite-direction cooldown &
-      ;; `> 3` gas-worker floor while backing up `saturate-workers-and-gas-commands` at `>= 210G & < 100M`
-      ;; so `210..299G / 60..99M` midgame pockets never stall in `gas_rich_min_starved`!
-      [(and (eq? wd-gas-mode-raw 'normal)
-            (pair? ready-gas-bldgs-wd)
-            (>= (l2-ctx-gas ctx) 210)
-            (< (l2-ctx-minerals ctx) 100)
-            (< supply-used 175)
-            (> wd-cur-gas-harv 3))
-       'pull-to-minerals]
-      [else wd-gas-mode-raw]))
-  (define wd-gas-bldg-tags
-    (for/seteqv ([gb (in-list ready-gas-bldgs-wd)])
-      (hash-ref gb 'id -1)))
   (when (and (not live-obs-harvesters?)
              gas-bldg
              (not (null? harvest-workers-pool))
              (not gas-float-starved?)
-             (not (eq? wd-gas-mode 'pull-to-minerals))
              (> (gas-worker-allocation-desired-gas-workers gas-alloc) 0))
     (l2-emit! ctx (list 'harvest-gas (hash-ref (car harvest-workers-pool) 'id 10) (hash-ref gas-bldg 'id 103))))
   (when (not (null? harvest-workers-pool))
     (define patch-id (hash-ref obs 'mineral-patch-id SC2-SYNTHETIC-MINERAL-PATCH-ID))
-    (define wd-live-min-patch
-      (findf (lambda (mp)
-               (and (hash? mp)
-                    (> (hash-ref mp 'id 0) 0)
-                    (> (hash-ref mp 'mineral-contents 1000) 0)))
-             (if (pair? step-mineral-patches) step-mineral-patches '())))
-    (define wd-live-min-patch-id
-      (if wd-live-min-patch (hash-ref wd-live-min-patch 'id patch-id) patch-id))
-    (define wd-gas-targeted-ws
-      (if (and (eq? wd-gas-mode 'pull-to-minerals) (pair? ready-gas-bldgs-wd))
-          (filter (lambda (w)
-                    (and (not (worker-carrying-minerals-or-gas? w))
-                         (set-member? wd-gas-bldg-tags (hash-ref w 'order-target-id -1))))
-                  harvest-workers-pool)
-          '()))
-    (cond
-      [(and (not live-obs-harvesters?) gas-float-starved?)
-       (define pull-workers
-         (take harvest-workers-pool
-               (min (if (>= (l2-ctx-gas ctx) SC2-GAS-FLOAT-CRITICAL-THRESH) 4 2)
-                    (length harvest-workers-pool))))
-       (l2-emit! ctx (list 'rebalance-gas-to-minerals
-                     (for/list ([w (in-list pull-workers)]) (hash-ref w 'id 10))
-                     patch-id))]
-      [(and (eq? wd-gas-mode 'pull-to-minerals)
-            (pair? ready-gas-bldgs-wd)
-            (not worker-rush-active?)
-            (or (not live-obs-harvesters?)
-                (and (pair? wd-gas-targeted-ws) wd-live-min-patch))
-            (refractory-allow-action?! cd-tracker '(wd-gas-valve-switch) frame 112))
-       (define pull-cands
-         (if (pair? wd-gas-targeted-ws) wd-gas-targeted-ws harvest-workers-pool))
-       (define raw-pull-cap (if (>= (l2-ctx-gas ctx) 650) 4 2))
-       (define safe-pull-cap
-         (if (> wd-min-keep-gas-ws 0)
-             (min raw-pull-cap (max 0 (- wd-cur-gas-harv wd-min-keep-gas-ws)))
-             raw-pull-cap))
-       (define pull-ws
-         (take pull-cands (min safe-pull-cap (length pull-cands))))
-       (when (pair? pull-ws)
-         (l2-emit! ctx (list 'rebalance-gas-to-minerals
-                             (for/list ([w (in-list pull-ws)]) (hash-ref w 'id 10))
-                             wd-live-min-patch-id)))]
-      [(and (eq? wd-gas-mode 'force-saturate-gas)
-            (pair? ready-gas-bldgs-wd)
-            (not worker-rush-active?)
-            (refractory-allow-action?! cd-tracker '(wd-gas-valve-switch) frame 112))
-       (define empty-gb
-         (findf (lambda (gb) (< (safe-nonneg-int (hash-ref gb 'assigned-harvesters 0) 0) 3))
-                ready-gas-bldgs-wd))
-       (when empty-gb
-         (define gb-id (hash-ref empty-gb 'id 103))
-         (define gb-x (exact->inexact (hash-ref empty-gb 'x base-x)))
-         (define gb-y (exact->inexact (hash-ref empty-gb 'y base-y)))
-         (define need-cnt (max 1 (- 3 (safe-nonneg-int (hash-ref empty-gb 'assigned-harvesters 0) 0))))
-         (define non-carry-ws
-           (filter (lambda (w) (not (worker-carrying-minerals-or-gas? w))) harvest-workers-pool))
-         (define sorted-ws
-           (sort (if (pair? non-carry-ws) non-carry-ws harvest-workers-pool)
-                 <
-                 #:key (lambda (w)
-                         (define ords (hash-ref w 'orders SANITIZE-MISSING))
-                         (define idle-bonus (if (or (null? ords) (equal? ords '(idle))) -100.0 0.0))
-                         (+ idle-bonus
-                            (fast-dist2d gb-x gb-y
-                                         (exact->inexact (hash-ref w 'x base-x))
-                                         (exact->inexact (hash-ref w 'y base-y)))))))
-         (define fill-ws (take sorted-ws (min need-cnt (length sorted-ws))))
-         (when (pair? fill-ws)
-           (l2-emit! ctx (list 'harvest-gas
-                               (for/list ([w (in-list fill-ws)]) (hash-ref w 'id 10))
-                               gb-id))))])
+    (when (and (not live-obs-harvesters?) gas-float-starved?)
+      (define pull-workers
+        (take harvest-workers-pool
+              (min (if (>= (l2-ctx-gas ctx) SC2-GAS-FLOAT-CRITICAL-THRESH) 4 2)
+                   (length harvest-workers-pool))))
+      (l2-emit! ctx (list 'rebalance-gas-to-minerals
+                          (for/list ([w (in-list pull-workers)]) (hash-ref w 'id 10))
+                          patch-id)))
     (unless live-obs-harvesters?
       (l2-emit! ctx (list 'harvest-mineral (hash-ref (car harvest-workers-pool) 'id 10) patch-id)))
     ;; Lazy per-frame coordinate extraction so idle workers don't repeat hash-ref x/y lookups.
@@ -18152,9 +18156,13 @@
        (* 64 (if l85-missing-main-prod? 1 0))
        (* 128 (if l85-early-pool? 1 0))
        (* 256 (if l85-protoss-wall-needs-slot3? 1 0))))
+  (define active-phys-refusals-p8
+    (rt-active-physical-refusals rt-p8 frame (hash-ref obs 'wire-placement-refusals #f)))
   (define macro-cache-ok?
     (and live-game?
          (> frame 60)
+         (hash-empty? active-phys-refusals-p8)
+         (equal? (hash-ref wall-st-p8 'l88-phys-refusals #f) active-phys-refusals-p8)
          (let* ([cf (vector-ref mc-cv 0)]
                 [base-ttl (if (< frame 2400) 13 29)]
                 [ttl (if (and (= (modulo frame 16) 8)
@@ -18262,6 +18270,21 @@
                         'enemy-confirmed-bases l85-confirmed-bases
                         'enemy-estimated-bases l86-est-bases
                         'enemy-estimated-gases l86-est-gases
+                        'enemy-happy-expected-bases (if owm-sum-p8 (opponent-world-summary-happy-expected-bases owm-sum-p8) 1)
+                        'unscouted-expansion-ambiguity? (and owm-sum-p8 (opponent-world-summary-unscouted-expansion-ambiguity? owm-sum-p8))
+                        'enemy-estimated-workers (if owm-sum-p8 (opponent-world-summary-estimated-workers owm-sum-p8) 12)
+                        'enemy-workers-killed (if owm-sum-p8 (opponent-world-summary-workers-killed owm-sum-p8) 0)
+                        'enemy-min-rate (if owm-p8 (owm-estimated-min-rate owm-p8) 0)
+                        'enemy-gas-rate (if owm-p8 (owm-estimated-gas-rate owm-p8) 0)
+                        'enemy-production-facility-count (if owm-sum-p8 (opponent-world-summary-production-facility-count owm-sum-p8) 0)
+                        'enemy-imminent-reachable-supply (if owm-sum-p8 (opponent-world-summary-imminent-reachable-supply owm-sum-p8) 0)
+                        'enemy-known-army-value (if owm-sum-p8 (opponent-world-summary-known-army-value owm-sum-p8) 0)
+                        'enemy-unaccounted-minerals (if owm-sum-p8 (opponent-world-summary-unaccounted-minerals owm-sum-p8) 0)
+                        'enemy-unaccounted-gas (if owm-sum-p8 (opponent-world-summary-unaccounted-gas owm-sum-p8) 0)
+                        'enemy-hidden-gas-tech-risk? (and owm-sum-p8 (opponent-world-summary-hidden-gas-tech-risk? owm-sum-p8))
+                        'enemy-active-summon-count (if owm-sum-p8 (opponent-world-summary-active-summon-count owm-sum-p8) 0)
+                        'enemy-sunk-tech-gas (if owm-sum-p8 (opponent-world-summary-sunk-tech-gas owm-sum-p8) 0)
+                        'physical-refusals active-phys-refusals-p8
                         'hidden-expand-posterior l86-hexp-post
                         'win-prob l86-win-prob
                         'attrition-recommended-action (and owm-attrition (attrition-strength-verdict-recommended-action owm-attrition))
@@ -18315,12 +18338,40 @@
                     #:enemy-wall-assessment l82-enemy-wall-assessment
                     #:total-adepts-produced l82-total-adepts-produced
                     #:total-zerglings-produced l82-total-zerglings-produced)]
+               [in-prog-tech-etas-p8
+                (for/fold ([ht (hasheq)]) ([b (in-list (or (l2-ctx-ally-bldgs ctx) '()))])
+                  (if (hash? b)
+                      (let* ([bp (exact->inexact (hash-ref b 'build-progress 1.0))]
+                             [cs (fast-canonical-structure-sym (unit-type-sym b))])
+                        (if (and (fl< bp SC2-BUILD-COMPLETE-PROGRESS)
+                                 (memq cs '(spire greater-spire hydralisk-den lurker-den lair hive
+                                            factory-techlab starport starport-techlab
+                                            robotics-facility robotics-bay stargate
+                                            templar-archive dark-shrine)))
+                            (let* ([total-sec (case cs
+                                                [(spire greater-spire) 71.0]
+                                                [(lair hive) 57.0]
+                                                [(factory-techlab starport-techlab) 18.0]
+                                                [(starport robotics-bay templar-archive dark-shrine) 36.0]
+                                                [(robotics-facility stargate) 43.0]
+                                                [(hydralisk-den lurker-den) 29.0]
+                                                [else 36.0])]
+                                   [eta (flmax 0.0 (fl* (fl- 1.0 bp) total-sec))]
+                                   [prev (hash-ref ht cs #f)])
+                              (if (or (not prev) (fl< eta prev))
+                                  (hash-set ht cs eta)
+                                  ht))
+                            ht))
+                      ht))]
                [md (step-priority-macro-brain
                     mw
                     #:arbiter-gas-override-count arb-gas-ov-cnt
                     #:arbiter-facility-override-count arb-fac-ov-cnt
                     #:cheese-spec active-cspec-p8
-                    #:cheese-phase (rt-cheese-phase rt-p8))]
+                    #:cheese-phase (rt-cheese-phase rt-p8)
+                    #:owm-summary owm-sum-p8
+                    #:physical-refusals active-phys-refusals-p8
+                    #:in-progress-tech-etas in-prog-tech-etas-p8)]
                [dp (macro-brain-decision-dynamic-plan md)]
                [pn (if (dynamic-macro-plan? dp)
                        (dynamic-macro-plan-translated-next-actions dp)
@@ -18384,6 +18435,7 @@
             (vector-set! mc-cv 85 arb-fac-boost-active?)
             (hash-set! wall-st-p8 'l85-mc-key l85-mc-key-now)
             (hash-set! wall-st-p8 'l86-mc-key l86-mc-key-now)
+            (hash-set! wall-st-p8 'l88-phys-refusals active-phys-refusals-p8)
             (hash-set! wall-st-p8 'l82-mc-key
                        (+ (if l82-enemy-wall-open? 1 0)
                           (* 2 l82-total-adepts-produced)
@@ -18402,7 +18454,16 @@
                  (symbol? (hash-ref wd-info 'stalled-goal #f)))
             (list (hash-ref wd-info 'stalled-goal #f))
             '()))
-      (hash-set! (rt-door-state wd-rt) 'watchdog-expand-ring-syms wd-ring-syms)))
+      (hash-set! (rt-door-state wd-rt) 'watchdog-expand-ring-syms wd-ring-syms)
+      (define fd-ht (macro-brain-decision-flow-demand macro-decision))
+      (when (hash? fd-ht)
+        (define dm-st (rt-macro-demand-state wd-rt))
+        (hash-set! dm-st 'mineral-demand-rate (hash-ref fd-ht 'mineral-demand-rate #f))
+        (hash-set! dm-st 'gas-demand-rate (hash-ref fd-ht 'gas-demand-rate #f))
+        (hash-set! dm-st 'desired-gas-workers (hash-ref fd-ht 'desired-gas-workers #f)))
+      (define da-ht (macro-brain-decision-desired-addons macro-decision))
+      (when (hash? da-ht)
+        (hash-set! (rt-door-state wd-rt) 'l88-desired-addons da-ht))))
   (set-l2-ctx-dyn-plan! ctx dyn-plan)
   (set-l2-ctx-plan-next-actions-ht! ctx plan-next-actions-ht)
   (set-l2-ctx-repaired-prereqs! ctx repaired-prereqs)
@@ -19950,9 +20011,12 @@
              (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
                   (not (not (memq 'spire (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx)))))))))
   (define brain-wants-hydra-den-now?
-    (or (eq? prio-saving-for-sym 'hydralisk-den)
-        (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
-             (not (not (memq 'hydralisk-den (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx))))))))
+    (and (or zerg-real-anti-air-threat?
+             (not (and live-game? (memq 'roach-warren ready-bldg-types) (< (l2-unit-count ctx 'roach) 4)
+                       (ormap (lambda (e) (and (hash? e) (combat-unit-record? e) (not (fast-unit-is-flying-sym? (unit-type-sym e))))) enemy-units))))
+         (or (eq? prio-saving-for-sym 'hydralisk-den)
+             (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
+                  (not (not (memq 'hydralisk-den (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx)))))))))
   ;; L27-P0-3 (`#28`) + L37-P0-2 (`#25/#73` Banshee): Activate `zerg-holding-for-aa-spire?`
   ;; starting at `gas >= 40` unless Brain explicitly scheduled `hydralisk-den` or Banshee threat
   ;; is unlocking faster `hydralisk-den` (`100M/100G`) first (with no heavy Capital Air!).
@@ -21189,18 +21253,21 @@
                       (>= (+ (l2-unit-count ctx 'baneling) (quotient (l2-unit-count ctx 'zergling) 2)) 3))
                   (l2-upgrade-needed? ctx 'centrifical-hooks))
          (l2-emit-research-verified! ctx 'centrifical-hooks))
-       ;; L37-P0-2 (`#25/#73` ZvT Banshee): Allow `hydralisk-den` (`100M/100G`) to build immediately
-       ;; whenever Brain scheduled `hydralisk-den` or `zerg-real-anti-air-threat?` is active and
-       ;; Spire is not yet affordable (`< 200G` / not holding for Capital Air Spire)!
        (define p3-brain-wants-hydra-den?
-         (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'hydralisk-den)
-             (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
-                  (not (not (memq 'hydralisk-den (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx))))))))
+         (and (or zerg-real-anti-air-threat?
+                  (not (and (memq 'roach-warren ready-bldg-types) (< (l2-unit-count ctx 'roach) 4)
+                            (ormap (lambda (e) (and (hash? e) (combat-unit-record? e) (not (fast-unit-is-flying-sym? (unit-type-sym e))))) enemy-units))))
+              (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'hydralisk-den)
+                  (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
+                       (not (not (memq 'hydralisk-den (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx)))))))))
        (define p3-hydra-den-aa-urgent?
          (or p3-brain-wants-hydra-den?
              (and zerg-real-anti-air-threat?
                   (not zerg-holding-for-aa-spire?))))
-       (when (and (or (not zerg-saving-for-expand?)
+       (when (and (or zerg-real-anti-air-threat?
+                      (not (and live-game? (memq 'roach-warren ready-bldg-types) (< (l2-unit-count ctx 'roach) 4)
+                                (ormap (lambda (e) (and (hash? e) (combat-unit-record? e) (not (fast-unit-is-flying-sym? (unit-type-sym e))))) enemy-units))))
+                  (or (not zerg-saving-for-expand?)
                       zerg-real-anti-air-threat?
                       p3-brain-wants-hydra-den?)
                   (or (not crisis-tech-upgrade-deferral?) zerg-real-anti-air-threat? p3-brain-wants-hydra-den?)
@@ -22477,6 +22544,7 @@
     (define blk-rush-prob
       (exact->inexact (safe-finite-real (hash-ref (l2-ctx-wall-st ctx) 'l85-rush-prob 0.0) 0.0)))
     (define blk-early-pool? (l2-enemy-early-pool-detected? ctx))
+    (define off-blk-sym (if (eq? race 'Protoss) 'pylon 'engineering-bay))
     (define allow-new-off-block?
       (and (<= frame 2016)
            has-core-prod?
@@ -22484,7 +22552,9 @@
            (not (l2-ctx-supply-at-risk? ctx))
            (not (l2-saving-for-expansion-now? ctx (l2-ctx-active-bases ctx)))
            (not (memq (l2-ctx-prio-saving-for-sym ctx)
-                      '(nexus command-center pylon supply-depot)))
+                      '(nexus command-center orbital-command factory starport
+                        barracks refinery pylon supply-depot)))
+           (not (l2-brain-reserves-for-higher? ctx off-blk-sym (exact-round (* 0.25 (sc2-min-cost off-blk-sym)))))
            (not (l2-ctx-under-base-attack? ctx))
            (not (l2-ctx-early-survival-crisis? ctx))
            (not (l2-ctx-worker-rush-active? ctx))
@@ -26619,6 +26689,7 @@
                    (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'orbital-command))
                        (l2-terran-early-fast-rush-min-reserve ctx)))
                (>= (l2-ctx-minerals ctx) (sc2-min-cost 'orbital-command))
+               (not (l2-brain-reserves-for-higher? ctx 'orbital-command (sc2-min-cost 'orbital-command)))
                (l2-non-combat-min-ok? ctx (sc2-min-cost 'orbital-command) 'orbital-command)
                (or (not live-game?)
                    (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
@@ -26978,21 +27049,91 @@
                       (hash-ref fac-needing-addon 'id 705)))))
   ;; Loop 82 (Track B/D): Pro `31.25M` TvP Natural Ebay-Cancel Block (only after Barracks #1 started).
   (l2-try-pro-offensive-expansion-block! ctx (pair? barracks-list))
-  ;; Activate Terran addon swaps by coordinating donor release when a bare Factory/Starport needs an addon.
+  ;; Goal-driven Terran addon swap: read Game Plan's target TechLab/Reactor goals
+  ;; so a Factory needed for Siege Tanks / Cyclones never gets locked onto a Reactor!
   (define door-st-swap (rt-door-state rt))
+  (define desired-addons-swap
+    (or (hash-ref door-st-swap 'l88-desired-addons #f)
+        (macro-brain-decision-desired-addons (l2-ctx-macro-decision ctx))))
+  (define want-fac-tl-swap?
+    (and (hash? desired-addons-swap) (hash-ref desired-addons-swap 'factory-techlab? #f)))
+  (define want-fac-tl-cnt-swap
+    (if (hash? desired-addons-swap) (max 1 (hash-ref desired-addons-swap 'factory-techlab-count 1)) 1))
+  (define ready-fac-tl-cnt-swap
+    (count (lambda (b)
+             (and (hash? b)
+                  (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'factory-techlab)
+                  (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
+           ally-bldgs))
+  (define need-fac-tl-swap?
+    (and want-fac-tl-swap? (< ready-fac-tl-cnt-swap want-fac-tl-cnt-swap)))
+  (define want-sp-tl-swap?
+    (and (hash? desired-addons-swap) (hash-ref desired-addons-swap 'starport-techlab? #f)))
+  (define want-sp-tl-cnt-swap
+    (if (hash? desired-addons-swap) (max 1 (hash-ref desired-addons-swap 'starport-techlab-count 1)) 1))
+  (define ready-sp-tl-cnt-swap
+    (count (lambda (b)
+             (and (hash? b)
+                  (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'starport-techlab)
+                  (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
+           ally-bldgs))
+  (define need-sp-tl-swap?
+    (and want-sp-tl-swap? (< ready-sp-tl-cnt-swap want-sp-tl-cnt-swap)))
   (define allow-rax-tl-strip-now?
-    (and (>= (length barracks-list) 2)
+    (and (or (>= (length barracks-list) 2)
+             (and need-fac-tl-swap? (pair? (l2-ctx-terran-rax-techlab-bldgs ctx))))
          (not (l2-building-present-or-pending? ctx 'factory-techlab #t))))
+  (define has-tl-donor-for-swap?
+    (or (and allow-rax-tl-strip-now? (pair? (l2-ctx-terran-rax-techlab-bldgs ctx)))
+        (ormap (lambda (b)
+                 (and (hash? b)
+                      (memq (unit-type-sym b) '(tech-lab techlab barracks-techlab barracks-tech-lab))
+                      (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
+               ally-bldgs)))
   (define swap-obs-0
     (if (and allow-rax-tl-strip-now?
              (not (eq? (hash-ref obs 'allow-barracks-techlab-strip? #f) #t)))
         (hash-set obs 'allow-barracks-techlab-strip? #t)
         obs))
-  (define swap-obs
+  (define swap-obs-1
     (let ([rw (l2-ctx-terran-ramp-wall ctx)])
       (if (and (hash? rw) (not (hash-empty? rw)))
           (hash-set swap-obs-0 'terran-ramp-wall rw)
           swap-obs-0)))
+  (define swap-obs
+    (if live-game?
+        (let* ([raw-ab (hash-ref swap-obs-1 'ally-buildings '())]
+               [filtered-ab
+                (if (list? raw-ab)
+                    (filter (lambda (b)
+                              (cond
+                                [(not (hash? b)) #t]
+                                [(and (memq (unit-type-sym b) '(barracks factory starport))
+                                      (not (l2-terran-facility-has-addon? ctx b))
+                                      (order-ledger-facility-busy? oledger b frame))
+                                 #f]
+                                [(and need-fac-tl-swap?
+                                      (not has-tl-donor-for-swap?)
+                                      (eq? (unit-type-sym b) 'factory)
+                                      (l2-building-grounded-and-powered? ctx b)
+                                      (not (l2-terran-facility-has-addon? ctx b)))
+                                 #f]
+                                [(and need-sp-tl-swap?
+                                      (not has-tl-donor-for-swap?)
+                                      (eq? (unit-type-sym b) 'starport)
+                                      (l2-building-grounded-and-powered? ctx b)
+                                      (not (l2-terran-facility-has-addon? ctx b)))
+                                 #f]
+                                [(and need-fac-tl-swap?
+                                      has-tl-donor-for-swap?
+                                      (eq? (unit-type-sym b) 'barracks)
+                                      (eq? (l2-barracks-addon-kind ctx b) 'reactor))
+                                 #f]
+                                [else #t]))
+                            raw-ab)
+                    raw-ab)])
+          (hash-set swap-obs-1 'ally-buildings filtered-ab))
+        swap-obs-1))
   (define addon-swap-acts (plan-terran-addon-swap swap-obs))
   (set-l2-ctx-addon-swap-acts! ctx addon-swap-acts)
   (for ([swap-act (in-list addon-swap-acts)])
@@ -27003,6 +27144,9 @@
         (define bare-recipient
           (for/first ([b (in-list ally-bldgs)]
                       #:when (and (memq (unit-type-sym b) '(factory starport))
+                                  (not (order-ledger-facility-busy? oledger b frame))
+                                  (not (and need-fac-tl-swap? (not has-tl-donor-for-swap?) (eq? (unit-type-sym b) 'factory)))
+                                  (not (and need-sp-tl-swap? (not has-tl-donor-for-swap?) (eq? (unit-type-sym b) 'starport)))
                                   (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
                                   (l2-building-grounded-and-powered? ctx b)
                                   (not (l2-terran-facility-has-addon? ctx b))))
@@ -27608,12 +27752,17 @@
                               enemy-cloaked-or-burrowed-active?))
                     (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'bunker))
                         (sc2-min-cost 'missile-turret)))
-                ;; W18-P0-3-rt (`#29` / `w18-tac-3`): Outside active main-base breach (`not under-base-attack?`),
-                ;; when Brain ranked Marine higher than Bunker, keep 50M for an idle Barracks Marine!
+                ;; Single-authority Brain guard: outside active base breach or early survival crisis,
+                ;; never let an out-of-band Bunker steal minerals from Brain-scheduled/escrowed items!
+                (or (not live-game?)
+                    under-base-attack?
+                    early-survival-crisis?
+                    (l2-ctx-worker-rush-active? ctx)
+                    (not (l2-brain-reserves-for-higher? ctx 'bunker (sc2-min-cost 'bunker))))
                 (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'bunker))
                     (if (and live-game? (not under-base-attack?))
                         (let-values ([(smin _sgas) (l2-scheduled-combat-reserve ctx 'bunker)])
-                          (min (sc2-min-cost 'marine) smin))
+                          smin)
                         0)))
        (define-values (bk-x bk-y)
          (cond
@@ -27906,17 +28055,13 @@
                 (l2-building-present-or-pending? ctx 'barracks-techlab #t))))
   (define addon-threat-enemies (reverse addon-threat-enemies-rev))
   (define (facility-safe-for-addon? fac)
-       (or (not live-game?)
-           (and (not (l2-addon-pad-blocked? ctx fac))
-                (let ([fx (exact->inexact (hash-ref fac 'x base-x))]
-                      [fy (exact->inexact (hash-ref fac 'y base-y))])
-                  (and (not (eq? (hash-ref fac 'under-attack #f) #t))
-                       (not (for/or ([e (in-list addon-threat-enemies)])
-                              (define dx (- fx (exact->inexact (hash-ref e 'x 9999.0))))
-                              (define dy (- fy (exact->inexact (hash-ref e 'y 9999.0))))
-                              ;; W18-P0-3-rt (`#14`): Tighten undamaged addon proximity veto `10t -> 6.5t`
-                              ;; (`42.25` sq-dist) so enemies at the natural ramp never block in-main Factory TechLab!
-                              (<= (+ (* dx dx) (* dy dy)) 42.25))))))))
+    (or (not live-game?)
+        (and (not (l2-addon-pad-blocked? ctx fac)) (not (eq? (hash-ref fac 'under-attack #f) #t))
+             (let ([fx (exact->inexact (hash-ref fac 'x base-x))] [fy (exact->inexact (hash-ref fac 'y base-y))])
+               (not (for/or ([e (in-list addon-threat-enemies)])
+                      (define dx (- fx (exact->inexact (hash-ref e 'x 9999.0))))
+                      (define dy (- fy (exact->inexact (hash-ref e 'y 9999.0))))
+                      (<= (+ (* dx dx) (* dy dy)) 42.25)))))))
   ;; L37-P0-2 (`#74 TvP who` WarpPrism DTs): Fire urgent anti-cloak Missile Turret (`100M`)
   ;; BEFORE Factory/Starport/Barracks/Reactor can spend minerals whenever Engineering Bay is
   ;; ready and confirmed DT/DarkShrine/Banshee/Brain-scheduled turret threat is active!
@@ -28375,6 +28520,17 @@
                 (l2-save-cancel-rebuild-ready? ctx 'starport 60)
                 (>= (l2-ctx-minerals ctx) (sc2-min-cost 'starport))
                 (>= (l2-ctx-gas ctx) (sc2-gas-cost 'starport))
+                (or endgame-corner-hunt?
+                    terran-heavy-air-or-colossus-sp?
+                    l85-tvp-proxy-sp1-urgent?
+                    (and (= cur-sp-total 0)
+                         (eq? (l2-ctx-prio-saving-for-sym ctx) 'starport)
+                         (not (let ([md0 (l2-ctx-macro-decision ctx)])
+                                (and (macro-brain-decision? md0)
+                                     (memq 'scv (macro-brain-decision-scheduled-ids md0))))))
+                    (not (l2-brain-reserves-for-higher? ctx 'starport
+                                                        (sc2-min-cost 'starport)
+                                                        (sc2-gas-cost 'starport))))
                 (or endgame-corner-hunt?
                     terran-heavy-air-or-colossus-sp?
                     (and (or brain-sched-sp-now? l85-tvp-proxy-sp1-urgent?)
@@ -28934,8 +29090,15 @@
            (and (macro-brain-decision? md)
                 (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'engineering-bay)
                     (memq 'engineering-bay (macro-brain-decision-scheduled-ids md)))))))
+  (define proactive-ebay1-vs-gas-blocked-sp?
+    (and live-game? (= (l2-building-present-or-pending-count ctx 'engineering-bay) 0)
+         (>= (length ccs) 2) (memq 'factory ready-bldg-types) (>= eff-phase-supply 40)
+         (eq? (l2-ctx-prio-saving-for-sym ctx) 'starport) (< (l2-ctx-gas ctx) (sc2-gas-cost 'starport))))
   (when (and (not terran-saving-for-expand?)
                 (not terran-saving-for-orbital?)
+                (or need-emergency-ebay-or-turret?
+                    proactive-ebay1-vs-gas-blocked-sp?
+                    (not (l2-brain-reserves-for-higher? ctx 'engineering-bay (sc2-min-cost 'engineering-bay))))
                 (or need-emergency-ebay-or-turret?
                     (not (and l85-tvp-proxy-mode? (not l85-tvp-proxy-aa-ready?))))
                 ;; Loop 82B: On east-facing spawns where wall Barracks #1 is add-on blocked,
@@ -28991,12 +29154,7 @@
                      (sc2-min-cost 'engineering-bay)))
         (let-values ([(ebx eby) (l2-interior-offset ctx (if (= cur-ebay-cnt 0) 5.5 8.5) -3.5)])
           (l2-emit-build-verified! ctx 'engineering-bay ebx eby
-                                   #:bypass-escrow? (or need-emergency-ebay-or-turret?
-                                                        brain-sched-ebay-now?
-                                                        (and (= cur-ebay-cnt 0)
-                                                             (>= (length ccs) 2)
-                                                             (memq 'factory ready-bldg-types)
-                                                             (>= eff-phase-supply 40)))))))
+                                   #:waive-worker-reserve? (or need-emergency-ebay-or-turret? brain-sched-ebay-now? proactive-ebay1-vs-gas-blocked-sp?)))))
   ;; L34-P0-3 (`#74` TvT `CloakLoss -> 0`): Decouple `missile-turret` (`100M`) from the
   ;; `engineering-bay` (`125M`) / `terran-saving-for-orbital?` / `terran-saving-for-expand?`
   ;; locks so emergency or Brain-scheduled Missile Turrets build IMMEDIATELY at `100M` once
@@ -33208,6 +33366,142 @@
          (l2-cheese-try-train! ctx cu stage7-res-min stage7-res-gas 4)])))
   (void))
 
+;; Single-Authority Layer 2 Macro Decision Executor (`Brain -> Runtime`).
+(define L2-EXEC-TECH-STRUCT-SYMS
+  '(starport factory armory ghost-academy fusion-core robotics-facility fleet-beacon cybernetics-core
+    spawning-pool roach-warren baneling-nest hydralisk-den spire infestation-pit lurker-den ultralisk-cavern nydus-network))
+(define L2-EXEC-TECH-ADDON-SYMS '(factory-techlab starport-techlab))
+(define L2-EXEC-TECH-MORPH-SYMS '(lair hive greater-spire))
+
+(define (l2-execute-macro-decision! ctx)
+  (define md (l2-ctx-macro-decision ctx))
+  (define rt (l2-ctx-rt ctx))
+  (define live-game? (l2-ctx-live-obs-harvesters? ctx))
+  (when (and (macro-brain-decision? md) rt live-game?)
+    (define sched-res (macro-brain-decision-priority-schedule md))
+    (define sched (if (priority-schedule-result? sched-res) (or (priority-schedule-result-scheduled-candidates sched-res) '()) '()))
+    (define frame (l2-ctx-frame ctx))
+    (define oledger (l2-ctx-oledger ctx))
+    (define open-prod-slots (l2-ctx-open-prod-slots ctx))
+    (define ready-bldgs (or (l2-ctx-ready-bldgs ctx) '()))
+    (define rtypes (or (l2-ctx-ready-bldg-types ctx) '()))
+    (define race (l2-ctx-race ctx))
+    (define base-x (l2-ctx-base-x ctx)) (define base-y (l2-ctx-base-y ctx))
+    (define enemy-units (or (l2-ctx-enemy-units ctx) '()))
+    (define wall-deferred-cyber?
+      (and (eq? race 'Protoss) (l2-ctx-allow-exact-wall-slot? ctx)
+           (hash? (l2-ctx-protoss-matchup-wall ctx)) (< (l2-building-present-or-pending-count ctx 'cybernetics-core) 1)))
+    (define terran-need-oc1?
+      (and (eq? race 'Terran)
+           (memq 'barracks rtypes) (= (l2-building-present-or-pending-count ctx 'orbital-command) 0)
+           (ormap (lambda (b) (and (hash? b) (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'command-center))) ready-bldgs)))
+    (define defer-sp-for-rax-addon?
+      (and (eq? race 'Terran)
+           (= (+ (l2-building-present-or-pending-count ctx 'barracks-techlab) (l2-building-present-or-pending-count ctx 'barracks-reactor)) 0)
+           (>= (count (lambda (b) (and (hash? b) (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'barracks))) ready-bldgs) 2)))
+    (define defer-fac-tl-for-sp1?
+      (and (eq? race 'Terran) (= (l2-building-present-or-pending-count ctx 'starport) 0)
+           (>= (l2-ctx-minerals ctx) (sc2-min-cost 'starport)) (< (l2-ctx-gas ctx) (sc2-gas-cost 'starport))
+           (>= (l2-ctx-gas ctx) (- (sc2-gas-cost 'starport) (sc2-gas-cost 'factory-techlab)))))
+    (define terran-1base-cc-ready?
+      (and (eq? race 'Terran) (= (l2-ctx-active-bases ctx) 1) (>= (l2-ctx-minerals ctx) (sc2-min-cost 'command-center))))
+    (define defer-lair-for-z4-expand?
+      (and (eq? race 'Zerg) (>= (l2-ctx-active-bases ctx) 3) (>= (l2-ctx-minerals ctx) (* 3 (sc2-min-cost 'hatchery)))))
+    (define defer-spire-for-hydra?
+      (and (eq? race 'Zerg) (> (l2-building-present-or-pending-count ctx 'hydralisk-den) 0)
+           (let* ([owm-sum (opponent-world-model-last-summary (rt-opponent-world-model rt))]
+                  [owm-kc (and owm-sum (opponent-world-summary-known-unit-counts owm-sum))]
+                  [owm-bc (and owm-sum (opponent-world-summary-known-bldg-counts owm-sum))])
+             (not (zerg-cap-air-tech-or-unit-scouted?
+                   enemy-units (or (l2-ctx-enemy-bldgs ctx) '()) owm-kc owm-bc (l2-ctx-tech-obs ctx))))))
+    (define defer-hydra-den?
+      (and (eq? race 'Zerg)
+           (or (> (l2-building-present-or-pending-count ctx 'spire) 0)
+               (and (memq 'roach-warren rtypes)
+                    (or (< (l2-ctx-live-army-supply ctx) (l2-ctx-live-enemy-threat-supply ctx))
+                        (and (< (l2-unit-count ctx 'roach) 4)
+                             (ormap (lambda (e) (and (hash? e) (combat-unit-record? e) (not (fast-unit-is-flying-sym? (unit-type-sym e))))) enemy-units)))))))
+    (define defer-addon-under-attack?
+      (and (or (l2-ctx-under-base-attack? ctx) (l2-ctx-forward-proxy-detected? ctx) (l2-ctx-early-survival-crisis? ctx)
+               (ormap (lambda (b) (and (hash? b) (memq (fast-canonical-structure-sym (unit-type-sym b)) '(command-center orbital-command planetary-fortress))
+                                       (l2-active-enemy-combat-within? enemy-units (hash-ref b 'x base-x) (hash-ref b 'y base-y) 24.0)))
+                      ready-bldgs))
+           (> (hash-ref open-prod-slots 'barracks 0) 0)
+           (< (l2-ctx-live-army-supply ctx) (max 12 (l2-ctx-live-enemy-threat-supply ctx)))))
+    (define defer-med-for-im?
+      (and (memq 'starport-techlab rtypes) (>= (l2-unit-count ctx 'raven) 1) (l2-upgrade-needed? ctx 'interference-matrix)))
+    (define res-m 0) (define res-g 0) (define executed-syms '())
+    (for ([entry (in-list sched)] #:when (priority-candidate? entry))
+      (define raw-sym (priority-candidate-id entry))
+      (define csym (sc2-canonical-structure-sym raw-sym))
+      (define m-cost (sc2-min-cost raw-sym (priority-candidate-min-cost entry)))
+      (define g-cost (sc2-gas-cost raw-sym (priority-candidate-gas-cost entry)))
+      (define aff? (and (>= (- (l2-ctx-minerals ctx) res-m) m-cost) (>= (- (l2-ctx-gas ctx) res-g) g-cost)))
+      (cond
+        [(or (and (eq? csym 'cybernetics-core) wall-deferred-cyber?)
+             (and (eq? csym 'starport) defer-sp-for-rax-addon?)
+             (and terran-need-oc1?
+                  (or (eq? csym 'factory) (memq csym L2-EXEC-TECH-ADDON-SYMS))
+                  (< (- (l2-ctx-minerals ctx) m-cost) (sc2-min-cost 'orbital-command)))
+             (and (memq csym L2-EXEC-TECH-ADDON-SYMS) defer-addon-under-attack? (l2-save-cancel-rebuild-ready? ctx csym))
+             (and (eq? csym 'factory-techlab) defer-fac-tl-for-sp1?)
+             (and terran-1base-cc-ready? (memq csym L2-EXEC-TECH-STRUCT-SYMS)
+                  (< (- (l2-ctx-minerals ctx) m-cost) (sc2-min-cost 'command-center)))
+             (and (eq? csym 'lair) defer-lair-for-z4-expand?)
+             (and (eq? csym 'spire) defer-spire-for-hydra?)
+             (and (eq? csym 'hydralisk-den) defer-hydra-den?))
+         (set! res-m (+ res-m m-cost)) (set! res-g (+ res-g g-cost))]
+        [(and (memq csym L2-EXEC-TECH-MORPH-SYMS) (= (l2-building-present-or-pending-count ctx csym) 0))
+         (when aff?
+           (define src-syms (case csym [(lair) '(hatchery)] [(hive) '(lair)] [else '(spire)]))
+           (if (l2-emit-building-morph-verified! ctx csym src-syms)
+               (begin (rt-clear-physical-refusal! rt csym) (set! executed-syms (cons csym executed-syms)))
+               (when (not (l2-building-present-or-pending? ctx csym))
+                 (rt-record-physical-refusal! rt csym 'parent-busy frame 32))))]
+        [(and (memq csym L2-EXEC-TECH-ADDON-SYMS) (= (l2-building-present-or-pending-count ctx csym) 0))
+         (define parent-sym (if (eq? csym 'factory-techlab) 'factory 'starport))
+         (define bare-parents
+           (for/list ([b (in-list ready-bldgs)]
+                      #:when (and (hash? b) (eq? (fast-canonical-structure-sym (unit-type-sym b)) parent-sym)
+                                  (l2-building-grounded-and-powered? ctx b) (not (l2-terran-facility-has-addon? ctx b))
+                                  (<= (hash-ref b 'order-count 0) 0) (not (order-ledger-facility-busy? oledger b frame))))
+             b))
+         (define rebuild-ok? (l2-save-cancel-rebuild-ready? ctx csym))
+         (define safe-parent
+           (and rebuild-ok? (for/first ([b (in-list bare-parents)] #:when (l2-addon-retry-ready? ctx b csym)) b)))
+         (cond
+           [(and (not safe-parent) (or (not rebuild-ok?) (pair? bare-parents)))
+            (rt-record-physical-refusal! rt csym 'site-contested frame 64)]
+           [(and aff? (not (l2-build-issue-blocked? ctx csym 24)) safe-parent)
+            (define px (exact->inexact (hash-ref safe-parent 'x base-x)))
+            (define py (exact->inexact (hash-ref safe-parent 'y base-y)))
+            (define fid (hash-ref safe-parent 'id 832000))
+            (l2-emit! ctx (list 'build csym px py)) (l2-record-build-issue-lock! ctx csym)
+            (l2-addon-record-emit! ctx safe-parent csym) (rt-clear-physical-refusal! rt csym)
+            (order-ledger-record-issued! oledger fid 'build csym px py frame)
+            (set-l2-ctx-bldg-types! ctx (cons csym (l2-ctx-bldg-types ctx)))
+            (hash-set! open-prod-slots parent-sym (max 0 (sub1 (hash-ref open-prod-slots parent-sym 0))))
+            (l2-spend-resources-and-supply! ctx m-cost g-cost 0) (set! executed-syms (cons csym executed-syms))]
+           [(and aff? (not (l2-build-issue-blocked? ctx csym 24)) (null? bare-parents))
+            (rt-record-physical-refusal! rt csym 'no-bare-parent frame 32)])]
+        [(and (memq csym L2-EXEC-TECH-STRUCT-SYMS) (= (l2-building-present-or-pending-count ctx csym) 0))
+         (when (and aff? (not (l2-build-issue-blocked? ctx csym)))
+           (define main-contested?
+             (or (l2-active-enemy-combat-within? enemy-units base-x base-y 12.0)
+                 (l2-site-recently-contested? ctx base-x base-y 10.0)))
+           (define-values (ax ay)
+             (let ([safe-ths (and main-contested? (l2-safe-living-townhall-anchors ctx 12.0))])
+               (if (pair? safe-ths) (values (+ (second (car safe-ths)) 4.5) (+ (third (car safe-ths)) 3.0))
+                   (l2-interior-offset ctx 5.0 3.0))))
+           (when (l2-emit-build-verified! ctx csym ax ay) (set! executed-syms (cons csym executed-syms))))]
+        [(and (eq? raw-sym 'medivac) (not defer-med-for-im?) (memq 'starport rtypes))
+         (when (and aff? (> (hash-ref open-prod-slots 'starport 0) 0)
+                    (l2-can-spend-supply? ctx (sc2-supply-cost raw-sym 0))
+                    (l2-try-train-unit! ctx raw-sym 'starport #f #:respect-bo-reserve? #f #:max-batch 1))
+           (rt-clear-physical-refusal! rt raw-sym) (set! executed-syms (cons raw-sym executed-syms)))]
+        [else (set! res-m (+ res-m m-cost)) (set! res-g (+ res-g g-cost))]))
+    (hash-set! (rt-door-state rt) 'l88-last-executed-sched (reverse executed-syms))))
+
 (define (step-layer2-economy! rt raw-obs #:raw-obs [orig-raw-obs #f] #:sanitized? [sanitized? #f])
   (define ctx (rt-l2-ctx rt))
   (l2-phase1-setup! ctx rt raw-obs orig-raw-obs sanitized?)
@@ -33236,6 +33530,7 @@
      (l2-phase6-crisis-supply! ctx)
      (l2-phase7-wall-counts! ctx)
      (l2-phase8-macro-escrow! ctx)
+     (l2-execute-macro-decision! ctx)
      (case (l2-ctx-race ctx)
        [(Zerg)
         (l2-zerg-phase1-inject-creep! ctx)
@@ -33948,7 +34243,17 @@
   (unless (runtime-suppressed-live-ability-action? act)
     (when preserved?
       (set-add! (l34-ctx-wave3-preserved-set ctx) act))
-    (order-ledger-record-issued! (l34-ctx-oledger ctx) (l34-ctx-frame ctx) act)
+    (cond
+      [(and (pair? act) (eq? (car act) 'repair) (>= (length act) 3)
+            (exact-integer? (second act)) (exact-integer? (third act)))
+       (order-ledger-record-issued! (l34-ctx-oledger ctx) (second act) 'repair 'repair
+                                    #:target-id (third act) #:frame (l34-ctx-frame ctx))]
+      [(and (pair? act) (memq (car act) '(cast cast-spell)) (>= (length act) 4)
+            (eq? (third act) 'repair) (exact-integer? (second act)) (exact-integer? (fourth act)))
+       (order-ledger-record-issued! (l34-ctx-oledger ctx) (second act) 'repair 'repair
+                                    #:target-id (fourth act) #:frame (l34-ctx-frame ctx))]
+      [else
+       (order-ledger-record-issued! (l34-ctx-oledger ctx) (l34-ctx-frame ctx) act)])
     (set-l34-ctx-actions! ctx (cons act (l34-ctx-actions ctx)))))
 
 (define (l34-emit-sanitized! ctx act preserved?)
@@ -35578,7 +35883,7 @@
                  (l34-emit-preserved! ctx (list 'move uid (safe-coord br-x ux) (safe-coord br-y uy)))
                  #t]
                 [else
-                 (define-values (uh-x uh-y) (zerg-uphill-ramp-hold-pt pos-ctx-eng u))
+                 (define-values (uh-x uh-y) (all-race-uphill-ramp-hold-pt pos-ctx-eng u))
                  (cond
                    [(and uh-x uh-y)
                     (emit-home-safe-atk! (list 'attack-pos uid (safe-coord uh-x ux) (safe-coord uh-y uy)))
@@ -35601,7 +35906,10 @@
                           #t]
                          [else
                           (define-values (cc-x cc-y)
-                            (compute-lateral-concave-spread-pt pos-ctx-eng u ex ey wr-p))
+                            (let-values ([(x1 y1) (compute-lateral-concave-spread-pt pos-ctx-eng u ex ey wr-p)])
+                              (if (and x1 y1)
+                                  (values x1 y1)
+                                  (compute-in-combat-concave-step-pt pos-ctx-eng u ex ey wr-p))))
                           (if (and cc-x cc-y (l34-wing-point-pathable? ctx cc-x cc-y))
                               (begin
                                 (emit-home-safe-atk! (list 'attack-pos uid (safe-coord cc-x ux) (safe-coord cc-y uy)))
@@ -36714,24 +37022,7 @@
     (and (pair? combat-units) (fl>= army-mobility 0.95)))
   (define owm-believed-val
     (if owm-tactics (opponent-world-summary-believed-total-army-value owm-tactics) 0))
-  (define visible-enemy-combat-val
-    (if (l34-ctx-live-obs? ctx)
-        (for/sum ([e (in-list enemy-units)]
-                  #:when (and (hash? e) (combat-unit-record? e)))
-          (define et (fast-canonical-unit-sym (unit-type-sym e)))
-          (if (or (free-summon-unit-sym? et)
-                  (memq et '(drone probe scv overlord overseer observer larva egg)))
-              0
-              (+ (max 0 (sc2-min-cost et))
-                 (exact-round (* 1.5 (max 0 (sc2-gas-cost et)))))))
-        0))
-  (define known-enemy-army-val (max owm-believed-val visible-enemy-combat-val))
   (define supply-used-eval (safe-nonneg-int (hash-ref obs 'supply-used 0) 0))
-  (define zergling-only-trickle?
-    (and (pair? combat-units)
-         (>= known-enemy-army-val 1200)
-         (andmap (lambda (u) (eq? (fast-canonical-unit-sym (unit-type-sym u)) 'zergling))
-                 combat-units)))
   (define owm-locust-wave?
     (and owm-tactics (opponent-world-summary-locust-wave-active? owm-tactics)))
   (define vis-locust-wave?
@@ -36740,8 +37031,6 @@
            (not (eq? (hash-ref e 'snapshot? #f) #t))
            (hash-has-key? RUNTIME-LOCUST-SET (unit-type-sym e)))))
   (define active-locust-wave? (or owm-locust-wave? vis-locust-wave?))
-  (define owm-sh-cooldown?
-    (and owm-tactics (opponent-world-summary-swarm-host-cooldown-window? owm-tactics)))
   ;; Loop 79 Pass 2 (Anomaly 2 — `sh-d02` No-Splash Locust Retreat): Only override `locust-kite-retreat?`
   ;; when a visible Swarm Host is genuinely exposed (`<= 8.0t` point-blank, OR `<= 12.0t` with `0` live
   ;; Locusts within `<= 9.0t` of our army, OR `<= 14.5t` small-remnant `<= 6` Locusts & `<= 4` SH) —
@@ -36957,28 +37246,6 @@
          (>= our-combat-sup-eval 18.0)
          (>= (length combat-units) 5)
          (>= our-combat-val (* 0.85 owm-believed-val))))
-  (define-values (army-margin-eval _army-do-eval _army-cb-eval)
-    (if (pair? combat-units)
-        (compute-territory-details/info t-info-eval
-                                        (l34-ctx-prelim-army-cx ctx)
-                                        (l34-ctx-prelim-army-cy ctx)
-                                        #f)
-        (values 20.0 0.0 #f)))
-  (define deep-dist-factor
-    (cond
-      [(fl< army-margin-eval -8.0) 1.0]
-      [(fl< army-margin-eval 6.0)
-       (fl+ 0.45 (fl* 0.55 (fl/ (fl- 6.0 army-margin-eval) 14.0)))]
-      [else 0.35]))
-  ;; Smooth commitment-risk multiplier in `[0.95 .. 1.18]`:
-  ;; - Faster/retreatable armies near midline -> ~0.95x - 1.03x
-  ;; - Slow/non-retreatable siege/immortal/roach armies committing deep -> ~1.12x - 1.18x
-  (define commitment-risk-ratio-req
-    (flmax 0.95
-           (flmin 1.18
-                  (fl+ 0.95
-                       (fl* 0.16 (fl- 1.0 army-mobility))
-                       (fl* 0.07 deep-dist-factor)))))
   (define decisive-victory-posture?
     (and rt
          (memq (live-bot-runtime-posture rt)
@@ -36993,8 +37260,6 @@
         (>= our-combat-val (* 0.85 owm-believed-val))))
   (when (hash? (l34-ctx-l34-sc ctx))
     (hash-set! (l34-ctx-l34-sc ctx) 'w15-forward-window-active? forward-timing-window?)
-    (hash-set! (l34-ctx-l34-sc ctx) 'w15-commitment-risk-req commitment-risk-ratio-req)
-    (hash-set! (l34-ctx-l34-sc ctx) 'w15-army-mobility army-mobility)
     (hash-set! (l34-ctx-l34-sc ctx) 'w15-all-mobile-retreatable? all-mobile-retreatable?)
     (hash-set! (l34-ctx-l34-sc ctx) 'w15-frontline-strength-ok? frontline-strength-ok?))
   ;; L20-P0-3 / L21-P0-3: Anti-Drip-Feed Mass-Before-Attack Gate.
@@ -37025,45 +37290,20 @@
           (cons (exact->inexact (hash-ref eb 'x 0.0))
                 (exact->inexact (hash-ref eb 'y 0.0))))
         '()))
-  ;; L22-P0-3: Tighten `army-in-direct-visible-contact?` to require `>= 2` friendly combat units
-  ;; (or `>= 4.0` supply) within `18.0t` of visible enemy combat so 1 lone scout cannot break
-  ;; cross-map mass staging (`enemy-within-22-of-any-combat?` unchanged!).
-  (define-values (army-in-direct-visible-contact? enemy-within-22-of-any-combat?)
-    (if (and (pair? combat-units)
-             (or (pair? visible-enemy-combat-pts) (pair? visible-enemy-def-pts)))
-        (let loop ([rem combat-units] [c18-cnt 0] [c18-sup 0.0] [c22? #f])
-          (define c18-ready? (or (>= c18-cnt 2) (fl>= c18-sup 4.0)))
-          (cond
-            [(or (null? rem) (and c18-ready? c22?)) (values c18-ready? c22?)]
-            [else
-             (define u (car rem))
-             (define ux0 (and (hash? u) (hash-ref u 'x #f)))
-             (define uy0 (and (hash? u) (hash-ref u 'y #f)))
-             (if (and (real? ux0) (real? uy0))
-                 (let ([fux (exact->inexact ux0)]
-                       [fuy (exact->inexact uy0)])
-                   (define-values (u18? u22?)
-                     (for/fold ([hit18? #f] [hit22? c22?])
-                               ([ep (in-list visible-enemy-combat-pts)]
-                                #:break (and hit18? hit22?))
-                       (define dx (fl- fux (car ep)))
-                       (define dy (fl- fuy (cdr ep)))
-                       (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
-                       (values (or hit18? (fl<= d2 324.0))
-                               (or hit22? (fl<= d2 484.0)))))
-                   (define u22-all?
-                     (or u22?
-                         (for/or ([dp (in-list visible-enemy-def-pts)])
-                           (define dx (fl- fux (car dp)))
-                           (define dy (fl- fuy (cdr dp)))
-                           (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 484.0))))
-                   (if u18?
-                       (let ([usup (exact->inexact
-                                    (max 0.5 (sc2-supply-cost (fast-canonical-unit-sym (unit-type-sym u)))))])
-                         (loop (cdr rem) (add1 c18-cnt) (fl+ c18-sup usup) u22-all?))
-                       (loop (cdr rem) c18-cnt c18-sup u22-all?)))
-                 (loop (cdr rem) c18-cnt c18-sup c22?))]))
-        (values #f #f)))
+  (define enemy-within-22-of-any-combat?
+    (and (pair? combat-units)
+         (or (pair? visible-enemy-combat-pts) (pair? visible-enemy-def-pts))
+         (for/or ([u (in-list combat-units)])
+           (define ux0 (and (hash? u) (hash-ref u 'x #f)))
+           (define uy0 (and (hash? u) (hash-ref u 'y #f)))
+           (and (real? ux0) (real? uy0)
+                (let ([fux (exact->inexact ux0)] [fuy (exact->inexact uy0)])
+                  (or (for/or ([ep (in-list visible-enemy-combat-pts)])
+                        (define dx (fl- fux (car ep))) (define dy (fl- fuy (cdr ep)))
+                        (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 484.0))
+                      (for/or ([dp (in-list visible-enemy-def-pts)])
+                        (define dx (fl- fux (car dp))) (define dy (fl- fuy (cdr dp)))
+                        (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 484.0))))))))
   (define our-race-eval
     (let ([r (and rt (live-bot-runtime-actual-race rt))])
       (if (and (symbol? r) (not (eq? r 'Unknown)))
@@ -37088,299 +37328,30 @@
                    (if (memq esym '(tempest carrier brood-lord broodlord battlecruiser))
                        20.0
                        14.0))))))
-  ;; L25-P0-3 / L26-P0-3 (`DRIP_FEED_COLLAPSE 13 -> <= 4`, `clip03` `#30` Visual-QA):
-  ;; Defensive Ground Counter-Volley Staging with true-parity hysteresis.
-  ;; Close `early-midgame-pt-timing-exempt?` (`L21749`) & `all-mobile-retreatable?` (`L21765`)
-  ;; loopholes whenever `known-enemy-army-val >= 1400` and `our-combat-val < 0.60 * enemy`
-  ;; (`not enemy-within-14-of-main?`, `our-combat-sup < 45`); stay staged until cohesive
-  ;; counter-wave reaches `>= 0.72 * enemy` OR `>= 48.0` combat supply (never release `2k` into `8k`!)
-  ;; AND bypass outer-base `enemy-within-14-of-th?` so 3rd-base containment still musters safely!
   (define eval-enemies
     (let ([non-summon-enemies
            (if owm-tactics
                (filter (lambda (e) (not (free-summon-unit-sym? (unit-type-sym e)))) enemy-units)
                enemy-units)])
-      (if (null? enemy-def-bldgs)
-          non-summon-enemies
-          (append non-summon-enemies enemy-def-bldgs))))
-  (define l25-cv-severe-outgunned?
-    (and (l34-ctx-live-obs? ctx)
-         (not enemy-within-14-of-main?)
-         (>= known-enemy-army-val 1400)
-         (< our-combat-sup-eval 45.0)
-         (< (exact->inexact our-combat-val)
-            (fl* 0.60 (exact->inexact known-enemy-army-val)))))
-  (define l25-cv-prev?
-    (and rt (> frame 4)
-         (hash-ref (rt-door-state rt) 'l25-counter-volley-staging? #f)))
-  (define l25-cv-reached-wave?
-    (or (>= (exact->inexact our-combat-val)
-            (fl* 0.72 (exact->inexact known-enemy-army-val)))
-        (>= our-combat-sup-eval 48.0)))
-  (define l25-counter-volley-staging?
-    (and (l34-ctx-live-obs? ctx)
-         (not enemy-within-14-of-main?)
-         (not enemy-main-cleared-eval?)
-         (not decisive-victory-posture?)
-         (not owm-sh-cooldown?)
-         (>= known-enemy-army-val 1400)
-         (or l25-cv-severe-outgunned?
-             (and l25-cv-prev? (not l25-cv-reached-wave?)))))
-  (when rt
-    (hash-set! (rt-door-state rt) 'l25-counter-volley-staging? l25-counter-volley-staging?))
-  ;; L26-P0-3 (`DRIP_FEED 13 -> <= 4`, Hole A): Early/Midgame Fog Minimum Push Mass.
-  ;; Between 2:00 and 8:00 (`2688 <= frame < 10752`), when no combat enemies or static D
-  ;; are visible (`(null? eval-enemies)` — marching blind into Fog!), hold our main army
-  ;; at Natural/Ramp until >= 18.0 combat supply AND >= 1,200 combat value (keeping solo
-  ;; harass/scouts via `l34-solo-harass-exempt-unit?` and forward timing windows active!).
-  (define early-fog-min-push-mass-hold?
-    (and (l34-ctx-live-obs? ctx)
-         (>= frame 2688)
-         (< frame 10752)
-         (null? eval-enemies)
-         (not enemy-within-14-of-th?)
-         (not enemy-main-cleared-eval?)
-         (not decisive-victory-posture?)
-         (not owm-sh-cooldown?)
-         (not forward-timing-window?)
-         (or (< our-combat-sup-eval 18.0)
-             (< our-combat-val 1200))))
-  ;; L35-P0-3 + L36-P0-3 (`Siege0DPS`, `CORE14 DripFeed`, Prod `#840` `51.5%` of L+T):
-  ;; Anti-Siege / Anti-Tempest / Anti-Gateway-Robo Mass-Breakout & Value-Parity Staging.
-  ;;   - `l35-siege-tempest-mass-hold?`: >= 3 visible/OWM Siege Tanks OR >= 3 Tempests
-  ;;     raises offensive supply floor to `min(60, max(36, 0.70 * rem-enemy-sup))`.
-  ;;   - `l36-prod-parity-mass-hold?`: >= 10 visible/OWM Protoss Gateway-Robo units
-  ;;     (`stalker`/`immortal`/`colossus`/`archon`) OR >= 3 Siege Tanks holds offensive
-  ;;     pushes until `our-combat-val >= 0.85 * rem-enemy-val` (capped at `<= 65` supply),
-  ;;     strictly outside home defense & active close contact!
-  (define-values (l35-vis-tank-cnt l35-vis-tempest-cnt l36-vis-gw-robo-cnt l35-vis-enemy-sup l36-vis-enemy-val)
-    (for/fold ([tc 0] [tmp 0] [gwr 0] [esup 0.0] [eval-v 0])
-              ([e (in-list enemy-units)]
-               #:when (and (hash? e) (combat-unit-record? e)))
-      (define cu (fast-canonical-unit-sym (unit-type-sym e)))
-      (values (if (memq cu '(siege-tank siege-tank-sieged)) (add1 tc) tc)
-              (if (eq? cu 'tempest) (add1 tmp) tmp)
-              (if (memq cu '(stalker immortal colossus archon)) (add1 gwr) gwr)
-              (fl+ esup (exact->inexact (max 0.5 (sc2-supply-cost cu 1))))
-              (+ eval-v (fast-res-cost-50 cu)))))
-  (define l35-owm-kc
-    (and owm-tactics (opponent-world-summary-known-unit-counts owm-tactics)))
-  (define l35-owm-tank-cnt
-    (if (hash? l35-owm-kc)
-        (+ (hash-ref l35-owm-kc 'siege-tank 0)
-           (hash-ref l35-owm-kc 'siege-tank-sieged 0))
-        0))
-  (define l35-owm-tempest-cnt
-    (if (hash? l35-owm-kc)
-        (hash-ref l35-owm-kc 'tempest 0)
-        0))
-  (define l36-owm-gw-robo-cnt
-    (if (hash? l35-owm-kc)
-        (+ (hash-ref l35-owm-kc 'stalker 0)
-           (hash-ref l35-owm-kc 'immortal 0)
-           (hash-ref l35-owm-kc 'colossus 0)
-           (hash-ref l35-owm-kc 'archon 0))
-        0))
-  (define l35-enemy-siege-tank-cnt (max l35-vis-tank-cnt l35-owm-tank-cnt))
-  (define l35-enemy-tempest-cnt (max l35-vis-tempest-cnt l35-owm-tempest-cnt))
-  (define l36-enemy-gw-robo-cnt (max l36-vis-gw-robo-cnt l36-owm-gw-robo-cnt))
-  (define l35-enemy-rem-sup
-    (flmax l35-vis-enemy-sup
-           (if owm-tactics
-               (flmax (exact->inexact (opponent-world-summary-believed-total-army-supply owm-tactics))
-                      (exact->inexact (opponent-world-summary-known-army-supply owm-tactics)))
-               0.0)))
-  (define l36-enemy-rem-val
-    (max known-enemy-army-val owm-believed-val l36-vis-enemy-val))
-  (define l35-siege-or-tempest-wall?
-    (or (>= l35-enemy-siege-tank-cnt 3)
-        (>= l35-enemy-tempest-cnt 3)))
-  (define l35-siege-breakout-sup-req
-    (flmin 60.0 (flmax 36.0 (fl* 0.70 l35-enemy-rem-sup))))
-  ;; Loop 87 (Track 4): Exempt winning Protoss armies (>= 1.35x army value AND >= 2 heavy Robo
-  ;; siege units: Immortals/Colossi/Disruptors) from l35/l36 mass-hold so 6m leads close out
-  ;; before Terran masses Siege Tanks.
-  (define l87-protoss-heavy-siege-cnt
-    (if (eq? our-race-eval 'Protoss)
-        (for/sum ([u (in-list combat-units)]
-                  #:when (and (hash? u)
-                              (memq (fast-canonical-unit-sym (unit-type-sym u))
-                                    '(immortal colossus disruptor))))
-          1)
-        0))
-  (define l87-protoss-winning-siege-exempt?
-    (and (eq? our-race-eval 'Protoss)
-         (>= l87-protoss-heavy-siege-cnt 2)
-         (fl>= (exact->inexact our-combat-val)
-               (fl* 1.35 (exact->inexact (max 1 l36-enemy-rem-val))))))
-  (define l35-siege-tempest-mass-hold?
-    (and (l34-ctx-live-obs? ctx)
-         l35-siege-or-tempest-wall?
-         (not l87-protoss-winning-siege-exempt?)
-         (not enemy-within-14-of-th?)
-         (not enemy-within-14-of-main?)
-         (not enemy-main-cleared-eval?)
-         (not decisive-victory-posture?)
-         (not owm-sh-cooldown?)
-         (not army-in-direct-visible-contact?)
-         (< supply-used-eval 165)
-         (< our-combat-sup-eval l35-siege-breakout-sup-req)))
-  (define l36-prod-parity-mass-hold?
-    (and (l34-ctx-live-obs? ctx)
-         (or (>= l35-enemy-siege-tank-cnt 3)
-             (>= l36-enemy-gw-robo-cnt 10))
-         (not l87-protoss-winning-siege-exempt?)
-         (not enemy-within-14-of-th?)
-         (not enemy-within-14-of-main?)
-         (not enemy-main-cleared-eval?)
-         (not decisive-victory-posture?)
-         (not owm-sh-cooldown?)
-         (not army-in-direct-visible-contact?)
-         (< supply-used-eval 165)
-         (< our-combat-sup-eval 65.0)
-         (>= l36-enemy-rem-val 1200)
-         (< (exact->inexact our-combat-val)
-            (fl* 0.85 (exact->inexact l36-enemy-rem-val)))))
-  ;; L42-P0-1d (`#04 PvT` 2-6m Attack Guard while Colossus #1 queued/teching):
-  ;; Stop 2-base PvT Gateway armies (14-28 supply, 0 Colossi) from marching across the map into
-  ;; Terran Bio+Medivac+Tank concaves (`Atk2-6 60.6% -> ~30%`) right before Colossus #1 finishes!
-  ;; Releases immediately once Colossus #1 pops, under home attack, or in visible combat contact.
-  (define l42-our-colossus-cnt
-    (for/sum ([u (in-list combat-units)]
-              #:when (and (hash? u) (eq? (fast-canonical-unit-sym (unit-type-sym u)) 'colossus)))
-      1))
-  (define l42-our-robo-bay-present?
-    (for/or ([b (in-list (or (l34-ctx-ally-bldgs ctx) '()))])
-      (and (hash? b)
-           (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'robotics-bay))))
-  (define l42-colossus-pending?
-    (let ([ol (l34-ctx-oledger ctx)])
-      (and ol (> (order-ledger-pending-count-for-type ol 'colossus frame) 0))))
-  (define l42-pvt-awaiting-colossus-hold?
-    (and (l34-ctx-live-obs? ctx)
-         (eq? our-race-eval 'Protoss)
-         (eq? (hash-ref (l34-ctx-obs ctx) 'enemy-race 'Unknown) 'Terran)
-         (< frame 9600)
-         (not enemy-within-14-of-th?)
-         (not enemy-within-14-of-main?)
-         (not enemy-main-cleared-eval?)
-         (not decisive-victory-posture?)
-         (not owm-sh-cooldown?)
-         (not army-in-direct-visible-contact?)
-         (< our-combat-sup-eval 42.0)
-         (= l42-our-colossus-cnt 0)
-         (or l42-our-robo-bay-present?
-             l42-colossus-pending?
-             (and (>= frame 3360)
-                  (<= our-bases-eval 2)
-                  (< our-combat-sup-eval 28.0)
-                  (>= known-enemy-army-val 450)
-                  (< (exact->inexact our-combat-val)
-                     (fl* 1.15 (exact->inexact known-enemy-army-val)))))))
-  ;; L43-P0-1d (`H2H #02 TvT` `Siege0DPS(Tank:8)` Tank+Viking Parity Guard):
-  ;; Prevent TvT Bio+Medivac armies from marching across the map into `>= 4` enemy Sieged Tanks
-  ;; without matching Tank+Viking parity (`>= max(3, 65% enemy Tanks)` and Viking parity when opp
-  ;; has `>= 4` Vikings). Immediately releases on home defense, visible combat contact, or parity!
-  (define-values (l43-our-tank-cnt l43-our-viking-cnt)
-    (for/fold ([tc 0] [vc 0]) ([u (in-list combat-units)] #:when (hash? u))
-      (define cu (fast-canonical-unit-sym (unit-type-sym u)))
-      (values (if (memq cu '(siege-tank siege-tank-sieged)) (add1 tc) tc)
-              (if (memq cu '(viking viking-fighter viking-assault)) (add1 vc) vc))))
-  (define l43-vis-enemy-viking-cnt
-    (for/sum ([e (in-list enemy-units)]
-              #:when (and (hash? e)
-                          (memq (fast-canonical-unit-sym (unit-type-sym e))
-                                '(viking viking-fighter viking-assault))))
-      1))
-  (define l43-owm-enemy-viking-cnt
-    (if (hash? l35-owm-kc)
-        (+ (hash-ref l35-owm-kc 'viking 0)
-           (hash-ref l35-owm-kc 'viking-fighter 0)
-           (hash-ref l35-owm-kc 'viking-assault 0))
-        0))
-  (define l43-enemy-viking-cnt (max l43-vis-enemy-viking-cnt l43-owm-enemy-viking-cnt))
-  (define l43-tvt-tank-viking-parity-hold?
-    (and (l34-ctx-live-obs? ctx)
-         (eq? our-race-eval 'Terran)
-         (eq? (hash-ref (l34-ctx-obs ctx) 'enemy-race 'Unknown) 'Terran)
-         (< frame 16000)
-         (not enemy-within-14-of-th?)
-         (not enemy-within-14-of-main?)
-         (not enemy-main-cleared-eval?)
-         (not decisive-victory-posture?)
-         (not owm-sh-cooldown?)
-         (not army-in-direct-visible-contact?)
-         (< supply-used-eval 165)
-         (>= l35-enemy-siege-tank-cnt 4)
-         (or (< l43-our-tank-cnt (max 3 (inexact->exact (floor (* 0.65 l35-enemy-siege-tank-cnt)))))
-             (and (>= l43-enemy-viking-cnt 4)
-                  (< l43-our-viking-cnt (inexact->exact (floor (* 0.65 l43-enemy-viking-cnt))))))))
-  (define early-midgame-pt-timing-exempt?
-    (and (not l25-counter-volley-staging?)
-         (not l35-siege-tempest-mass-hold?)
-         (not l36-prod-parity-mass-hold?)
-         (not l42-pvt-awaiting-colossus-hold?)
-         (not l43-tvt-tank-viking-parity-hold?)
-         (memq our-race-eval '(Protoss Terran))
-         (< frame 10752)
-         (>= (exact->inexact our-combat-val)
-             (fl* 0.45 (exact->inexact known-enemy-army-val)))
-         (or (>= our-combat-sup-eval 20.0)
-             (and (<= our-bases-eval 2)
-                  (>= our-combat-sup-eval 14.0)))))
-  (define mass-parity-before-attack-suppress?
-    (and (l34-ctx-live-obs? ctx)
-         (or early-fog-min-push-mass-hold?
-             l35-siege-tempest-mass-hold?
-             l36-prod-parity-mass-hold?
-             l42-pvt-awaiting-colossus-hold?
-             l43-tvt-tank-viking-parity-hold?
-             (and (or (not enemy-within-14-of-th?) l25-counter-volley-staging?)
-                  (not enemy-within-14-of-main?)
-                  (not enemy-main-cleared-eval?)
-                  (not decisive-victory-posture?)
-                  (not owm-sh-cooldown?)
-                  (not forward-timing-window?)
-                  (not early-midgame-pt-timing-exempt?)
-                  (or (not all-mobile-retreatable?) zergling-only-trickle? l25-counter-volley-staging?)
-                  (or l25-counter-volley-staging? (not army-in-direct-visible-contact?))
-                  (< our-combat-sup-eval 65.0)
-                  (< supply-used-eval 165)
-                  (> known-enemy-army-val 550)
-                  (or l25-counter-volley-staging?
-                      (< (exact->inexact our-combat-val)
-                         (fl* 0.65 (exact->inexact known-enemy-army-val))))))))
-  ;; Loop 64 P0 #1 (`#1724` + Pro GM Graphs 9-10): Midgame Defensive Muster (`< 0.80x` enter /
-  ;; `>= 0.95x` counter-commit) & Generalized Situational Fallback (`pick-safe-fallback-point`)
-  ;; precomputed ONCE per step! Strictly gated to `live-obs?`, `frame >= 4704` (`>= 3:30`), and
-  ;; `>= 2` live owned TownHalls so `0/278` Tactics Arena micro skirmishes are touched!
+      (if (null? enemy-def-bldgs) non-summon-enemies (append non-summon-enemies enemy-def-bldgs))))
+  ;; Geometry inputs for unified Layer 4 operation controller (safe fallback & home core threat).
   (define l64-ally-bldgs-eval (or (l34-ctx-ally-bldgs ctx) '()))
   (define l64-live-th-recs
     (for/list ([b (in-list l64-ally-bldgs-eval)]
-               #:when (and (hash? b)
-                           (real? (hash-ref b 'x #f)) (real? (hash-ref b 'y #f))
+               #:when (and (hash? b) (real? (hash-ref b 'x #f)) (real? (hash-ref b 'y #f))
                            (memq (fast-canonical-structure-sym (unit-type-sym b))
                                  '(hatchery lair hive nexus command-center orbital-command planetary-fortress))))
       b))
   (define l64-vis-enemy-combat-recs
     (for/list ([e (in-list enemy-units)]
-               #:when (and (hash? e)
-                           (combat-unit-record? e)
-                           (not (eq? (hash-ref e 'snapshot? #f) #t))
+               #:when (and (hash? e) (combat-unit-record? e) (not (eq? (hash-ref e 'snapshot? #f) #t))
                            (eqv? (hash-ref e 'display-type 1) 1)
                            (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))))
       e))
-  ;; Loop 64B Bug #1 (`#1811`): Expand direct Main core-threat abort radius `8.0t -> 14.0t`!
-  (define l64-direct-core-threat?
-    (or enemy-within-14-of-main?
-        (for/or ([e (in-list l64-vis-enemy-combat-recs)])
-          (fl<= (fast-dist2d (exact->inexact (hash-ref e 'x 9999.0))
-                             (exact->inexact (hash-ref e 'y 9999.0))
-                             eval-base-x eval-base-y)
-                14.0))))
-  (define-values (l64-threat-th l64-local-push-val l64-local-def-val l64-push-cx l64-push-cy)
+  (define l64-direct-core-threat? enemy-within-14-of-main?)
+  (define-values (l64-local-push-val l64-push-cx l64-push-cy)
     (if (and (l34-ctx-live-obs? ctx) (pair? l64-live-th-recs) (pair? l64-vis-enemy-combat-recs))
-        (for/fold ([best-th #f] [best-pv 0] [best-dv 0] [best-cx #f] [best-cy #f])
+        (for/fold ([best-pv 0] [best-cx #f] [best-cy #f])
                   ([th (in-list l64-live-th-recs)])
           (define thx (exact->inexact (hash-ref th 'x eval-base-x)))
           (define thy (exact->inexact (hash-ref th 'y eval-base-y)))
@@ -37393,37 +37364,12 @@
                           (fl+ x0 ex) (fl+ y0 ey) (+ c 1))
                   (values v x0 y0 c))))
           (if (> pv best-pv)
-              (let ([dv (for/sum ([u (in-list combat-units)]
-                                  #:when (and (hash? u) (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f))
-                                              (fl<= (fast-dist2d (exact->inexact (hash-ref u 'x 9999.0))
-                                                                 (exact->inexact (hash-ref u 'y 9999.0))
-                                                                 thx thy)
-                                                    28.0)))
-                          (fast-res-cost-50 (fast-canonical-unit-sym (unit-type-sym u))))])
-                (values th pv dv
-                        (if (> ec 0) (fl/ sx (exact->inexact ec)) thx)
-                        (if (> ec 0) (fl/ sy (exact->inexact ec)) thy)))
-              (values best-th best-pv best-dv best-cx best-cy)))
-        (values #f 0 0 #f #f)))
-  (define l64-muster-eligible?
-    (and (l34-ctx-live-obs? ctx)
-         (>= frame 4704)
-         (>= (max (length l64-live-th-recs) (or (l34-ctx-live-owned-townhalls ctx) 1)) 2)
-         (not enemy-main-cleared-eval?)
-         (not decisive-victory-posture?)
-         (not owm-sh-cooldown?)))
+              (values pv
+                      (if (> ec 0) (fl/ sx (exact->inexact ec)) thx)
+                      (if (> ec 0) (fl/ sy (exact->inexact ec)) thy))
+              (values best-pv best-cx best-cy)))
+        (values 0 #f #f)))
   (define l64-ds-eval (and rt (rt-door-state rt)))
-  (define l64-prev-muster-active?
-    (and l64-ds-eval (> frame 4)
-         (hash-ref l64-ds-eval 'l64-def-muster-active? #f)))
-  (define l64-prev-muster-start
-    (if (and l64-ds-eval (> frame 4))
-        (hash-ref l64-ds-eval 'l64-def-muster-start-frame frame)
-        frame))
-  (define l64-prev-muster-cd-until
-    (if (and l64-ds-eval (> frame 4))
-        (hash-ref l64-ds-eval 'l64-def-muster-cd-until -99999)
-        -99999))
   (define l64-prev-fb-pt
     (and l64-ds-eval (> frame 4)
          (let ([lf (hash-ref l64-ds-eval 'l64-fallback-last-frame -1)])
@@ -37442,29 +37388,14 @@
                    (fl+ sy (exact->inexact (hash-ref e 'y 0.0))))))]
       [else (values (exact->inexact (l34-ctx-enemy-x ctx))
                     (exact->inexact (l34-ctx-enemy-y ctx)))]))
-  ;; Loop 64B Bug #1 / Loop 87 (Track 4): Require BOTH local AND global army deficit (`< 0.80x`) plus
-  ;; unbreached Main (`<= 14t`) & post-timeout cooldown so we NEVER muster-retreat when ahead;
-  ;; lower push threshold 1800 -> 1100 so mid-sized Natural/3rd sieges trigger coordinated mustering!
-  (define l64-muster-enter?
-    (and l64-muster-eligible?
-         (not enemy-within-14-of-main?)
-         (not l64-direct-core-threat?)
-         (>= frame l64-prev-muster-cd-until)
-         (>= l64-local-push-val 1100)
-         (< (exact->inexact l64-local-def-val)
-            (fl* 0.80 (exact->inexact l64-local-push-val)))
-         (< (exact->inexact our-combat-val)
-            (fl* 0.80 (exact->inexact l64-local-push-val)))))
-  (define l64-fb-severity
-    (cond
-      [(or enemy-within-14-of-main? l25-counter-volley-staging?) 'severe]
-      [(or l64-muster-enter? l64-prev-muster-active? enemy-within-14-of-th?
-           mass-parity-before-attack-suppress? (null? l64-vis-enemy-combat-recs)) 'muster]
-      [else 'skirmish]))
   (define l64-bfs-eval (hash-ref obs 'our-ground-bfs #f))
   (define l64-bfs-fn-eval (and l64-bfs-eval (lambda (px py) (l34-eval-bfs-dist l64-bfs-eval px py))))
   (define l64-map-w (exact->inexact (hash-ref obs 'map-width 200.0)))
   (define l64-map-h (exact->inexact (hash-ref obs 'map-height 200.0)))
+  (define enemy-cap-air-cnt-eval
+    (for/sum ([e (in-list l64-vis-enemy-combat-recs)]
+              #:when (eq? (fast-canonical-unit-sym (unit-type-sym e)) 'tempest))
+      1))
   (define l64-fb-pt
     (pick-safe-fallback-point
      #:domain 'ground
@@ -37472,7 +37403,7 @@
      #:group-y l64-group-cy
      #:threat-x l64-threat-cx
      #:threat-y l64-threat-cy
-     #:severity l64-fb-severity
+     #:severity (if enemy-within-14-of-main? 'severe (if enemy-within-14-of-th? 'muster 'skirmish))
      #:ally-townhalls l64-live-th-recs
      #:ally-buildings l64-ally-bldgs-eval
      #:ally-units combat-units
@@ -37486,46 +37417,12 @@
      #:map-height l64-map-h
      #:prev-pt l64-prev-fb-pt
      #:bfs-dist-fn l64-bfs-fn-eval
-     #:enemy-capital-air? (>= l35-enemy-tempest-cnt 2)
+     #:enemy-capital-air? (>= enemy-cap-air-cnt-eval 2)
      #:has-home-base? (not (rt-skip-build-order? rt))))
   (define l64-fb-x (car l64-fb-pt))
   (define l64-fb-y (cdr l64-fb-pt))
-  (define l64-merged-def-val
-    (max l64-local-def-val
-         (for/sum ([u (in-list combat-units)]
-                   #:when (and (hash? u) (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f))
-                               (fl<= (fast-dist2d (exact->inexact (hash-ref u 'x 9999.0))
-                                                  (exact->inexact (hash-ref u 'y 9999.0))
-                                                  l64-fb-x l64-fb-y)
-                                     16.0)))
-           (fast-res-cost-50 (fast-canonical-unit-sym (unit-type-sym u))))))
-  ;; Loop 64B Bug #1 / Loop 87 (Track 4): Release cleanly at `>= 0.72x` local/global,
-  ;; Main `<= 14t` threat, OR unconditional hard `224f` (`10s`) timeout (with `168f` cooldown)!
-  (define l64-muster-timeout?
-    (and l64-prev-muster-active?
-         (>= (max 0 (- frame l64-prev-muster-start)) 224)))
-  (define l64-muster-release?
-    (or (not l64-muster-eligible?)
-        enemy-within-14-of-main?
-        l64-direct-core-threat?
-        (< l64-local-push-val 900)
-        (>= (exact->inexact l64-merged-def-val)
-            (fl* 0.72 (exact->inexact l64-local-push-val)))
-        (>= (exact->inexact our-combat-val)
-            (fl* 0.72 (exact->inexact l64-local-push-val)))
-        l64-muster-timeout?))
-  (define l64-defensive-muster-active?
-    (cond
-      [l64-muster-release? #f]
-      [l64-muster-enter? #t]
-      [l64-prev-muster-active? #t]
-      [else #f]))
   (define l65f-vis-enemy-val
-    (for/fold ([v 0]) ([e (in-list enemy-units)]
-                       #:when (and (hash? e)
-                                   (combat-unit-record? e)
-                                   (not (eq? (hash-ref e 'snapshot? #f) #t))
-                                   (eqv? (hash-ref e 'display-type 1) 1)))
+    (for/fold ([v 0]) ([e (in-list l64-vis-enemy-combat-recs)])
       (define et (fast-canonical-unit-sym (unit-type-sym e)))
       (if (or (free-summon-unit-sym? et)
               (memq et '(drone probe scv overlord overseer observer larva egg)))
@@ -37537,33 +37434,15 @@
         (fl/ (exact->inexact our-combat-val) (exact->inexact l65f-eff-enemy-val))
         1.0))
   (when (hash? (l34-ctx-l34-sc ctx))
-    (hash-set! (l34-ctx-l34-sc ctx) 'l20-mass-staging-active? mass-parity-before-attack-suppress?)
-    (hash-set! (l34-ctx-l34-sc ctx) 'l25-counter-volley-staging? l25-counter-volley-staging?)
     (hash-set! (l34-ctx-l34-sc ctx) 'l25-enemy-within-14-of-main? enemy-within-14-of-main?)
-    (hash-set! (l34-ctx-l34-sc ctx) 'l35-siege-tempest-mass-hold? l35-siege-tempest-mass-hold?)
-    (hash-set! (l34-ctx-l34-sc ctx) 'l35-siege-breakout-sup-req l35-siege-breakout-sup-req)
-    (hash-set! (l34-ctx-l34-sc ctx) 'l36-prod-parity-mass-hold? l36-prod-parity-mass-hold?)
-    (hash-set! (l34-ctx-l34-sc ctx) 'l42-pvt-awaiting-colossus-hold? l42-pvt-awaiting-colossus-hold?)
-    (hash-set! (l34-ctx-l34-sc ctx) 'l43-tvt-tank-viking-parity-hold? l43-tvt-tank-viking-parity-hold?)
     (hash-set! (l34-ctx-l34-sc ctx) 'l64-fallback-x l64-fb-x)
     (hash-set! (l34-ctx-l34-sc ctx) 'l64-fallback-y l64-fb-y)
-    (hash-set! (l34-ctx-l34-sc ctx) 'l64-defensive-muster-active? l64-defensive-muster-active?)
     (hash-set! (l34-ctx-l34-sc ctx) 'l64-local-push-val l64-local-push-val)
     (hash-set! (l34-ctx-l34-sc ctx) 'l65f-strength-ratio l65f-strength-ratio)
     (hash-set! (l34-ctx-l34-sc ctx) 'l64-direct-core-threat? l64-direct-core-threat?))
   (when rt
-    (hash-set! (rt-door-state rt) 'l35-siege-tempest-mass-hold? l35-siege-tempest-mass-hold?)
-    (hash-set! (rt-door-state rt) 'l35-siege-breakout-sup-req l35-siege-breakout-sup-req)
-    (hash-set! (rt-door-state rt) 'l36-prod-parity-mass-hold? l36-prod-parity-mass-hold?)
-    (hash-set! (rt-door-state rt) 'l42-pvt-awaiting-colossus-hold? l42-pvt-awaiting-colossus-hold?)
-    (hash-set! (rt-door-state rt) 'l43-tvt-tank-viking-parity-hold? l43-tvt-tank-viking-parity-hold?)
     (hash-set! (rt-door-state rt) 'l64-fallback-prev-pt l64-fb-pt)
     (hash-set! (rt-door-state rt) 'l64-fallback-last-frame frame)
-    (hash-set! (rt-door-state rt) 'l64-def-muster-active? l64-defensive-muster-active?)
-    (when (and l64-defensive-muster-active? (not l64-prev-muster-active?))
-      (hash-set! (rt-door-state rt) 'l64-def-muster-start-frame frame))
-    (when (and l64-muster-timeout? (not l64-defensive-muster-active?))
-      (hash-set! (rt-door-state rt) 'l64-def-muster-cd-until (+ frame 168)))
     ;; Loop 65F (`#1920`/`#1922`/`#1930`): Record last frame of GENUINE active combat contact
     ;; (`<= 9.0t` close combat OR firing `weapon-cooldown > 0` within `<= 12.0t` of live combat
     ;; enemy), NOT passive `12.8t-16t` proximity, so post-skirmish squads don't die to passive `MOVE`.
@@ -37592,9 +37471,8 @@
                                  (define dy (fl- uy0 (cdr ep)))
                                  (fl<= (fl+ (fl* dx dx) (fl* dy dy)) lim2))))))))
       (hash-set! (rt-door-state rt) 'l65f-last-contact-frame frame)))
-  ;; L27-P0-3 / L30-P0-3 (`#14/#23` `OBRet -> 0`): Treat army OR active visible threat within `32.0t`
-  ;; (`1024.0`) of ANY friendly TownHall (incl. lifted CCs/OCs) / base / natural OR `24.0t` (`576.0`)
-  ;; of ANY friendly production/tech/home building as owned territory so home fights never log `'retreat`!
+  ;; Treat army OR active visible threat within `38.0t` (`1444.0`) of ANY friendly TownHall
+  ;; or `24.0t` (`576.0`) of ANY friendly home building as owned territory so home fights never log `'retreat`.
   (define within-28-of-any-ally-th?
     (let ([acx (exact->inexact (l34-ctx-prelim-army-cx ctx))]
           [acy (exact->inexact (l34-ctx-prelim-army-cy ctx))])
@@ -37602,7 +37480,7 @@
            (or (for/or ([tc (in-list home-anchor-ths)])
                  (define dx (fl- acx (car tc)))
                  (define dy (fl- acy (cdr tc)))
-                 (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 1024.0))
+                 (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 1444.0))
                (for/or ([bc (in-list home-bldg-coords)])
                  (define dx (fl- acx (car bc)))
                  (define dy (fl- acy (cdr bc)))
@@ -37619,7 +37497,7 @@
                         (or (for/or ([tc (in-list home-anchor-ths)])
                               (define dx (fl- ex (car tc)))
                               (define dy (fl- ey (cdr tc)))
-                              (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 1024.0))
+                              (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 1444.0))
                             (for/or ([bc (in-list home-bldg-coords)])
                               (define dx (fl- ex (car bc)))
                               (define dy (fl- ey (cdr bc)))
@@ -37631,20 +37509,7 @@
         (l34-point-in-owned-territory? ctx
                                        (l34-ctx-prelim-army-cx ctx)
                                        (l34-ctx-prelim-army-cy ctx))))
-  (define fog-belief-suppress?
-    (and owm-tactics
-         (not enemy-within-14-of-th?)
-         (not owm-sh-cooldown?)
-         (not enemy-main-cleared-eval?)
-         (not decisive-victory-posture?)
-         (not all-mobile-retreatable?)
-         (not forward-timing-window?)
-         (< our-combat-sup-eval 55.0)
-         (< supply-used-eval 155)
-         (> owm-believed-val 550)
-         (< (exact->inexact our-combat-val)
-            (fl* commitment-risk-ratio-req (exact->inexact owm-believed-val)))))
-  ;; Loop 86 (Track 4): Softest-Outer-Base Target Selection + Choke-Attrition Breaker (`>= 6:00` / `8064f`).
+  ;; Softest-Outer-Base Target Selection + Choke-Attrition Breaker feeding operation-controller.rkt.
   ;; Strictly bypassed under cheese mode, `--no-macro`, non-live observations, or endgame building hunt!
   (define l86-sc-eval (l34-ctx-l34-sc ctx))
   (define l86-endgame-hunt-eval?
@@ -37763,7 +37628,7 @@
              #:enemy-buildings enemy-bldgs
              #:enemy-turtle-posterior l86-turtle-post-eval
              #:live-obs? (l34-ctx-live-obs? ctx)
-             #:has-home-base? (l34-has-home-economy-base? rt (or (l34-ctx-live-owned-townhalls ctx) 0))
+             #:has-home-base? (l34-has-home-economy-base? rt (max (length l64-live-th-recs) (or (l34-ctx-live-owned-townhalls ctx) 0)))
              #:cheese-committed? (or (rt-cheese-committed? rt) (cheese-mode-active? rt))
              #:skip-build-order? (rt-skip-build-order? rt)
              #:enemy-th-killed? th-killed-now?
@@ -37787,176 +37652,201 @@
                   s-pt (if (real? s-score) (exact->inexact s-score) +inf.0)
                   av-pt fl-pt all-eth-pts bl-fn))
         (values #f #f 'bypass #f +inf.0 #f #f '() #f)))
-  ;; Loop 86E (Track 4): Belt-and-suspenders guard on `l86-choke-hold-active?` feeding into
-  ;; `eff-mass-parity-suppress?` / `fog-only-suppress?` / `l34-mass-staging?`: NEVER suppress
-  ;; pushes when `snowball-adv >= 0.35` OR when `l86-turtle-post-eval < 0.25` with zero active
-  ;; blacklisted static choke!
-  (define l86-snowball-adv-eval
-    (let* ([mm-e (and rt (live-bot-runtime-mirror-mind rt))]
-           [ms-ht (and mm-e (mirror-mind-state-signals-ht mm-e))]
-           [msb (and (hash? ms-ht) (hash-ref ms-ht 'snowball-adv #f))])
-      (if (and (real? msb) (rational? msb))
-          (exact->inexact msb)
-          (let ([eff-e-sup
-                 (flmax (exact->inexact (safe-finite-real (hash-ref obs 'enemy-threat-supply 0.0) 0.0))
-                        l35-vis-enemy-sup
-                        l35-enemy-rem-sup)])
-            (fl/ (exact->inexact (lanchester-snowball-advantage our-combat-sup-eval eff-e-sup)) 20.0)))))
-  (define l86-has-active-bl-choke?
-    (and (pair? l86-avoid-pt)
-         (procedure? l86-choke-bl-fn)
-         (l86-choke-bl-fn l86-avoid-pt)))
-  (define l86-eff-choke-hold?
-    (and l86-choke-hold-active?
-         (not (fl>= l86-snowball-adv-eval 0.35))
-         (or (fl>= l86-turtle-post-eval 0.25)
-             l86-has-active-bl-choke?)))
+  ;; Single Unified Layer 4 Tactical Operation Controller (`operation-controller.rkt`):
+  ;; Consumes all 7 OWM dimensions + local cohesive cluster + terrain elevation/choke +
+  ;; upgrade delta + active spike ETA, replacing all ad-hoc runtime hold booleans!
+  (define tb-mm (and rt (live-bot-runtime-mirror-mind rt)))
+  (define tb-mmtech (and tb-mm (mirror-mind-state-last-tech-observation tb-mm)))
+  (define tb-ms-ht (and tb-mm (mirror-mind-state-signals-ht tb-mm)))
+  (define enemy-upgs-eval
+    (or (hash-ref obs 'enemy-upgrades #f)
+        (and tb-mmtech (enemy-tech-observation-observed-upgrades tb-mmtech))
+        '()))
+  (define enemy-upg-adv-eval
+    (let ([v (and (hash? tb-ms-ht) (hash-ref tb-ms-ht 'mirror-enemy-upgrade-advantage 0))])
+      (if (real? v) (inexact->exact (round v)) 0)))
+  (define enemy-posture-eval
+    (if (hash? tb-ms-ht) (hash-ref tb-ms-ht 'mirror-strategy 'MacroStandard) 'MacroStandard))
+  (define owm-ctrl-eval
+    (owm-build-control-signals (or l86-owm-inst-eval owm-tactics)
+                               #:enemy-upgrade-advantage enemy-upg-adv-eval
+                               #:enemy-posture enemy-posture-eval))
+  (define pred-ht-eval
+    (if (or (null? combat-units) (null? eval-enemies))
+        #f
+        (let* ([ally-sig (l34-summarize-for-combat-eval combat-units)]
+               [enemy-sig (l34-summarize-for-combat-eval eval-enemies)]
+               [pcache (rt-combat-pred-cache rt)])
+          (if (and (vector-ref pcache 6)
+                   (eq? enemy-within-14-of-th? (vector-ref pcache 4))
+                   (equal? ally-sig (vector-ref pcache 0))
+                   (equal? enemy-sig (vector-ref pcache 1))
+                   (equal? researched-upgs (vector-ref pcache 2))
+                   (equal? enemy-upgs-eval (vector-ref pcache 3)))
+              (vector-ref pcache 6)
+              (let* ([res (combat:predict-engagement-outcome
+                           (l34-sig->combat-hashes ally-sig)
+                           (l34-sig->combat-hashes enemy-sig)
+                           #:ally-upgrades researched-upgs
+                           #:enemy-upgrades enemy-upgs-eval
+                           #:defending-home? enemy-within-14-of-th?
+                           #:upgrade-delta (- enemy-upg-adv-eval))])
+                (vector-set! pcache 0 ally-sig)
+                (vector-set! pcache 1 enemy-sig)
+                (vector-set! pcache 2 researched-upgs)
+                (vector-set! pcache 3 enemy-upgs-eval)
+                (vector-set! pcache 4 enemy-within-14-of-th?)
+                (vector-set! pcache 5 frame)
+                (vector-set! pcache 6 res)
+                res)))))
+  (define wstate-eval (and rt (rt-wave-loss-state rt)))
+  (define live-th-cnt-pb-eval
+    (max (length l64-live-th-recs) (or (l34-ctx-live-owned-townhalls ctx) 0)))
+  (define our-s-eval
+    (exact->inexact
+     (or (and wstate-eval (hash-ref wstate-eval 'combat-army-supply #f))
+         (l34-ctx-live-combat-supply ctx)
+         our-combat-sup-eval
+         0.0)))
+  (define pred-ratio-val (and (hash? pred-ht-eval) (hash-ref pred-ht-eval 'predicted-lanchester-ratio #f)))
+  (define locally-winning-fight?
+    (and (hash? pred-ht-eval)
+         (hash-ref pred-ht-eval 'should-engage? #f)
+         (real? pred-ratio-val)
+         (>= pred-ratio-val 1.15)))
+  (define cheese-committed-p1? (and rt (rt-cheese-committed? rt)))
+  (define pullback-active?
+    (and (l34-ctx-live-obs? ctx)
+         (not cheese-committed-p1?)
+         (l34-has-home-economy-base? rt live-th-cnt-pb-eval)
+         (not enemy-within-14-of-th?)
+         (not locally-winning-fight?)
+         (hash? wstate-eval)
+         (or (< frame (hash-ref wstate-eval 'pullback-until-frame -1))
+             (let ([est-e (hash-ref wstate-eval 'est-enemy-army-supply 0.0)])
+               (and (or (pair? eval-enemies) (< our-s-eval 14.0))
+                    (> est-e 0.0) (< our-s-eval (* 0.85 est-e)))))))
+  (define active-spike-eta-eval
+    (let ([has-col? (ormap (lambda (u) (and (hash? u) (eq? (fast-canonical-unit-sym (unit-type-sym u)) 'colossus))) combat-units)]
+          [has-robo? (ormap (lambda (b) (and (hash? b) (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'robotics-facility))) l64-ally-bldgs-eval)])
+      (for/fold ([best 0.0]) ([b (in-list l64-ally-bldgs-eval)] #:when (hash? b))
+        (define bp (exact->inexact (hash-ref b 'build-progress 1.0)))
+        (define cs (fast-canonical-structure-sym (unit-type-sym b)))
+        (cond
+          [(and (fl< bp SC2-BUILD-COMPLETE-PROGRESS) (memq cs '(robotics-bay spire factory-techlab starport-techlab templar-archive)))
+           (let ([eta (fl* (fl- 1.0 bp) 36.0)]) (if (and (fl> eta 0.0) (or (fl<= best 0.0) (fl< eta best))) eta best))]
+          [(and (eq? cs 'robotics-bay) (fl>= bp SC2-BUILD-COMPLETE-PROGRESS) has-robo? (not has-col?))
+           (if (or (fl<= best 0.0) (fl< 15.0 best)) 15.0 best)]
+          [else best]))))
+  (define our-workers-eval
+    (safe-nonneg-int (+ (safe-nonneg-int (hash-ref obs 'mineral-harvesters 0) 0)
+                        (safe-nonneg-int (hash-ref obs 'vespene-harvesters 0) 0))
+                     0))
+  (define op-plan
+    (evaluate-tactical-operation
+     #:frame frame
+     #:race our-race-eval
+     #:live-obs? (l34-ctx-live-obs? ctx)
+     #:combat-units combat-units
+     #:enemy-units eval-enemies
+     #:ally-buildings l64-ally-bldgs-eval
+     #:enemy-buildings enemy-bldgs
+     #:owm-signals owm-ctrl-eval
+     #:base-x eval-base-x
+     #:base-y eval-base-y
+     #:nat-x (exact->inexact (l34-ctx-nat-x ctx))
+     #:nat-y (exact->inexact (l34-ctx-nat-y ctx))
+     #:enemy-x (exact->inexact (l34-ctx-enemy-x ctx))
+     #:enemy-y (exact->inexact (l34-ctx-enemy-y ctx))
+     #:ally-upgrades researched-upgs
+     #:enemy-upgrades enemy-upgs-eval
+     #:enemy-upgrade-advantage enemy-upg-adv-eval
+     #:our-workers (and (> our-workers-eval 0) our-workers-eval)
+     #:our-bases (max 1 (length l64-live-th-recs))
+     #:spike-eta-sec active-spike-eta-eval
+     #:choke-hold-active? l86-choke-hold-active?
+     #:choke-redirect-xy l86-choke-redirect-xy
+     #:enemy-turtle-posterior l86-turtle-post-eval
+     #:under-home-attack? (or enemy-within-14-of-th? (l34-ctx-under-tactics-base-attack? ctx))
+     #:enemy-near-main? enemy-within-14-of-main?
+     #:enemy-main-cleared? enemy-main-cleared-eval?
+     #:decisive-victory? decisive-victory-posture?
+     #:cheese-committed? cheese-committed-p1?
+     #:skip-build-order? (and rt (rt-skip-build-order? rt))
+     #:has-home-economy-base? (l34-has-home-economy-base? rt live-th-cnt-pb-eval)
+     #:pullback-active? pullback-active?
+     #:supply-used supply-used-eval
+     #:combat-pred-ht pred-ht-eval
+     #:pathable-fn (let ([mg (hash-ref (l34-ctx-obs ctx) 'map-grids #f)])
+                     (and (hash? mg)
+                          (lambda (px py) (l34-wing-point-pathable? ctx px py))))
+     #:fallback-pt l64-fb-pt
+     #:state (and rt (rt-tactical-op-state rt))))
+  (define op-mode (tactical-op-plan-op-mode op-plan))
+  (define pred-engage? (if (hash? pred-ht-eval) (hash-ref pred-ht-eval 'should-engage? #t) #t))
+  (define op-suppress-main?
+    (and (not cheese-committed-p1?)
+         (or locust-kite-retreat?
+             (tactical-op-plan-suppress-main-attack? op-plan)
+             (and (not pred-engage?) (not enemy-within-14-of-th?) (not (eq? op-mode 'defend-home))))))
+  (define op-staging-hold? (and (not cheese-committed-p1?) (and (memq op-mode '(regroup-stage pre-arc-hold flank-rotate)) #t)))
+  (define op-def-muster-raw?
+    (and (l34-ctx-live-obs? ctx) (>= frame (SC2-SECONDS->FRAMES 210.0)) (not cheese-committed-p1?)
+         (not (tactical-op-plan-active-home-defense-engaged? op-plan)) (not l64-direct-core-threat?)
+         (eq? op-mode 'pre-arc-hold) (eq? (tactical-op-plan-rationale op-plan) 'home-outer-base-pre-arc)))
+  (define prev-def-muster? (and l64-ds-eval (hash-ref l64-ds-eval 'l64-def-muster-active? #f)))
+  (define def-muster-start-f (if (and l64-ds-eval prev-def-muster?) (hash-ref l64-ds-eval 'l64-def-muster-start-frame frame) frame))
+  (define def-muster-cd-until (if l64-ds-eval (hash-ref l64-ds-eval 'l64-def-muster-cd-until -99999) -99999))
+  (define def-muster-timeout? (and prev-def-muster? (>= (- frame def-muster-start-f) 224)))
+  (define op-def-muster? (and op-def-muster-raw? (not def-muster-timeout?) (or prev-def-muster? (>= frame def-muster-cd-until))))
+  (define op-delay-harass? (tactical-op-plan-delay-harass-allowed? op-plan))
+  (define op-engage-now?
+    (or cheese-committed-p1?
+        (and (not locust-kite-retreat?) (or pred-engage? (eq? op-mode 'defend-home))
+             (or (tactical-op-plan-should-engage-local? op-plan)
+                 (and enemy-within-22-of-any-combat? (not (eq? op-mode 'retreat-regroup)))))))
+  (define op-ratio
+    (if (hash? pred-ht-eval) (hash-ref pred-ht-eval 'predicted-lanchester-ratio (tactical-op-plan-eff-power-ratio op-plan))
+        (if (pair? combat-units) (tactical-op-plan-eff-power-ratio op-plan) #f)))
+  (define op-choke-hold-active? (and l86-choke-hold-active? (eq? op-mode 'flank-rotate)))
   (when (hash? l86-sc-eval)
+    (hash-set! l86-sc-eval 'l88-tactical-op-plan op-plan) (hash-set! l86-sc-eval 'l88-op-mode op-mode)
+    (hash-set! l86-sc-eval 'l88-delay-harass-allowed? op-delay-harass?)
+    (hash-set! l86-sc-eval 'l88-pre-arc-anchor-pt (tactical-op-plan-pre-arc-anchor-pt op-plan))
+    (hash-set! l86-sc-eval 'l88-pre-arc-facing-pt (tactical-op-plan-pre-arc-facing-pt op-plan))
+    (hash-set! l86-sc-eval 'l88-scout-ambiguous-pad (tactical-op-plan-scout-ambiguous-pad op-plan))
+    (hash-set! l86-sc-eval 'l88-active-home-defense-engaged? (tactical-op-plan-active-home-defense-engaged? op-plan))
+    (hash-set! l86-sc-eval 'l20-mass-staging-active? op-staging-hold?)
+    (hash-set! l86-sc-eval 'l25-counter-volley-staging? (eq? op-mode 'retreat-regroup))
+    (hash-set! l86-sc-eval 'l64-defensive-muster-active? op-def-muster?)
     (hash-set! l86-sc-eval 'l86-choke-hold-active? l86-choke-hold-active?)
-    (hash-set! l86-sc-eval 'l86-eff-choke-hold? l86-eff-choke-hold?)
-    (hash-set! l86-sc-eval 'l86-choke-redirect-xy l86-choke-redirect-xy)
+    (hash-set! l86-sc-eval 'l86-eff-choke-hold? op-choke-hold-active?)
+    (hash-set! l86-sc-eval 'l86-choke-redirect-xy (or (tactical-op-plan-redirect-target-pt op-plan) l86-choke-redirect-xy))
     (hash-set! l86-sc-eval 'l86-choke-release-reason l86-choke-release-reason)
-    (hash-set! l86-sc-eval 'l86-soft-target-pt l86-soft-pt)
-    (hash-set! l86-sc-eval 'l86-soft-target-score l86-soft-score)
-    (hash-set! l86-sc-eval 'l86-avoid-fort-pt l86-avoid-pt)
-    (hash-set! l86-sc-eval 'l86-flank-wp-pt l86-flank-pt)
+    (hash-set! l86-sc-eval 'l86-soft-target-pt l86-soft-pt) (hash-set! l86-sc-eval 'l86-soft-target-score l86-soft-score)
+    (hash-set! l86-sc-eval 'l86-avoid-fort-pt l86-avoid-pt) (hash-set! l86-sc-eval 'l86-flank-wp-pt l86-flank-pt)
     (hash-set! l86-sc-eval 'l86-all-enemy-base-pts l86-all-enemy-base-pts)
     (hash-set! l86-sc-eval 'l86-enemy-base-count (length l86-all-enemy-base-pts))
-    (hash-set! l86-sc-eval 'l86-choke-bl-fn l86-choke-bl-fn)
-    (hash-set! l86-sc-eval 'l86-turtle-post l86-turtle-post-eval))
+    (hash-set! l86-sc-eval 'l86-choke-bl-fn l86-choke-bl-fn) (hash-set! l86-sc-eval 'l86-turtle-post l86-turtle-post-eval))
+  (set-l34-ctx-combat-pred-ht! ctx pred-ht-eval) (set-l34-ctx-combat-pred-ratio! ctx op-ratio)
+  (set-l34-ctx-combat-should-engage?! ctx op-engage-now?) (set-l34-ctx-enemy-within-14-of-th?! ctx enemy-within-14-of-th?)
+  (set-l34-ctx-fog-belief-suppress?! ctx (and op-staging-hold? (not locust-kite-retreat?)))
+  (set-l34-ctx-combat-suppress-attack?! ctx op-suppress-main?)
   (when rt
-    (define ds-l86 (rt-door-state rt))
-    (hash-set! ds-l86 'l86-choke-hold-active? l86-choke-hold-active?)
-    (hash-set! ds-l86 'l86-eff-choke-hold? l86-eff-choke-hold?)
-    (hash-set! ds-l86 'l86-choke-redirect-xy l86-choke-redirect-xy)
-    (hash-set! ds-l86 'l86-choke-release-reason l86-choke-release-reason)
-    (hash-set! ds-l86 'l86-soft-target-pt l86-soft-pt))
-  (cond
-    [(or (null? combat-units) (null? eval-enemies))
-     (define fog-only-suppress?
-       (and (null? eval-enemies)
-            (or fog-belief-suppress? mass-parity-before-attack-suppress? l86-eff-choke-hold?)))
-     (define fog-suppress-now? (or locust-kite-retreat? fog-only-suppress?))
-     (when (and l86-eff-choke-hold? (hash? l86-sc-eval))
-       (hash-set! l86-sc-eval 'l20-mass-staging-active? #t))
-     (set-l34-ctx-combat-pred-ht! ctx #f)
-     (set-l34-ctx-combat-pred-ratio! ctx (if (pair? combat-units) (if fog-suppress-now? 0.65 10.0) #f))
-     (set-l34-ctx-combat-should-engage?! ctx (not fog-suppress-now?))
-     (set-l34-ctx-enemy-within-14-of-th?! ctx enemy-within-14-of-th?)
-     (set-l34-ctx-fog-belief-suppress?! ctx (and fog-only-suppress? (not locust-kite-retreat?)))
-     (set-l34-ctx-combat-suppress-attack?! ctx fog-suppress-now?)
-     (when rt
-       (hash-set! (rt-door-state rt) 'l34-defending-home? enemy-within-14-of-th?)
-       (hash-set! (rt-door-state rt) 'l34-army-at-home? army-at-home-eval?)
-       (hash-set! (rt-door-state rt) 'l34-mass-staging?
-                  (and (null? eval-enemies) (or mass-parity-before-attack-suppress? l86-eff-choke-hold?))))]
-    [else
-     (define tb-mm (live-bot-runtime-mirror-mind rt))
-     (define tb-mmtech (and tb-mm (mirror-mind-state-last-tech-observation tb-mm)))
-     (define enemy-upgs
-       (or (hash-ref obs 'enemy-upgrades #f)
-           (and tb-mmtech (enemy-tech-observation-observed-upgrades tb-mmtech))
-           '()))
-     (define ally-sig (l34-summarize-for-combat-eval combat-units))
-     (define enemy-sig (l34-summarize-for-combat-eval eval-enemies))
-     (define pcache (rt-combat-pred-cache rt))
-     (define pred-ht
-       (if (and (vector-ref pcache 6)
-                (eq? enemy-within-14-of-th? (vector-ref pcache 4))
-                (equal? ally-sig (vector-ref pcache 0))
-                (equal? enemy-sig (vector-ref pcache 1))
-                (equal? researched-upgs (vector-ref pcache 2))
-                (equal? enemy-upgs (vector-ref pcache 3)))
-           (vector-ref pcache 6)
-           (let ([res (combat:predict-engagement-outcome
-                       (l34-sig->combat-hashes ally-sig)
-                       (l34-sig->combat-hashes enemy-sig)
-                       #:ally-upgrades researched-upgs
-                       #:enemy-upgrades enemy-upgs
-                       #:defending-home? enemy-within-14-of-th?)])
-             (vector-set! pcache 0 ally-sig)
-             (vector-set! pcache 1 enemy-sig)
-             (vector-set! pcache 2 researched-upgs)
-             (vector-set! pcache 3 enemy-upgs)
-             (vector-set! pcache 4 enemy-within-14-of-th?)
-             (vector-set! pcache 5 frame)
-             (vector-set! pcache 6 res)
-             res)))
-     (define wstate (rt-wave-loss-state rt))
-     (define pred-ratio-val (or (hash-ref pred-ht 'predicted-lanchester-ratio #f) 0.0))
-     (define live-th-cnt-pb-eval (or (l34-ctx-live-owned-townhalls ctx) 0))
-     (define our-s-eval
-       (exact->inexact
-        (hash-ref wstate 'combat-army-supply (or (l34-ctx-live-combat-supply ctx) our-combat-sup-eval 0.0))))
-     (define locally-winning-fight?
-       (and (hash-ref pred-ht 'should-engage? #f)
-            (real? pred-ratio-val)
-            (>= pred-ratio-val 1.15)))
-     ;; Loop 76B A1 + Loop 83 + Loop 84: Clear `pullback-active?` when no real home-base economy
-     ;; exists OR when a Version C cheese all-in is committed (`rt-cheese-committed?`), restoring
-     ;; 100% of normal ladder wave-loss pullback!
-     (define cheese-committed-p1? (rt-cheese-committed? rt))
-     (define pullback-active?
-       (and (l34-ctx-live-obs? ctx)
-            (not cheese-committed-p1?)
-            (l34-has-home-economy-base? rt live-th-cnt-pb-eval)
-            (not enemy-within-14-of-th?)
-            (not locally-winning-fight?)
-            (or (< frame (hash-ref wstate 'pullback-until-frame -1))
-                (let ([est-e (hash-ref wstate 'est-enemy-army-supply 0.0)])
-                  (and (> est-e 0.0) (< our-s-eval (* 0.85 est-e)))))))
-     (define engage?
-       (or cheese-committed-p1?
-           (and (not pullback-active?)
-                (not locust-kite-retreat?)
-                (or enemy-within-14-of-th?
-                    (hash-ref pred-ht 'should-engage? #t))
-                #t)))
-     (define hard-suppress?
-       (and (not cheese-committed-p1?)
-            (or (not engage?) pullback-active? locust-kite-retreat?)
-            (not enemy-within-14-of-th?)))
-     ;; L21-P0-3 / L25-P0-3 / L35-P0-3 + Loop 83 + Loop 84: Bypass cross-map mass-parity &
-     ;; counter-volley macro staging under `--no-macro` OR committed Version C cheese!
-     (define eff-mass-parity-suppress?
-       (and (not (rt-skip-build-order? rt))
-            (not cheese-committed-p1?)
-            (or l35-siege-tempest-mass-hold?
-                l36-prod-parity-mass-hold?
-                l42-pvt-awaiting-colossus-hold?
-                l43-tvt-tank-viking-parity-hold?
-                l86-eff-choke-hold?
-                (and mass-parity-before-attack-suppress?
-                     (not locally-winning-fight?)))))
-     (define eff-l25-counter-volley-staging?
-       (and (not (rt-skip-build-order? rt))
-            (not cheese-committed-p1?)
-            l25-counter-volley-staging?
-            (not locally-winning-fight?)))
-     (when (hash? (l34-ctx-l34-sc ctx))
-       (hash-set! (l34-ctx-l34-sc ctx) 'l20-mass-staging-active? eff-mass-parity-suppress?)
-       (hash-set! (l34-ctx-l34-sc ctx) 'l25-counter-volley-staging? eff-l25-counter-volley-staging?))
-     (define suppress?
-       (or hard-suppress? eff-mass-parity-suppress?))
-     (set-l34-ctx-combat-pred-ht! ctx pred-ht)
-     (set-l34-ctx-combat-pred-ratio! ctx (hash-ref pred-ht 'predicted-lanchester-ratio #f))
-     ;; L21-P0-3: NEVER clear `combat-should-engage?!` when visible enemies are within `22t` of ANY
-     ;; friendly combat unit — cross-map staging must only hold distant marches, never tell units
-     ;; standing next to enemies to hold fire!
-     (set-l34-ctx-combat-should-engage?!
-      ctx
-      (and engage? (or enemy-within-22-of-any-combat? (not eff-mass-parity-suppress?))))
-     (set-l34-ctx-enemy-within-14-of-th?! ctx enemy-within-14-of-th?)
-     ;; When suppressed solely by cross-map mass-parity staging (not local retreat), mark
-     ;; `fog-belief-suppress?` so local defense / in-contact micro stays crisp while distant
-     ;; cross-map suicide runs stage and mass at natural/3rd!
-     (set-l34-ctx-fog-belief-suppress?! ctx (and eff-mass-parity-suppress? (not hard-suppress?)))
-     (set-l34-ctx-combat-suppress-attack?! ctx suppress?)
-     (when rt
-       (hash-set! (rt-door-state rt) 'l34-defending-home? enemy-within-14-of-th?)
-       (hash-set! (rt-door-state rt) 'l34-army-at-home? army-at-home-eval?)
-       (hash-set! (rt-door-state rt) 'l34-mass-staging? eff-mass-parity-suppress?))
-     pred-ht]))
+    (define ds-op (rt-door-state rt))
+    (hash-set! ds-op 'l88-tactical-op-plan op-plan) (hash-set! ds-op 'l88-op-mode op-mode)
+    (hash-set! ds-op 'l88-delay-harass-allowed? op-delay-harass?) (hash-set! ds-op 'l64-def-muster-active? op-def-muster?)
+    (when (and op-def-muster? (not prev-def-muster?)) (hash-set! ds-op 'l64-def-muster-start-frame frame))
+    (when (and def-muster-timeout? (not op-def-muster?)) (hash-set! ds-op 'l64-def-muster-cd-until (+ frame 168)))
+    (hash-set! ds-op 'l86-choke-hold-active? l86-choke-hold-active?)
+    (hash-set! ds-op 'l86-eff-choke-hold? op-choke-hold-active?)
+    (hash-set! ds-op 'l86-choke-redirect-xy (or (tactical-op-plan-redirect-target-pt op-plan) l86-choke-redirect-xy))
+    (hash-set! ds-op 'l86-choke-release-reason l86-choke-release-reason)
+    (hash-set! ds-op 'l86-soft-target-pt l86-soft-pt)
+    (hash-set! ds-op 'l34-defending-home? (or enemy-within-14-of-th? (eq? op-mode 'defend-home)))
+    (hash-set! ds-op 'l34-army-at-home? army-at-home-eval?)
+    (hash-set! ds-op 'l34-mass-staging? op-staging-hold?))
+  pred-ht-eval)
 
 (define (l34-phase2-tbrain-drops! ctx)
   (l34-eval-combat-prediction! ctx)
@@ -40802,7 +40692,11 @@
         ;; trapped inside fire commit ATTACK instead of being hijacked into 0-DPS pure-MOVE splits!
         (define active-tank-shell-commit?
           (and (pair? (or (l34-ctx-enemy-sieged-tanks-near ctx) '()))
-               (null? (or (l34-ctx-enemy-pf-list ctx) '()))
+               (let ([st0 (car (l34-ctx-enemy-sieged-tanks-near ctx))])
+                 (l34-no-local-enemy-pf? (l34-ctx-enemy-pf-list ctx)
+                                         (hash-ref st0 'x base-x)
+                                         (hash-ref st0 'y base-y)
+                                         20.0))
                (or (l34-ctx-enemy-within-14-of-th? ctx)
                    (>= (length (or (l34-ctx-combat-units ctx) '())) 4))
                (memq cmd-role '(avoid-siege-tank-splash-split
@@ -42388,7 +42282,16 @@
       (define ab (spell-directive-ability sd))
       (define cid (spell-directive-caster-tag sd))
       (define tid (spell-directive-target-tag sd))
-      (unless (or (and (eq? ab 'inject-larva)
+      (define skip-repair-sp?
+        (and (eq? ab 'repair)
+             (or (< (safe-nonneg-int (hash-ref obs 'minerals 100) 100) 5)
+                 (and oledger
+                      (let ([cu (for/first ([u (in-list ally-units)]
+                                            #:when (= (hash-ref u 'id -1) cid))
+                                  u)])
+                        (order-ledger-order-equivalent? oledger (or cu (hasheq 'id cid)) 'repair tid 0.0 0.0 frame))))))
+      (unless (or skip-repair-sp?
+                  (and (eq? ab 'inject-larva)
                        (pair? injected-th-ids)
                        (exact-integer? tid)
                        (memv tid injected-th-ids))
@@ -42407,7 +42310,9 @@
           (set-add! oracle-cast-tags cid))
         (when (and (eq? ab 'repair) (exact-integer? tid) (> tid 0))
           (unless scv-repair-claims (set! scv-repair-claims (make-hasheqv)))
-          (hash-update! scv-repair-claims tid add1 0))
+          (hash-update! scv-repair-claims tid add1 0)
+          (when oledger
+            (order-ledger-record-issued! oledger cid 'repair 'repair #:target-id tid #:frame frame)))
         ;; L40-P0-1d (`t15`) + L58-P1: NEVER emit same-tick `attack-unit` (`P2`) alongside channeled/key
         ;; spells (`yamato-cannon`, `caustic-spray`, `contaminate`, `hallucination-archon`, `nexus-energy-recharge`)!
         (when (memq ab '(yamato-cannon caustic-spray contaminate hallucination-archon nexus-energy-recharge abduct viper-consume))
@@ -44481,10 +44386,12 @@
                                            (fl< hp (fl* mhp 0.90))
                                            (near-vis-enemy? bx by 10.0))))))
           b))
-      (when damaged-proxy-bunker
+      (when (and damaged-proxy-bunker
+                 (>= (safe-nonneg-int (hash-ref (l34-ctx-obs ctx) 'minerals 100) 100) 5))
         (define bid (hash-ref damaged-proxy-bunker 'id -1))
         (define bkx (exact->inexact (hash-ref damaged-proxy-bunker 'x base-x-ch)))
         (define bky (exact->inexact (hash-ref damaged-proxy-bunker 'y base-y-ch)))
+        (define ol-rep-ch (l34-ctx-oledger ctx))
         (define rep-cnt 0)
         (for ([u (in-list au-ch)]
               #:when (and (< rep-cnt 4)
@@ -44502,7 +44409,10 @@
           (define sid (hash-ref u 'id -1))
           (set-add! w3-ch sid)
           (set! rep-cnt (add1 rep-cnt))
-          (l34-emit-preserved! ctx (list 'repair sid bid))))
+          (unless (and ol-rep-ch (order-ledger-order-equivalent? ol-rep-ch u 'repair bid 0.0 0.0 fr-ch))
+            (when ol-rep-ch
+              (order-ledger-record-issued! ol-rep-ch sid 'repair 'repair #:target-id bid #:frame fr-ch))
+            (l34-emit-preserved! ctx (list 'repair sid bid)))))
 
       (cond
         [(not committed-ch?)
@@ -45004,6 +44914,8 @@
                                        (set-member? lib-peel-harass-ids (hash-ref e 'id -1)))))
                            eu-p)))
              (define mp-suppress? (l34-ctx-combat-suppress-attack? ctx))
+             (define mp-delay-harass?
+               (and (hash? sc-p) (hash-ref sc-p 'l88-delay-harass-allowed? #f) #t))
              (define mp-res
                (step-multiprong-coordinator!
                 (rt-multiprong-state rt-p)
@@ -45018,6 +44930,7 @@
                 #:role-leases (rt-role-leases rt-p)
                 #:defensive-muster-active? (and (hash? sc-p) (hash-ref sc-p 'l64-defensive-muster-active? #f))
                 #:combat-suppress-attack? mp-suppress?
+                #:delay-harass-allowed? mp-delay-harass?
                 #:endgame-hunt-active? endgame-hunt-active?
                 #:enemy-main-cleared? mp-main-cleared?
                 #:enemy-buildings eb-mp
@@ -45052,10 +44965,62 @@
                (cond
                  [mp-defensive-mode?
                   (acquire-unit-lease! mp-leases uid 'strike-group fr-p 20)]
-                 [(not mp-suppress?)
+                 [(or (not mp-suppress?) mp-delay-harass?)
                   (acquire-unit-lease! mp-leases uid 'strike-group fr-p 16)]))
              (when (hash? sc-p)
                (hash-set! sc-p 'l65-multiprong-mode mp-mode))
+             ;; Defensive pre-arc crescent (`'pre-arc-hold`): form remaining main-army units into a
+             ;; front-to-back arc after bounded delay-harass prongs are claimed, never splitting home defense.
+             (when (and (hash? sc-p)
+                        (eq? (hash-ref sc-p 'l88-op-mode #f) 'pre-arc-hold)
+                        (not (hash-ref sc-p 'l64-defensive-muster-active? #f))
+                        (not (hash-ref sc-p 'l88-active-home-defense-engaged? #f))
+                        (not (l34-ctx-enemy-within-14-of-th? ctx))
+                        (not enemy-near-main-p))
+               (define arc-anchor (hash-ref sc-p 'l88-pre-arc-anchor-pt #f))
+               (define arc-facing (hash-ref sc-p 'l88-pre-arc-facing-pt #f))
+               (when (and (pair? arc-anchor) (pair? arc-facing))
+                 (define arc-cands
+                   (for/list ([u (in-list cu-p)]
+                              #:when (and (hash? u)
+                                          (let ([uid (hash-ref u 'id -1)]
+                                                [ux (exact->inexact (hash-ref u 'x 0.0))]
+                                                [uy (exact->inexact (hash-ref u 'y 0.0))])
+                                            (and (> uid 0)
+                                                 (not (set-member? w3-ht uid))
+                                                 (not (set-member? skip-p uid))
+                                                 (not (memq (unit-type-sym u)
+                                                            '(overlord overseer overseer-siege-mode observer observer-siege-mode raven medivac warp-prism warp-prism-phasing)))
+                                                 ;; Never pull units already in active close combat off firing!
+                                                 (not (for/or ([e (in-list eu-p)])
+                                                        (and (hash? e)
+                                                             (combat-unit-record? e)
+                                                             (not (eq? (hash-ref e 'snapshot? #f) #t))
+                                                             (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                                                             (fl<= (fast-dist2d ux uy
+                                                                                (exact->inexact (hash-ref e 'x 9999.0))
+                                                                                (exact->inexact (hash-ref e 'y 9999.0)))
+                                                                   14.0))))))))
+                     u))
+                 (define arc-tot (length arc-cands))
+                 (define arc-path-fn
+                   (let ([mg (hash-ref (l34-ctx-obs ctx) 'map-grids #f)])
+                     (and (hash? mg) (lambda (px py) (l34-wing-point-pathable? ctx px py)))))
+                 (for ([u (in-list arc-cands)] [idx (in-naturals)])
+                   (define uid (hash-ref u 'id -1))
+                   (define-values (px py)
+                     (compute-defensive-pre-arc-pt
+                      #f u
+                      #:anchor-x (car arc-anchor) #:anchor-y (cdr arc-anchor)
+                      #:facing-x (car arc-facing) #:facing-y (cdr arc-facing)
+                      #:slot-index idx #:slot-total arc-tot
+                      #:map-width mw-p #:map-height mh-p
+                      #:pathable? arc-path-fn))
+                   (when (and px py)
+                     (set-add! w3-ht uid)
+                     (l34-emit! ctx (list 'attack-pos uid
+                                          (safe-coord px (hash-ref u 'x (car arc-anchor)))
+                                          (safe-coord py (hash-ref u 'y (cdr arc-anchor)))))))))
              ;; Loop 65 Addendum (`#1845`/`#1846`): Forward Phased Warp Prism Chargelot Warp-In!
              (when (and (eq? mp-race 'Protoss)
                         (pair? ready-wgs-mp)
@@ -46830,6 +46795,9 @@
             (and live-obs? (memq protected-class '(morph channel cast-walk)))
             (and (not post-blink-focus-ready?)
                  (order-ledger-unit-in-attack-swing? oledger u))))
+      (when (and (eq? (unit-type-sym u) 'carrier)
+                 (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt) (list 'carrier-int uid) frame 68))
+        (l34-emit! ctx (list 'cast-spell uid 'build-interceptors uid)))
       (define unit-in-counter-wave?
         (and p5-light-harass-split-active?
              (not (set-member? p5-home-guard-tags uid))
@@ -47353,8 +47321,7 @@
                   [else #f])]
                [(and p5-has-phx-or-col?
                      (or (eq? ut 'colossus)
-                         (and (not l58-staging-active?)
-                              (eq? ut 'phoenix)
+                         (and (eq? ut 'phoenix)
                               (or (>= p5-enemy-contested-aa-cnt 4)
                                   (>= p5-effective-cap-air-cnt 2)
                                   combat-suppress-attack?))))
@@ -48462,7 +48429,7 @@
              (if (and live-obs? p5-pos-ctx unit-should-engage-target?
                       (not (l34-ctx-enemy-within-14-of-th? ctx))
                       (not p5-l64-defensive-muster?))
-                 (zerg-uphill-ramp-hold-pt p5-pos-ctx u)
+                 (all-race-uphill-ramp-hold-pt p5-pos-ctx u)
                  (values #f #f)))
            (define-values (b-zw-x b-zw-y b-zw-move?)
              (if (and (not b-uh-x) live-obs? p5-pos-ctx unit-should-engage-target?
@@ -48487,11 +48454,6 @@
              [else
               (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy)])]
           [(carrier)
-           (when (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
-                                            (list 'carrier-int uid)
-                                            frame
-                                            68)
-             (l34-emit! ctx (list 'cast-spell uid 'build-interceptors uid)))
            (if (and (fl< edist2 56.25) (fl> edist2 0.01))
                (let-values ([(kx ky) (compute-kite-vector ux uy ex ey 2.5)])
                  (l34-emit! ctx (list 'kite uid (l34-quantize-cell-2.5 ctx kx ux) (l34-quantize-cell-2.5 ctx ky uy))))
@@ -49895,7 +49857,7 @@
                     (if protoss-mid-tbrain?
                         #f
                         (let ()
-                          (define-values (uh-x uh-y) (zerg-uphill-ramp-hold-pt p5-pos-ctx u))
+                          (define-values (uh-x uh-y) (all-race-uphill-ramp-hold-pt p5-pos-ctx u))
                           (cond
                             [(and uh-x uh-y)
                              (else-pos-emit! (list 'attack-pos uid (safe-coord uh-x ux) (safe-coord uh-y uy)))
@@ -49935,7 +49897,11 @@
                                    (else-pos-emit! (list 'attack-pos uid (safe-coord zw-x ux) (safe-coord zw-y uy)))
                                    #t]
                                   [else
-                                   (define-values (cc-x cc-y) (compute-lateral-concave-spread-pt p5-pos-ctx u ex ey wr-e))
+                                   (define-values (cc-x cc-y)
+                                     (let-values ([(x1 y1) (compute-lateral-concave-spread-pt p5-pos-ctx u ex ey wr-e)])
+                                       (if (and x1 y1)
+                                           (values x1 y1)
+                                           (compute-in-combat-concave-step-pt p5-pos-ctx u ex ey wr-e))))
                                    (if (and cc-x cc-y (l34-wing-point-pathable? ctx cc-x cc-y))
                                        (begin
                                          (else-pos-emit! (list 'attack-pos uid (safe-coord cc-x ux) (safe-coord cc-y uy)))
@@ -50524,13 +50490,10 @@
                                        '(l20-mass-stage-rally)
                                        frame
                                        44)
+        (define stg-cmd (if (null? stage-vis-enemy-pts) 'move 'attack-pos))
         (if (<= (length stage-cands) 8)
-            (for ([u (in-list stage-cands)])
-              (l34-emit! ctx (list 'attack-pos (hash-ref u 'id 110) stage-x stage-y)))
-            (l34-emit! ctx (list 'attack-pos
-                                 (map (lambda (u) (hash-ref u 'id 110)) stage-cands)
-                                 stage-x
-                                 stage-y))))))
+            (for ([u (in-list stage-cands)]) (l34-emit! ctx (list stg-cmd (hash-ref u 'id 110) stage-x stage-y)))
+            (l34-emit! ctx (list stg-cmd (map (lambda (u) (hash-ref u 'id 110)) stage-cands) stage-x stage-y))))))
 
   ;; L23-P0-3 (`#16` Visual-QA): Rally charged idle Zerg Vipers (`energy >= 75`) out of the
   ;; main base corner to rejoin our main non-caster combat army even between fights!
@@ -51203,26 +51166,41 @@
                      (and (= (length filtered-act) 4)
                           (equal? (fourth filtered-act) 1)
                           (not (for/or ([eu (in-list enemy-units)]) (= (hash-ref eu 'id -1) 1)))))))
-          ;; L58-P1 (`sc2-ab-t11`, `sc2-ab-t12`): Drop ANY `(repair sid tid)` from direct tactics
-          ;; (e.g. proactive full-HP Bunker/PF repair in `static-defense.rkt`) whose target has
-          ;; `hp >= max-hp - 0.5` -> eliminates `28:TooMuchLife` wire rejections!
-          (define skip-full-hp-repair?
+          ;; Direct-tactics repair gate: enforce hp < max-hp - 0.5, minerals >= 5, and order-ledger dedup!
+          (define direct-repair-pair
             (and (list? filtered-act)
-                 (eq? (car filtered-act) 'repair)
-                 (>= (length filtered-act) 3)
-                 (let ([tid (third filtered-act)])
-                   (and (exact-integer? tid) (> tid 0)
-                        (let ([tgt (or (for/first ([b (in-list ally-bldgs)]
-                                                   #:when (and (hash? b) (eqv? (hash-ref b 'id -1) tid)))
-                                         b)
-                                       (for/first ([u (in-list ally-units)]
-                                                   #:when (and (hash? u) (eqv? (hash-ref u 'id -1) tid)))
-                                         u))])
-                          (and (hash? tgt)
-                               (let ([chp (or (hash-ref tgt 'hp #f) (hash-ref tgt 'health #f))]
-                                     [mhp (or (hash-ref tgt 'max-hp #f) (hash-ref tgt 'health-max #f))])
-                                 (and (real? chp) (real? mhp) (> mhp 0)
-                                      (>= (exact->inexact chp) (- (exact->inexact mhp) 0.5))))))))))
+                 (cond
+                   [(and (eq? (car filtered-act) 'repair) (>= (length filtered-act) 3)
+                         (exact-integer? (second filtered-act)) (exact-integer? (third filtered-act)))
+                    (cons (second filtered-act) (third filtered-act))]
+                   [(and (memq (car filtered-act) '(cast cast-spell)) (>= (length filtered-act) 4)
+                         (eq? (third filtered-act) 'repair)
+                         (exact-integer? (second filtered-act)) (exact-integer? (fourth filtered-act)))
+                    (cons (second filtered-act) (fourth filtered-act))]
+                   [else #f])))
+          (define skip-full-hp-repair?
+            (and direct-repair-pair
+                 (let ([sid (car direct-repair-pair)]
+                       [tid (cdr direct-repair-pair)]
+                       [d-ol (l34-ctx-oledger ctx)])
+                   (or (< (safe-nonneg-int (hash-ref (l34-ctx-obs ctx) 'minerals 100) 100) 5)
+                       (and d-ol (> sid 0) (> tid 0)
+                            (let ([su (for/first ([u (in-list ally-units)]
+                                                  #:when (and (hash? u) (eqv? (hash-ref u 'id -1) sid)))
+                                        u)])
+                              (order-ledger-order-equivalent? d-ol (or su (hasheq 'id sid)) 'repair tid 0.0 0.0 frame)))
+                       (and (> tid 0)
+                            (let ([tgt (or (for/first ([b (in-list ally-bldgs)]
+                                                       #:when (and (hash? b) (eqv? (hash-ref b 'id -1) tid)))
+                                             b)
+                                           (for/first ([u (in-list ally-units)]
+                                                       #:when (and (hash? u) (eqv? (hash-ref u 'id -1) tid)))
+                                             u))])
+                              (and (hash? tgt)
+                                   (let ([chp (or (hash-ref tgt 'hp #f) (hash-ref tgt 'health #f))]
+                                         [mhp (or (hash-ref tgt 'max-hp #f) (hash-ref tgt 'health-max #f))])
+                                     (and (real? chp) (real? mhp) (> mhp 0)
+                                          (>= (exact->inexact chp) (- (exact->inexact mhp) 0.5)))))))))))
           ;; L58-P1 (`sc2-runby-ro07`): Enforce Adept Psionic Transfer (`2544`) `248f` (`11.07s`)
           ;; per-Adept cooldown across direct tactics (`multitask-harass-and-proxy.rkt`) so Adepts
           ;; NEVER spam `2544` while on cooldown (`6:Cooldown`)!
@@ -51446,6 +51424,9 @@
                       skip-full-hp-repair? skip-adept-shade-cd? skip-overseer-changeling-spam?
                       skip-widow-mine-retarget-spam? skip-premature-mass-recall?
                       (runtime-suppressed-live-ability-action? filtered-act))
+            (when (and direct-repair-pair (l34-ctx-oledger ctx))
+              (order-ledger-record-issued! (l34-ctx-oledger ctx) (car direct-repair-pair)
+                                           'repair 'repair #:target-id (cdr direct-repair-pair) #:frame frame))
             (set-add! direct-seen-sexps filtered-act)
             (l34-emit! ctx filtered-act)
             (for ([uid (in-list actor-ids)])
@@ -54330,36 +54311,27 @@
       (tel-push! 'cam-y (human-cortex-cam-y cortex))
       (tel-push! 'fixation (human-cortex-fixation-frames cortex))
       (tel-push! 'fap-score fap-score)
-      ;; W18-P0-1-rt / L20-P0-3 (`OBRet` 11/22, `#22` 26,268f): Reflect actual committed home-defense
-      ;; or choke-staging posture (`enemy-within-home-perimeter?` or army already at home inside owned
-      ;; territory) rather than logging `'retreat` purely from raw `fap-score` while inside our bases!
-      (define raw-fap-posture (fap-posture-with-hysteresis fap-score 'hold))
-      (define l34-defending-home-now?
-        (and (hash? door-st-cache) (hash-ref door-st-cache 'l34-defending-home? #f)))
-      (define l34-army-at-home-now?
-        (and (hash? door-st-cache) (hash-ref door-st-cache 'l34-army-at-home? #f)))
-      (define l34-mass-staging-now?
-        (and (hash? door-st-cache) (hash-ref door-st-cache 'l34-mass-staging? #f)))
+      ;; Single-authority posture telemetry derived from canonical Layer 4 `l88-op-mode`.
+      (define l88-op-mode-now (and (hash? door-st-cache) (hash-ref door-st-cache 'l88-op-mode #f)))
+      (define l34-defending-home-now? (and (hash? door-st-cache) (hash-ref door-st-cache 'l34-defending-home? #f)))
+      (define l34-army-at-home-now? (and (hash? door-st-cache) (hash-ref door-st-cache 'l34-army-at-home? #f)))
+      (define (any-fight-act? acts)
+        (ormap (lambda (a) (and (pair? a) (memq (car a) '(attack-unit attack-pos pull-workers-attack worker-drill-stack-attack)))) acts))
+      (define any-combat-fight?
+        (or (any-fight-act? accepted) (any-fight-act? preserved-tactical-directives) (any-fight-act? tactic-acts)))
       (define eff-fap-posture
-        (cond
-          [(and (eq? raw-fap-posture 'retreat)
-                (or l34-defending-home-now? l34-army-at-home-now?))
-           (let ([any-home-fight?
-                  (or (ormap (lambda (a)
-                               (and (pair? a)
-                                    (memq (car a) '(attack-unit attack-pos pull-workers-attack worker-drill-stack-attack))))
-                             accepted)
-                      (ormap (lambda (a)
-                               (and (pair? a)
-                                    (memq (car a) '(attack-unit attack-pos pull-workers-attack worker-drill-stack-attack))))
-                             preserved-tactical-directives))])
-             (if any-home-fight? 'attack 'hold))]
-          ;; L27-P0-3 (`Atk2-6%` truthful telemetry): When `l20-mass-staging-active?` is holding
-          ;; our army at Natural/Ramp (and not actively fighting home defense), log `'hold` rather
-          ;; than raw Fog `fap-score = +1.0 -> 'attack`!
-          [(and l34-mass-staging-now? (not l34-defending-home-now?))
-           'hold]
-          [else raw-fap-posture]))
+        (case l88-op-mode-now
+          [(defend-home commit-push flank-rotate) (if any-combat-fight? 'attack 'hold)]
+          [(regroup-stage pre-arc-hold) 'hold]
+          [(retreat-regroup)
+           (if (or l34-defending-home-now? l34-army-at-home-now?) (if any-combat-fight? 'attack 'hold) 'retreat)]
+          [else
+           (define raw-fap-posture (fap-posture-with-hysteresis fap-score 'hold))
+           (cond
+             [(and (eq? raw-fap-posture 'retreat) (or l34-defending-home-now? l34-army-at-home-now?))
+              (if any-combat-fight? 'attack 'hold)]
+             [(and (hash? door-st-cache) (hash-ref door-st-cache 'l34-mass-staging? #f) (not l34-defending-home-now?)) 'hold]
+             [else raw-fap-posture])]))
       (tel-push! 'fap-posture eff-fap-posture)
       (tel-push! 'enemy-archetype (mastermind-state-enemy-archetype mstate))
       (tel-push! 'mastermind-unit (mastermind-state-selected-unit mstate))
@@ -54870,6 +54842,10 @@
                'arbiter-overrides arb-ov-total
                'arbiter-top-reason arb-top-reason))
   (set-live-bot-runtime-last-telemetry! rt telemetry)
+  (define demand-st (rt-macro-demand-state rt))
+  (define step-m-dem (hash-ref demand-st 'mineral-demand-rate #f))
+  (define step-g-dem (hash-ref demand-st 'gas-demand-rate #f))
+  (define step-des-gas-w (hash-ref demand-st 'desired-gas-workers #f))
   (hash 'actions final-actions
         'mirror-actions final-mirror-actions
         'telemetry telemetry
@@ -54881,6 +54857,9 @@
         'gas-starvation-boost? step-gas-starvation-boost?
         'mineral-override-pressure? step-min-override-pressure?
         'apm-pressure-backoff? step-apm-pressure-backoff?
+        'mineral-demand-rate step-m-dem
+        'gas-demand-rate step-g-dem
+        'desired-gas-workers step-des-gas-w
         'arbiter-ledger arb-ledger-step
         'arena-reset? arena-reset-triggered?))
 

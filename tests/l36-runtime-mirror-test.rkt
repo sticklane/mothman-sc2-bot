@@ -300,8 +300,9 @@
                   #:enemy-units enemy-gw-robo-far)
      0.0))
   (check-true "L36-T3a-prod-parity-holds-underpowered-army-vs-12-gateway-robo-ball"
-              (hash-ref (rt-door-state rt3a) 'l36-prod-parity-mass-hold? #f)
-              "Expected l36-prod-parity-mass-hold? = #t against 12-unit Protoss Gateway-Robo ball")
+              (hash-ref (rt-door-state rt3a) 'l34-mass-staging? #f)
+              (format "Expected unified tactical-op staging hold against 12-unit Protoss Gateway-Robo ball; mode=~a"
+                      (hash-ref (rt-door-state rt3a) 'l88-op-mode #f)))
 
   ;; T3b: 66 Marines (>= 65 supply cap & >= 0.85x value) -> MUST release (`#f`)!
   (define rt3b (make-live-bot-runtime #:race 'Terran))
@@ -315,8 +316,9 @@
                   #:enemy-units enemy-gw-robo-far)
      0.0))
   (check-true "L36-T3b-prod-parity-releases-at-65plus-supply"
-              (not (hash-ref (rt-door-state rt3b) 'l36-prod-parity-mass-hold? #f))
-              "Expected l36-prod-parity-mass-hold? = #f once combat supply >= 65")
+              (not (hash-ref (rt-door-state rt3b) 'l34-mass-staging? #f))
+              (format "Expected tactical-op staging hold to release once combat supply >= 65; mode=~a"
+                      (hash-ref (rt-door-state rt3b) 'l88-op-mode #f)))
 
   ;; T3c: >= 3 Sieged Tanks + 10 Marines across the map vs 18 Marines -> MUST hold!
   (define enemy-3tanks-far
@@ -333,9 +335,9 @@
                   #:enemy-units enemy-3tanks-far)
      0.0))
   (check-true "L36-T3c-prod-parity-holds-against-3-sieged-tank-line"
-              (and (hash-ref (rt-door-state rt3c) 'l35-siege-tempest-mass-hold? #f)
-                   (hash-ref (rt-door-state rt3c) 'l36-prod-parity-mass-hold? #f))
-              "Expected >= 3 Sieged Tank line to activate L35/L36 mass staging hold")
+              (hash-ref (rt-door-state rt3c) 'l34-mass-staging? #f)
+              (format "Expected >= 3 Sieged Tank line to activate unified tactical-op staging hold; mode=~a"
+                      (hash-ref (rt-door-state rt3c) 'l88-op-mode #f)))
 
   ;; T3d: Home defense (`enemy-within-14-of-th?`) vs Gateway-Robo ball -> MUST NOT hold!
   (define enemy-gw-robo-at-nat
@@ -353,8 +355,9 @@
                   #:enemy-units enemy-gw-robo-at-nat)
      0.0))
   (check-true "L36-T3d-prod-parity-never-holds-home-defense"
-              (not (hash-ref (rt-door-state rt3d) 'l36-prod-parity-mass-hold? #f))
-              "Home defense must NEVER be held by l36-prod-parity-mass-hold?"))
+              (not (eq? (hash-ref (rt-door-state rt3d) 'l88-op-mode #f) 'regroup-stage))
+              (format "Home defense must NEVER cross-map regroup-stage; mode=~a"
+                      (hash-ref (rt-door-state rt3d) 'l88-op-mode #f))))
 
 ;; =============================================================================
 ;; TEST 4: TvP / PvZ / PvT L2 Enforcement & `#31` Corruptor Dive vs Tempests

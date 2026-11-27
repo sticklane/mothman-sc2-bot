@@ -6,12 +6,12 @@
 ;; Verifies Loop 68B Lane A (`#2107`):
 ;;   1. `lib/plan/worker-saturation-policy.rkt` (Restored Release #19 Anti-GRMS Bounds):
 ;;      - Multi-base `150G / 200M` does NOT latch `gas-pull-latch-box` and emits zero pullbacks;
-;;      - Multi-base `210G / 90M` latches `gas-pull-latch-box` (`>=200G & <110M`) and pulls
-;;        excess gas workers down to floor `1`;
-;;      - Multi-base `310G / 90M` (`>= 300G`) and `worker-crisis-gas-evac?` (`<= 12w`)
+;;      - Multi-base `220G / 90M` holds 1 gas worker (`p220=0`), while `270G / 90M`
+;;        pulls down to `0` (`p270=1`) and latches the active pullback;
+;;      - Multi-base `310G / 90M` and `worker-crisis-gas-evac?` (`<= 12w`)
 ;;        evacuate gas workers to `0`;
-;;      - `req-mineral-workers-for-gas-slot` at `g = 6` holds Gas `#3` refill at `22` mineral
-;;        workers (`< 28` floor) and refills once `28` mineral workers exist!
+;;      - Flow-balanced gas saturation holds Gas `#3` under mineral-heavy demand
+;;        and refills Gas `#3` under gas-heavy demand!
 ;;   2. `lib/priority-macro-brain.rkt` (Restored Geyser Gates + P1 Zerg & Terran Brain AA):
 ;;      - `pro-min-workers-for-next-gas-bldg` returns `34` / `39` (Protoss), `34` / `40` (Terran),
 ;;        and `14 / 28 / 38 / 46` (Zerg);
@@ -152,18 +152,28 @@
                 st220 #:loop 7200 #:race 'Protoss #:minerals 90 #:gas 220
                 #:workers ws1 #:bases (list b1 b2) #:gas-buildings (list g1-1 g2-0)
                 #:minerals-fields (list m1 m2 m3 m4)))
-  ;; 1 gas worker at 270G/90M (>= 260G & < 120M) -> pulls to 0!
+  ;; 1 gas worker at 270G/90M without genuine overflow (< 2x horizon): obeys +-1w deadband (0 pulls!)
   (define st270 (make-worker-sat-state))
   (define d270 (evaluate-worker-saturation-policy!
                 st270 #:loop 7200 #:race 'Protoss #:minerals 90 #:gas 270
                 #:workers ws1 #:bases (list b1 b2) #:gas-buildings (list g1-1 g2-0)
                 #:minerals-fields (list m1 m2 m3 m4)))
-  (check! (and (unbox (worker-sat-gas-pull-latch-box st220))
-               (= (gas-pull-worker-count d220) 0)
-               (= (gas-pull-worker-count d270) 1))
-          (format "2. 220G/90M holds floor 1 while 270G/90M pulls to 0; p220=~a p270=~a"
+  ;; 1 gas worker at 270G/90M WITH genuine gas overflow (> 2x horizon=120G): latches & pulls to 0!
+  (define st-ovf (make-worker-sat-state))
+  (define d-ovf (evaluate-worker-saturation-policy!
+                 st-ovf #:loop 7200 #:race 'Protoss #:minerals 90 #:gas 270
+                 #:workers ws1 #:bases (list b1 b2) #:gas-buildings (list g1-1 g2-0)
+                 #:minerals-fields (list m1 m2 m3 m4)
+                 #:mineral-demand-rate 1400.0 #:gas-demand-rate 120.0))
+  (check! (and (= (gas-pull-worker-count d220) 0)
+               (= (gas-pull-worker-count d270) 0)
+               (unbox (worker-sat-gas-pull-latch-box st-ovf))
+               (= (gas-pull-worker-count d-ovf) 1))
+          (format "2. Non-overflow obeys +-1w deadband while genuine overflow latches & pulls 1->0; p220=~a p270=~a ovfLatch=~a pOvf=~a"
                   (gas-pull-worker-count d220)
-                  (gas-pull-worker-count d270))))
+                  (gas-pull-worker-count d270)
+                  (unbox (worker-sat-gas-pull-latch-box st-ovf))
+                  (gas-pull-worker-count d-ovf))))
 
 ;; =============================================================================
 ;; 3. Multi-base 310G/90M evacuates to 0, and worker-crisis-gas-evac? (<= 12w) still evacuates to 0
@@ -193,29 +203,31 @@
                   (gas-pull-worker-count d-cr))))
 
 ;; =============================================================================
-;; 4. `req-mineral-workers-for-gas-slot` at g = 6 preserves 28-mineral-worker floor!
+;; 4. Flow-balanced gas saturation holds Gas #3 under mineral-heavy demand & refills under gas demand
 ;; =============================================================================
 (let ()
   (define g3-empty (mk-g 12 54.0 28.0 #:asgn 0 #:ideal 3 #:base 2))
-  ;; 22 mineral workers (< 28 floor, minerals 180 < 400) -> holds Gas #3 refill
+  ;; Mineral-heavy demand (1400M/260G per min) with 6 gas workers -> holds Gas #3 refill
   (define st-hold (make-worker-sat-state))
   (define ws-22 (make-2base-workers 22 3 3))
   (define d-hold (evaluate-worker-saturation-policy!
                   st-hold #:loop 6800 #:race 'Protoss #:minerals 180 #:gas 90
                   #:workers ws-22 #:bases (list b1 b2) #:gas-buildings (list g1 g2 g3-empty)
-                  #:minerals-fields (list m1 m2 m3 m4)))
-  ;; 28 mineral workers (>= 28 floor) -> refills Gas #3 (tag 12)!
+                  #:minerals-fields (list m1 m2 m3 m4)
+                  #:mineral-demand-rate 1400.0 #:gas-demand-rate 260.0))
+  ;; Gas-heavy demand (1100M/600G per min) with 28 mineral workers -> refills Gas #3 (tag 12)!
   (define st-fill (make-worker-sat-state))
   (define ws-28 (make-2base-workers 28 3 3))
   (define d-fill (evaluate-worker-saturation-policy!
                   st-fill #:loop 6800 #:race 'Protoss #:minerals 180 #:gas 90
                   #:workers ws-28 #:bases (list b1 b2) #:gas-buildings (list g1 g2 g3-empty)
-                  #:minerals-fields (list m1 m2 m3 m4)))
+                  #:minerals-fields (list m1 m2 m3 m4)
+                  #:mineral-demand-rate 1100.0 #:gas-demand-rate 600.0))
   (define refills (gas-refill-dirs d-fill))
   (check! (and (null? (gas-refill-dirs d-hold))
                (pair? refills)
                (= (sat-directive-target-tag (car refills)) 12))
-          (format "4. g=6 must hold Gas #3 at 22 mineral workers (<28) and refill at 28; hold=~s fill=~s"
+          (format "4. Flow-balanced saturation holds Gas #3 under mineral-heavy demand and refills under gas demand; hold=~s fill=~s"
                   (gas-refill-dirs d-hold) refills)))
 
 ;; =============================================================================

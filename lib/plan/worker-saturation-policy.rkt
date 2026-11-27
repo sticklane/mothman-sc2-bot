@@ -22,13 +22,13 @@
 ;;   - Sec 0b: Offline/mined-out base worker evacuation (`'harvest-gather`, urgent)
 ;;   - Sec 1 : Idle worker recovery onto under-saturated online bases (or safe
 ;;             map minerals when owned bases are mined out)
-;;   - Sec 2 : Gas building refill (respecting mineral floor, `350G/600G` float
-;;             caps, `worker-crisis-gas-evac?`, `mined-out-gas-evac?`, `112f`
-;;             pull->fill opposite cooldown, and `#:gas-starvation-boost?` 2w/step)
+;;   - Sec 2 : Flow-balanced gas building refill toward `G*` (`compute-flow-balanced-gas-target`,
+;;             respecting physical mined-out / 6w mineral backbone, `112f` pull->fill
+;;             opposite cooldown, and `#:gas-starvation-boost?` 2w/step fallback)
 ;;   - Sec 3 : Inter-base over-saturated mineral transfer (`<= 6048` early natural
 ;;             split + `> 6048` strict `>= +2` over-sat, `2x` cd on APM backoff)
-;;   - Sec 4 : Gas pullback under hysteresis latch (suppressed `< 300G` under
-;;             `#:gas-starvation-boost?`, preserving crisis/mined-out evac)
+;;   - Sec 4 : Flow-balanced gas pullback toward `G*` (`+-1w` deadband hysteresis +
+;;             `112f` opposite cooldown, preserving mined-out evacuation)
 ;;   - Sec 5 : Idle MULE re-tasking onto nearby safe mineral patches
 ;; =============================================================================
 
@@ -40,8 +40,6 @@
                   SC2-IDEAL-WORKERS-PER-MINERAL-LINE
                   SC2-IDEAL-WORKERS-PER-GEYSER
                   SC2-BASE-RESOURCE-RADIUS
-                  SC2-GAS-FLOAT-REBALANCE-THRESH
-                  SC2-GAS-FLOAT-PULL-THRESHOLD
                   SC2-GAS-HARVESTER-EXCLUSION-RADIUS)
          (only-in "../sc2-common.rkt"
                   safe-int
@@ -57,6 +55,7 @@
  (struct-out sat-mineral-info)
  (struct-out sat-mule-info)
  (struct-out sat-directive)
+ compute-flow-balanced-gas-target
  evaluate-worker-saturation-policy!
  worker-sat-gas-pull-latch-box)
 
@@ -254,6 +253,84 @@
   (values (take capped near-cnt) (drop capped near-cnt) capped))
 
 ;; =============================================================================
+;; 2b. Closed-Form SC2 Flow-Balanced Gas Worker Target (Loop 88A)
+;;     Replaces brittle static bank-threshold valves with pure SC2 harvest physics:
+;;     r_M ~ 58 M/min per mineral worker, r_G ~ 54 G/min per gas worker, over a
+;;     30s flow-balance horizon (60s when saving under gas-starvation-boost).
+;; =============================================================================
+
+(define SC2-MINERAL-FLOW-PER-WORKER 58.0) ; physics: SC2 2/patch mineral harvest rate (M/min/worker)
+(define SC2-GAS-FLOW-PER-WORKER 54.0)     ; physics: SC2 3/geyser gas harvest rate (G/min/worker)
+(define SC2-FLOW-HORIZON-MIN 0.5)         ; physics: 30s flow-balance horizon
+
+(define (compute-flow-balanced-gas-target
+         total-workers
+         ready-gas-count
+         cur-min
+         cur-gas
+         #:mineral-demand-rate [m-dem #f]
+         #:gas-demand-rate [g-dem #f]
+         #:desired-gas-workers [desired-gas-w #f]
+         #:gas-starvation-boost? [gas-boost? #f]
+         #:owned-mineral-count [owned-mins 8])
+  (define n-w (max 0 (safe-int total-workers 0)))
+  (define n-g (max 0 (safe-int ready-gas-count 0)))
+  (define max-slots (* SC2-IDEAL-WORKERS-PER-GEYSER n-g))
+  (define m-bank (exact->inexact (max 0 (safe-int cur-min 0))))
+  (define g-bank (exact->inexact (max 0 (safe-int cur-gas 0))))
+  (define min-backbone-cap
+    (if (and (> owned-mins 0) (> n-w 6))
+        (- n-w 6)
+        n-w))
+  (define hard-cap-slots (min max-slots min-backbone-cap))
+  (cond
+    [(or (<= max-slots 0) (<= n-w 0)) 0]
+    ;; Physical mined-out guard: no local base minerals left while holding surplus gas -> evacuate gas
+    [(and (<= owned-mins 0) (fl> g-bank (fl* 2.0 (flmax 1.0 m-bank))) (fl>= g-bank 100.0)) ; physics: mined-out gas skew
+     0]
+    ;; Explicit declarative target from Layer 3 Escrow Engine
+    [(and (real? desired-gas-w) (rational? desired-gas-w))
+     (max 0 (min hard-cap-slots (inexact->exact (round (exact->inexact desired-gas-w)))))]
+    [else
+     (define has-explicit-dem?
+       (and (real? m-dem) (rational? m-dem)
+            (real? g-dem) (rational? g-dem)
+            (fl> (fl+ (exact->inexact m-dem) (exact->inexact g-dem)) 0.0)))
+     (define econ-cap (fl* (exact->inexact (max 1 n-w)) SC2-MINERAL-FLOW-PER-WORKER))
+     (define-values (eff-m-dem eff-g-dem)
+       (if has-explicit-dem?
+           (values (flmax 1.0 (exact->inexact m-dem))
+                   (flmax 0.0 (exact->inexact g-dem)))
+           (let* ([g-share (if gas-boost? 0.36 0.25)]
+                  [gd (fl* g-share econ-cap)]
+                  [md (flmax 1.0 (fl- econ-cap gd))])
+             (values md gd))))
+     (define horizon-min
+       (if (and gas-boost? (not has-explicit-dem?))
+           (fl* 2.0 SC2-FLOW-HORIZON-MIN)
+           SC2-FLOW-HORIZON-MIN))
+     (define ratio (fl/ eff-g-dem eff-m-dem))
+     (define excess-gas (flmax 0.0 (fl- g-bank (fl* m-bank ratio))))
+     (define excess-min
+       (if (fl> ratio 0.01)
+           (flmax 0.0 (fl- m-bank (fl/ g-bank ratio)))
+           0.0))
+     (define m-need (flmax 0.0 (fl- (fl* eff-m-dem horizon-min) excess-min)))
+     (define g-need (flmax 0.0 (fl- (fl* eff-g-dem horizon-min) excess-gas)))
+     (define m-we (fl/ m-need SC2-MINERAL-FLOW-PER-WORKER))
+     (define g-we (fl/ g-need SC2-GAS-FLOW-PER-WORKER))
+     (define denom (fl+ m-we g-we))
+     (define raw-g-frac
+       (if (fl> denom 0.0)
+           (fl/ g-we denom)
+           (let ([fm (fl/ eff-m-dem SC2-MINERAL-FLOW-PER-WORKER)]
+                 [fg (fl/ eff-g-dem SC2-GAS-FLOW-PER-WORKER)])
+             (if (fl> (fl+ fm fg) 0.0) (fl/ fg (fl+ fm fg)) 0.0))))
+     (define raw-target
+       (inexact->exact (round (fl* (exact->inexact n-w) raw-g-frac))))
+     (max 0 (min hard-cap-slots raw-target))]))
+
+;; =============================================================================
 ;; 3. Main Pure Policy Evaluator (`evaluate-worker-saturation-policy!`)
 ;; =============================================================================
 
@@ -270,7 +347,10 @@
          #:mules [mule-infos '()]
          #:heavy-worker-rush-active? [heavy-rush? #f]
          #:gas-starvation-boost? [gas-starvation-boost? #f]
-         #:apm-pressure-backoff? [apm-pressure-backoff? #f])
+         #:apm-pressure-backoff? [apm-pressure-backoff? #f]
+         #:mineral-demand-rate [mineral-demand-rate #f]
+         #:gas-demand-rate [gas-demand-rate #f]
+         #:desired-gas-workers [desired-gas-workers #f])
   (define cur-loop (safe-int cur-loop-raw 0))
   (define cur-min (safe-int cur-min-raw 0))
   (define cur-gas (safe-int cur-gas-raw 0))
@@ -873,28 +953,70 @@
                                               (fl-num (sat-mineral-info-y m)))))))
                 cand-mins)))
 
-  ;; Loop 66 hysteresis feedback flag: active when `gas-starvation-boost?` & `cur-gas < 300`
+  ;; Loop 88A: Single closed-form flow-balanced gas worker target `G*` driven by
+  ;; Layer 3 `(mineral-demand-rate, gas-demand-rate, desired-gas-workers)` & SC2 physics!
   (define gas-boost-active? (and gas-starvation-boost? (< cur-gas 300)))
+  (define flow-gas-target
+    (compute-flow-balanced-gas-target
+     (length workers)
+     (length ready-gas-bldgs)
+     cur-min
+     cur-gas
+     #:mineral-demand-rate mineral-demand-rate
+     #:gas-demand-rate gas-demand-rate
+     #:desired-gas-workers desired-gas-workers
+     #:gas-starvation-boost? gas-boost-active?
+     #:owned-mineral-count (length owned-base-minerals)))
+  (define eff-m-dem-rate ; physics: expected mineral consumption rate (M/min)
+    (cond
+      [(and (real? mineral-demand-rate) (rational? mineral-demand-rate)
+            (fl> (exact->inexact mineral-demand-rate) 0.0))
+       (exact->inexact mineral-demand-rate)]
+      [else
+       (fl* 0.75 (fl* (exact->inexact (max 1 (length workers))) SC2-MINERAL-FLOW-PER-WORKER))]))
+  (define eff-g-dem-rate ; physics: expected gas consumption rate (G/min)
+    (cond
+      [(and (real? gas-demand-rate) (rational? gas-demand-rate)
+            (fl> (exact->inexact gas-demand-rate) 0.0))
+       (exact->inexact gas-demand-rate)]
+      [else
+       (fl* 0.25 (fl* (exact->inexact (max 1 (length workers))) SC2-MINERAL-FLOW-PER-WORKER))]))
+  (define horizon-gas-demand ; physics: expected gas consumption over flow horizon
+    (fl* eff-g-dem-rate SC2-FLOW-HORIZON-MIN))
+  (define eff-gas-ratio ; physics: stoichiometry gas/mineral burn ratio
+    (flmin 0.85 (fl/ eff-g-dem-rate (flmax 1.0 eff-m-dem-rate))))
+  (define gas-surplus-pre (max 0 (- eff-active-gas-workers flow-gas-target)))
+  ;; Loop 88D: Mineral-paired gas overflow (pure SC2 physics, zero static bank ceiling!).
+  ;; Fires when cur-gas exceeds 2x horizon gas demand OR when Layer 3 requests a pullback
+  ;; (G*=0 with >=2 gas workers, or gas-surplus >= 3) and cur-gas exceeds both 1 full geyser's
+  ;; 60s output (3 * SC2-GAS-FLOW-PER-WORKER = 162G) and 1.5x mineral-paired bank burn.
+  (define mineral-paired-gas-overflow?
+    (and (> cur-gas 0)
+         (or (>= gas-surplus-pre 3)
+             (and (= flow-gas-target 0) (>= eff-active-gas-workers 2)))
+         (fl> (exact->inexact cur-gas)
+              (flmax (fl* 3.0 SC2-GAS-FLOW-PER-WORKER) ; physics: 1 full geyser 60s buffer
+                     (fl* 1.5 (exact->inexact (max 0 cur-min)) eff-gas-ratio)))))
+  (define genuine-gas-overflow?
+    (and (> cur-gas 0)
+         (or (fl> (exact->inexact cur-gas)
+                  (fl* 2.0 (flmax SC2-GAS-FLOW-PER-WORKER horizon-gas-demand)))
+             mineral-paired-gas-overflow?)))
+  ;; Loop 88B/88D: Always honor +-1w hysteresis deadband (no hard `(= flow-gas-target 0)` bypass)
+  ;; unless local minerals are physically mined out or cur-gas genuinely overflows horizon demand!
+  (define gas-pull-needed?
+    (or (> eff-active-gas-workers (+ flow-gas-target 1))
+        (and (= flow-gas-target 0)
+             (> eff-active-gas-workers 0)
+             (or (null? owned-base-minerals)
+                 genuine-gas-overflow?))))
 
   ;; ===========================================================================
   ;; Sec 0a: Zero-Gas-Freeze Rescue & 8s (`180f`) 0-Worker Geyser Auto-Resat
   ;; ===========================================================================
-  (define midgame-multi-base-gas?
-    (and (> cur-loop 4032) (>= (length online-townhalls) 2)))
   (define gas-8s-resat-blocked?
     (or heavy-rush?
-        (and (<= (length workers) 12) (>= cur-gas 150) (< cur-min 120))
-        (and (null? owned-base-minerals) (>= cur-gas 500) (< cur-min 200))
-        (and (not gas-boost-active?)
-             (or (if midgame-multi-base-gas?
-                     (or (and (>= cur-gas 200) (< cur-min 110))
-                         (and (>= cur-gas 260) (< cur-min 160))
-                         (and (>= cur-gas 400) (< cur-min 250)))
-                     (or (and (>= cur-gas 180) (< cur-min 160))
-                         (and (>= cur-gas SC2-GAS-FLOAT-REBALANCE-THRESH) (< cur-min 250))))
-                 (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD) (< cur-min 450))
-                 (and (>= cur-gas (if midgame-multi-base-gas? 140 130))
-                      (unbox gas-pull-latch-box))))))
+        (>= eff-active-gas-workers flow-gas-target)))
   (define live-ready-gas-tag-set all-gas-tags)
   (for ([k (in-list (hash-keys gas-zero-since-ht))]
         #:unless (set-member? live-ready-gas-tag-set k))
@@ -904,7 +1026,7 @@
                #:when (let* ([gtag (sat-gas-info-tag gb)]
                              [eligible?
                               (and (= (gas-eff-assigned gb) 0)
-                                   (>= (length workers) 12)
+                                   (< eff-active-gas-workers flow-gas-target)
                                    (not gas-8s-resat-blocked?)
                                    (not (gas-bldg-lethal-slaughter? gb))
                                    (fl< (gas-bldg-threat-score gb) 5000.0)
@@ -1182,114 +1304,26 @@
        (issue-gather! w bmtag #:urgent? #f #:reason 'idle-long-distance-mine))])
 
   ;; ===========================================================================
-  ;; Sec 2: Gas Building Refill + Hysteresis Latch Update
-  ;;   Loop 66: `gas-starvation-boost?` (`cur-gas < 300`) suppresses early pullback
-  ;;            and raises refill cap from 1 -> 2 workers/step (up to ideal <= 3)!
+  ;; Sec 2: Flow-Balanced Gas Building Refill (Loop 88A)
+  ;;   Refills toward `flow-gas-target` (`G*`) with zero static bank ladders!
   ;; ===========================================================================
-  (define self-is-zerg? (eq? race-sym 'Zerg))
-  (cond
-    [(if midgame-multi-base-gas?
-         (or (and (>= cur-gas 200) (< cur-min 110))
-             (and (>= cur-gas 260) (< cur-min 160))
-             (and (>= cur-gas 400) (< cur-min 250))
-             (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD) (< cur-min 450)))
-         (or (and (>= cur-gas 180) (< cur-min 160))
-             (and (>= cur-gas SC2-GAS-FLOAT-REBALANCE-THRESH) (< cur-min 250))
-             (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD) (< cur-min 450))))
-     (set-box! gas-pull-latch-box #t)]
-    [(or (>= cur-min 450)
-         (and (<= cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD)
-              (if midgame-multi-base-gas?
-                  (or (< cur-gas 140) (>= cur-min 280))
-                  (or (< cur-gas 130) (>= cur-min 280)))))
-     (set-box! gas-pull-latch-box #f)])
-
-  (define zerg-post-speed-surge-active?
-    (and self-is-zerg?
-         (< cur-loop 5040)
-         (>= (length online-townhalls) 2)
-         (< (length workers) 28)
-         (< cur-min 250)
-         (>= cur-gas 108)))
-  (define worker-crisis-gas-evac?
-    (and (<= (length workers) 12)
-         (>= cur-gas 150)
-         (< cur-min 120)))
-  (define mined-out-safe-map-minerals
-    (if (and (null? owned-base-minerals) (>= cur-gas 500) (< cur-min 200))
-        safe-map-minerals
-        '()))
+  (set-box! gas-pull-latch-box gas-pull-needed?)
   (define mined-out-gas-starved?
     (and (null? owned-base-minerals)
-         (>= cur-gas 500)
-         (< cur-min 200)))
+         (= flow-gas-target 0)))
+  (define mined-out-safe-map-minerals
+    (if mined-out-gas-starved? safe-map-minerals '()))
   (define mined-out-gas-evac?
     (and mined-out-gas-starved?
          (pair? mined-out-safe-map-minerals)))
-  (define severe-gas-rich-min-starved?
-    (and (>= cur-gas 350)
-         (< cur-min 220)
-         (>= eff-active-gas-workers 4)))
-  (define extreme-gas-rich-min-starved?
-    (and (>= cur-gas 550)
-         (< cur-min 180)))
-  ;; Loop 86C/86E: Terran & Protoss midgame mineral-starvation gas-pull tier
-  ;; (`>= 180G & < 120M` for T/P, plus `>= 160G & < 105M` for Terran pushes, when `>= 4 gas workers`),
-  ;; pulling excess Refineries/Assimilators onto minerals while preserving a 2-3 gas worker floor
-  ;; and holding resaturation until `cur-min >= 180`.
-  (define terran-midgame-gas-pull-due?
-    (and (memq race-sym '(Terran Protoss))
-         (>= eff-active-gas-workers 4)
-         (or (and (>= cur-gas 180) (< cur-min 120))
-             (and (eq? race-sym 'Terran) (>= cur-gas 160) (< cur-min 105))
-             (and (>= cur-gas 150)
-                  (< cur-min 180)
-                  (< (- cur-loop (unbox gas-last-pull-box)) 336)))))
-  (define terran-midgame-gas-resat-hold?
-    (and (memq race-sym '(Terran Protoss))
-         (< cur-min 180)
-         (>= cur-gas 150)
-         (>= eff-active-gas-workers 2)
-         (or (< cur-min 120)
-             (< (- cur-loop (unbox gas-last-pull-box)) 336))))
-  (define gas-over-banked?
-    (or worker-crisis-gas-evac?
-        mined-out-gas-starved?
-        severe-gas-rich-min-starved?
-        extreme-gas-rich-min-starved?
-        terran-midgame-gas-pull-due?
-        (and (not gas-boost-active?)
-             (unbox gas-pull-latch-box))))
-  (define gas-pull-to-zero-now?
-    (or worker-crisis-gas-evac?
-        mined-out-gas-starved?
-        extreme-gas-rich-min-starved?
-        (and (not gas-boost-active?)
-             gas-over-banked?
-             (or (>= cur-gas 300)
-                 (and (>= cur-gas 260) (< cur-min 120))))))
+  (define gas-deficit (max 0 (- flow-gas-target eff-active-gas-workers)))
   (define gas-resaturate-blocked?
-    (or gas-pull-to-zero-now?
-        heavy-rush?
-        terran-midgame-gas-resat-hold?
-        (and gas-over-banked? (>= eff-active-gas-workers 1))
-        (and zerg-post-speed-surge-active? (not gas-boost-active?) (>= eff-active-gas-workers 1))))
-
-  (define (req-mineral-workers-for-gas-slot g)
-    (cond
-      [(= g 0) 6]
-      [(= g 1) 8]
-      [(= g 2) 10]
-      [(< g 6) (if (or (>= cur-min 300) gas-boost-active?) 10 18)]
-      [else    (if (>= cur-min 400) 14 28)]))
-  (define min-mineral-workers-for-next-gas
-    (req-mineral-workers-for-gas-slot eff-active-gas-workers))
+    (or heavy-rush?
+        mined-out-gas-starved?
+        (<= gas-deficit 0)))
 
   (when (and (not rescue-issued-this-frame?)
              (pair? under-gas)
-             (or (and (null? owned-base-minerals) (not mined-out-gas-starved?))
-                 (>= (- (length workers) active-gas-worker-count)
-                     min-mineral-workers-for-next-gas))
              (not gas-resaturate-blocked?))
     (define gb (first under-gas))
     (define gtag (sat-gas-info-tag gb))
@@ -1327,7 +1361,7 @@
         (if (and (null? eligible-idle)
                  (null? eligible-all)
                  zero-gas-workers-now?
-                 (< cur-gas 180))
+                 (> flow-gas-target 0))
             (filter (lambda (w)
                       (and (not (set-member? commanded-this-frame (sat-worker-info-tag w)))
                            (not (worker-carrying-gas? w))
@@ -1343,22 +1377,14 @@
         (define gb-ideal (min 3 (max SC2-IDEAL-WORKERS-PER-GEYSER
                                      (safe-int (sat-gas-info-ideal-harvesters gb) 0))))
         (define gb-need (min 3 (max 0 (- gb-ideal gb-asgn))))
-        (define cur-min-workers (- (length workers) active-gas-worker-count))
-        (define max-fill-by-floor
-          (if (null? owned-base-minerals)
-              gb-need
-              (let loop ([k 0] [g eff-active-gas-workers] [m cur-min-workers])
-                (define req-m (req-mineral-workers-for-gas-slot g))
-                (if (and (< k gb-need) (>= m req-m))
-                    (loop (add1 k) (add1 g) (sub1 m))
-                    k))))
+        (define max-fill-by-target (min gb-need gas-deficit))
         (define fill-cap
           (cond
             [gas-boost-active?
-             (min (if allow-carry? 2 3) max-fill-by-floor)]
-            [(or allow-carry? gas-over-banked? zerg-post-speed-surge-active?)
-             (min 1 max-fill-by-floor)]
-            [else max-fill-by-floor]))
+             (min (if allow-carry? 2 3) max-fill-by-target)]
+            [allow-carry?
+             (min 1 max-fill-by-target)]
+            [else max-fill-by-target]))
         (when (> fill-cap 0)
           (define ranked-gas-ws
             (sort candidate-workers
@@ -1382,7 +1408,7 @@
               (or (<= cur-loop 2688)
                   zero-gas-workers-now?
                   gas-boost-active?
-                  (and (< cur-gas 180) (not gas-resaturate-blocked?))))
+                  (>= gas-deficit 2)))
             (emit-dir! 'harvest-gather fill-wtags gtag fill-p1?
                        (if gas-boost-active? 'gas-refill-boosted 'gas-refill)))))))
 
@@ -1550,39 +1576,24 @@
              (emit-dir! 'harvest-gather xfer-wtags bmtag #f 'inter-base-transfer)])))))
 
   ;; ===========================================================================
-  ;; Sec 4: Gas Pullback Back to Minerals Under Hysteresis Latch
-  ;;   Loop 66: Suppressed while `gas-starvation-boost?` & `cur-gas < 300`
-  ;;            (still honoring `worker-crisis-gas-evac?` & `mined-out-gas-starved?`)
+  ;; Sec 4: Flow-Balanced Gas Pullback Back to Minerals (Loop 88A)
+  ;;   Pulls surplus gas workers down to `flow-gas-target` (`G*`) with +-1w
+  ;;   deadband hysteresis & 112f opposite cooldown (zero static bank ladders!).
   ;; ===========================================================================
+  (define gas-surplus (max 0 (- eff-active-gas-workers flow-gas-target)))
   (define grms-urgent-pull?
-    (or (and gas-over-banked? (>= cur-gas 200) (< cur-min 110))
-        (and (>= cur-gas 380) (< cur-min 180))
-        (and terran-midgame-gas-pull-due? (< cur-min 110))
-        extreme-gas-rich-min-starved?))
-  (define gas-pull-target-floor
-    (cond
-      [gas-pull-to-zero-now? 0]
-      [severe-gas-rich-min-starved? (min 3 (length ready-gas-bldgs))]
-      [(or (and (not gas-boost-active?) (unbox gas-pull-latch-box))
-           worker-crisis-gas-evac?
-           mined-out-gas-starved?
-           (and zerg-post-speed-surge-active? (not gas-boost-active?)))
-       1]
-      [terran-midgame-gas-pull-due? (min 3 (max 2 (length ready-gas-bldgs)))]
-      [else eff-active-gas-workers]))
+    (and gas-pull-needed?
+         (or genuine-gas-overflow?
+             mined-out-gas-evac?)))
+  ;; Loop 88B: Smooth pullback cap (<= 2 workers per 112f cooldown unless cur-gas genuinely
+  ;; exceeds 2x horizon gas demand or local base minerals are physically mined out).
   (define max-gas-pulls-this-step
     (if (and (not gas-zero-freeze-rescue?)
-             (or (not gas-boost-active?)
-                 worker-crisis-gas-evac?
-                 mined-out-gas-starved?
-                 severe-gas-rich-min-starved?
-                 extreme-gas-rich-min-starved?
-                 terran-midgame-gas-pull-due?)
-             (or gas-over-banked? zerg-post-speed-surge-active?))
-        (let ([per-step-cap (cond [extreme-gas-rich-min-starved? 4]
-                                  [(>= eff-active-gas-workers 4) 3]
-                                  [else 2])])
-          (min per-step-cap (max 0 (- eff-active-gas-workers gas-pull-target-floor))))
+             gas-pull-needed?)
+        (let ([per-step-cap (if (or genuine-gas-overflow? mined-out-gas-evac?)
+                                (if (and (= flow-gas-target 0) (>= gas-surplus 4)) 4 3)
+                                2)])
+          (min per-step-cap gas-surplus))
         0))
   (define gas-pull-cand-mins
     (cond
@@ -1595,13 +1606,17 @@
   (define pull-retry-throttled?
     (and (< (- cur-loop (car prev-pull-state)) 32)
          (>= eff-active-gas-workers (cdr prev-pull-state))))
+  (define pull-same-cd (if (or genuine-gas-overflow? mined-out-gas-evac?) 48 112))
+  (define pull-same-cd-throttled?
+    (and (< (- cur-loop (unbox gas-last-pull-box)) pull-same-cd)
+         (not mined-out-gas-evac?)))
   (define pull-opp-throttled?
     (and (< (- cur-loop (unbox gas-last-fill-box)) 112)
          (not grms-urgent-pull?)
-         (not worker-crisis-gas-evac?)
          (not mined-out-gas-evac?)))
   (when (and (> max-gas-pulls-this-step 0)
              (not pull-retry-throttled?)
+             (not pull-same-cd-throttled?)
              (not pull-opp-throttled?)
              (pair? gas-pull-cand-mins)
              (pair? ready-gas-bldgs))
@@ -1609,11 +1624,7 @@
     (define (targeting-gas-bldg? w)
       (set-member? all-gas-tags (worker-tgt w)))
     (define allow-carrying-gas-pull?
-      (or (and (>= cur-gas 200) (< cur-min 120))
-          (and terran-midgame-gas-pull-due? (< cur-min 120))
-          severe-gas-rich-min-starved?
-          extreme-gas-rich-min-starved?
-          worker-crisis-gas-evac?
+      (or grms-urgent-pull?
           mined-out-gas-evac?))
     (define non-carrying-gas-workers
       (filter (lambda (w)

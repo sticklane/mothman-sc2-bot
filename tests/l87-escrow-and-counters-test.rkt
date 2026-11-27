@@ -1010,7 +1010,7 @@
     (step-priority-macro-brain
      (make-macro-world-state
       #:race 'Protoss #:enemy-race 'Zerg #:frame 10400
-      #:minerals 110 #:gas 120 #:supply-used 108 #:supply-cap 142 #:supply-left 34 #:pending-supply 0
+      #:minerals 80 #:gas 120 #:supply-used 108 #:supply-cap 142 #:supply-left 34 #:pending-supply 0
       #:workers 58 #:active-bases 3 #:mineral-harvesters 44 #:gas-harvesters 14
       #:army-supply 44 #:enemy-threat-supply 12 #:under-attack? #f
       #:researched-upgrades '(warp-gate-research charge)
@@ -1050,7 +1050,7 @@
     (step-priority-macro-brain
      (make-macro-world-state
       #:race 'Terran #:enemy-race 'Terran #:frame 7800
-      #:minerals 110 #:gas 130 #:supply-used 72 #:supply-cap 94 #:supply-left 22 #:pending-supply 0
+      #:minerals 110 #:gas 80 #:supply-used 72 #:supply-cap 94 #:supply-left 22 #:pending-supply 0
       #:workers 40 #:active-bases 2 #:mineral-harvesters 30 #:gas-harvesters 10
       #:army-supply 26 #:enemy-threat-supply 24 #:under-attack? #t
       #:researched-upgrades '(stimpack)
@@ -1069,7 +1069,7 @@
     (step-priority-macro-brain
      (make-macro-world-state
       #:race 'Terran #:enemy-race 'Zerg #:frame 10200
-      #:minerals 110 #:gas 130 #:supply-used 106 #:supply-cap 134 #:supply-left 28 #:pending-supply 0
+      #:minerals 110 #:gas 80 #:supply-used 106 #:supply-cap 134 #:supply-left 28 #:pending-supply 0
       #:workers 54 #:active-bases 3 #:mineral-harvesters 42 #:gas-harvesters 12
       #:army-supply 44 #:enemy-threat-supply 10 #:under-attack? #f
       #:researched-upgrades '(stimpack combat-shield)

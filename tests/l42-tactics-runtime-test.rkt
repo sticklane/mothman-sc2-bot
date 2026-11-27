@@ -426,7 +426,7 @@
                  #:ally-units pvt-gw-army #:ally-buildings pvt-bldgs
                  #:enemy-units far-terran-army))
   (define acts-pvt-wait (run-l34 rt-pvt obs-pvt-wait))
-  (define hold-wait? (hash-ref (rt-door-state rt-pvt) 'l42-pvt-awaiting-colossus-hold? #f))
+  (define hold-wait? (eq? (hash-ref (rt-door-state rt-pvt) 'l88-op-mode #f) 'pre-arc-hold))
   (define stage-wait? (hash-ref (rt-door-state rt-pvt) 'l34-mass-staging? #f))
   (define cross-map-atk-wait?
     (ormap (lambda (a)
@@ -442,7 +442,7 @@
                  #:ally-units pvt-with-col #:ally-buildings pvt-bldgs
                  #:enemy-units far-terran-army))
   (define acts-pvt-go (run-l34 rt-pvt obs-pvt-go))
-  (define hold-go? (hash-ref (rt-door-state rt-pvt) 'l42-pvt-awaiting-colossus-hold? #f))
+  (define hold-go? (eq? (hash-ref (rt-door-state rt-pvt) 'l88-op-mode #f) 'pre-arc-hold))
   (define stage-go? (hash-ref (rt-door-state rt-pvt) 'l34-mass-staging? #f))
   (check-true "L42-T4c-m04-pvt-staging-holds-while-awaiting-colossus1-and-releases-when-ready"
               (and hold-wait? stage-wait? (not cross-map-atk-wait?)
@@ -454,14 +454,15 @@
   ;; Natural Nexus (`<= 10t`) -> MUST immediately fight (`attack-unit`) & NEVER set colossus hold!
   (define home-terran-raid
     (for/list ([i (in-range 6)]) (mk-u (+ 5951 i) 'marine (+ 62.0 (* 0.4 i)) 36.0 #:hp 55.0)))
+  (define rt-pvt-def (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
   (define acts-pvt-def
-    (run-l34 rt-pvt
+    (run-l34 rt-pvt-def
              (mk-live-obs 'Protoss 'Terran 6850 #:minerals 300 #:gas 200 #:supply-used 62 #:supply-cap 78
                           #:ally-units pvt-gw-army #:ally-buildings pvt-bldgs
                           #:enemy-units home-terran-raid)))
   (define home-def-atks
     (filter (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit))) acts-pvt-def))
-  (define hold-home? (hash-ref (rt-door-state rt-pvt) 'l42-pvt-awaiting-colossus-hold? #f))
+  (define hold-home? (hash-ref (rt-door-state rt-pvt-def) 'l34-mass-staging? #f))
   (check-true "L42-T4d-m04-pvt-home-defense-never-suppressed-by-colossus-hold"
               (and (not hold-home?) (>= (length home-def-atks) 4))
               (format "Expected hold-home?=#f & >= 4 home defense attack-unit orders, got hold=~a atks=~a"

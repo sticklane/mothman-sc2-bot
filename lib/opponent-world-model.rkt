@@ -53,6 +53,8 @@
          owm-estimated-min-rate
          owm-estimated-gas-rate
          owm-belief-telemetry-snapshot
+         (struct-out owm-control-signals)
+         owm-build-control-signals
          make-opponent-world-model
          reset-opponent-world-model!
          free-summon-unit-sym?
@@ -3452,3 +3454,126 @@
           'unseen-min unseen-min
           'unseen-gas unseen-gas
           'believed-army-val believed-army-val))
+
+;; =============================================================================
+;; 7-Dimension Control-Signal Bridge (`owm-control-signals`)
+;; =============================================================================
+;; Canonical read-only view exposing all 7 calibrated OWM dimensions to Layer 2
+;; macro game planning and Layer 4 tactical operation control without changing
+;; the 35-field `opponent-world-summary` struct ABI.
+
+(struct owm-control-signals
+  (;; Dim 1: Bases & Map Control
+   confirmed-bases
+   estimated-bases
+   happy-expected-bases
+   stopped-expanding?
+   unscouted-expansion-ambiguity?
+   confirmed-early-greed?
+   urgent-scout-pad
+   ;; Dim 2: Geysers & Resource Income
+   confirmed-geysers
+   estimated-geysers
+   est-min-rate
+   est-gas-rate
+   cum-minerals-mined
+   cum-gas-mined
+   ;; Dim 3: Workers & Eco Attrition
+   estimated-workers
+   workers-killed
+   ;; Dim 4: Production Throughput & Reachability
+   production-facility-count
+   home-prod-count
+   imminent-reachable-supply
+   ;; Dim 5: Hidden Tech & Unaccounted Bank
+   unaccounted-minerals
+   unaccounted-gas
+   hidden-gas-tech-risk?
+   enemy-1base-double-gas?
+   early-pool-latched?
+   inferred-proxy-rush-floor
+   requires-anti-air?
+   requires-detection?
+   ;; Dim 6: Standing Army, Siege/Turtle & Free-Summon Split
+   known-army-supply
+   known-army-value
+   believed-army-supply
+   believed-army-value
+   enemy-siege-or-turtle-count
+   locust-wave-active?
+   swarm-host-cooldown-window?
+   active-summon-count
+   destroyed-min
+   destroyed-gas
+   ;; Dim 7: Upgrades & Posture
+   enemy-upgrade-advantage
+   enemy-posture)
+  #:transparent)
+
+(define (owm-build-control-signals owm-or-sum
+                                   #:enemy-upgrade-advantage [enemy-upg-adv 0]
+                                   #:enemy-posture [enemy-posture 'MacroStandard])
+  (define owm (and (opponent-world-model? owm-or-sum) owm-or-sum))
+  (define summary
+    (cond
+      [(opponent-world-summary? owm-or-sum) owm-or-sum]
+      [owm (opponent-world-model-last-summary owm)]
+      [else #f]))
+  (define src (or summary owm))
+  (define upg-adv
+    (if (real? enemy-upg-adv) (inexact->exact (round enemy-upg-adv)) 0))
+  (define posture (if (symbol? enemy-posture) enemy-posture 'MacroStandard))
+  (cond
+    [(not summary)
+     (owm-control-signals
+      1 1 1 #f #f #f #f
+      0 0 0 0 0 0
+      0 0
+      0 0 0
+      0 0 #f #f #f 0.0 #f #f
+      0 0 0 0 0 #f #f 0 0 0
+      upg-adv posture)]
+    [else
+     (define conf-b (opponent-world-summary-confirmed-bases summary))
+     (define est-b (max conf-b (owm-estimated-enemy-bases src)))
+     (define conf-g (opponent-world-summary-confirmed-geysers summary))
+     (define est-g (max conf-g (owm-estimated-enemy-gases src)))
+     (owm-control-signals
+      conf-b
+      est-b
+      (opponent-world-summary-happy-expected-bases summary)
+      (and (opponent-world-summary-stopped-expanding? summary) #t)
+      (and (opponent-world-summary-unscouted-expansion-ambiguity? summary) #t)
+      (and (opponent-world-summary-confirmed-early-greed? summary) #t)
+      (opponent-world-summary-urgent-scout-pad summary)
+      conf-g
+      est-g
+      (owm-estimated-min-rate src)
+      (owm-estimated-gas-rate src)
+      (opponent-world-summary-cum-minerals-mined summary)
+      (opponent-world-summary-cum-gas-mined summary)
+      (opponent-world-summary-estimated-workers summary)
+      (opponent-world-summary-workers-killed summary)
+      (opponent-world-summary-production-facility-count summary)
+      (owm-home-prod-count src)
+      (opponent-world-summary-imminent-reachable-supply summary)
+      (opponent-world-summary-unaccounted-minerals summary)
+      (opponent-world-summary-unaccounted-gas summary)
+      (and (opponent-world-summary-hidden-gas-tech-risk? summary) #t)
+      (and (owm-enemy-1base-double-gas? src) #t)
+      (and (owm-early-pool-latched? src) #t)
+      (exact->inexact (owm-inferred-proxy-rush-floor src))
+      (and (opponent-world-summary-requires-anti-air? summary) #t)
+      (and (opponent-world-summary-requires-detection? summary) #t)
+      (opponent-world-summary-known-army-supply summary)
+      (opponent-world-summary-known-army-value summary)
+      (opponent-world-summary-believed-total-army-supply summary)
+      (opponent-world-summary-believed-total-army-value summary)
+      (opponent-world-summary-enemy-siege-or-turtle-count summary)
+      (and (opponent-world-summary-locust-wave-active? summary) #t)
+      (and (opponent-world-summary-swarm-host-cooldown-window? summary) #t)
+      (opponent-world-summary-active-summon-count summary)
+      (opponent-world-summary-destroyed-min summary)
+      (opponent-world-summary-destroyed-gas summary)
+      upg-adv
+      posture)]))

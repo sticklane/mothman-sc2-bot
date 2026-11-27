@@ -709,50 +709,53 @@
             (for/list ([i (in-range 3)]) (mk-w (+ 210 i) 36.0 25.0 #:type 'scv #:tgt 11))
             (for/list ([i (in-range 3)]) (mk-w (+ 220 i) 62.0 25.0 #:type 'scv #:tgt 12))))
   (define st (make-worker-sat-state))
-  ;; (i) 190G / 95M with 9 gas workers across 3 Refineries -> pulls 3 SCVs immediately (even with boost=#t!)
+  ;; (i) 190G / 95M with 9 gas workers across 3 Refineries under mineral-heavy Bio demand -> pulls >= 3 SCVs!
   (define ds-pull
     (evaluate-worker-saturation-policy!
      st #:loop 8200 #:race 'Terran #:minerals 95 #:gas 190
      #:workers (append min-ws gas-ws-9)
      #:bases (list b1 b2) #:gas-buildings (list g1 g2 g3)
      #:minerals-fields (list m1 m2 m3 m4)
-     #:gas-starvation-boost? #t))
-  ;; (ii) Recovery at loop 8320 with 160G / 145M (< 180M) & 3 gas workers on 1 Refinery (g2/g3 empty) -> holds resat!
+     #:mineral-demand-rate 1400.0 #:gas-demand-rate 240.0))
+  ;; (ii) Recovery at loop 8320 with 160G / 145M (< 112f opp-cd & low gas need) -> holds resat!
   (define g2-empty (mk-g 11 36.0 24.0 #:type 'refinery #:asgn 0 #:ideal 3 #:base 1))
   (define g3-empty (mk-g 12 62.0 24.0 #:type 'refinery #:asgn 0 #:ideal 3 #:base 2))
   (define gas-ws-3
     (for/list ([i (in-range 3)]) (mk-w (+ 200 i) 30.0 25.0 #:type 'scv #:tgt 10)))
   (define ds-hold
     (evaluate-worker-saturation-policy!
-     st #:loop 8320 #:race 'Terran #:minerals 145 #:gas 160
+     st #:loop 8300 #:race 'Terran #:minerals 145 #:gas 160
      #:workers (append min-ws gas-ws-3)
      #:bases (list b1 b2) #:gas-buildings (list g1 g2-empty g3-empty)
-     #:minerals-fields (list m1 m2 m3 m4)))
+     #:minerals-fields (list m1 m2 m3 m4)
+     #:mineral-demand-rate 900.0 #:gas-demand-rate 450.0))
   (define hold-refill-cnt
     (for/sum ([d (in-list ds-hold)]
               #:when (and (eq? (sat-directive-kind d) 'harvest-gather)
                           (memv (sat-directive-target-tag d) '(10 11 12))))
       (length (sat-directive-unit-tags d))))
-  ;; (iii) Once cur-min = 210 (>= 180) past 112f opp-cd -> resaturation resumes!
+  ;; (iii) Once cur-min = 210 past 112f opp-cd with balanced Tank/Medivac demand -> resaturation resumes!
   (define ds-release
     (evaluate-worker-saturation-policy!
      st #:loop 8360 #:race 'Terran #:minerals 210 #:gas 160
      #:workers (append min-ws gas-ws-3)
      #:bases (list b1 b2) #:gas-buildings (list g1 g2-empty g3-empty)
-     #:minerals-fields (list m1 m2 m3 m4)))
+     #:minerals-fields (list m1 m2 m3 m4)
+     #:mineral-demand-rate 900.0 #:gas-demand-rate 450.0))
   (define rel-refill-cnt
     (for/sum ([d (in-list ds-release)]
               #:when (and (eq? (sat-directive-kind d) 'harvest-gather)
                           (memv (sat-directive-target-tag d) '(10 11 12))))
       (length (sat-directive-unit-tags d))))
-  ;; (iv) 1 Refinery (3 gas workers < 4) at 190G / 95M -> 0 pulled!
+  ;; (iv) 1 Refinery (3 gas workers) under Tank/Medivac demand at 190G / 95M -> 0 pulled (preserves tech gas)!
   (define st-1ref (make-worker-sat-state))
   (define ds-1ref
     (evaluate-worker-saturation-policy!
      st-1ref #:loop 8200 #:race 'Terran #:minerals 95 #:gas 190
      #:workers (append min-ws gas-ws-3)
      #:bases (list b1 b2) #:gas-buildings (list g1)
-     #:minerals-fields (list m1 m2 m3 m4)))
+     #:minerals-fields (list m1 m2 m3 m4)
+     #:mineral-demand-rate 800.0 #:gas-demand-rate 480.0))
   (check! (and (>= (gas-pull-worker-count ds-pull) 3)
                (= hold-refill-cnt 0)
                (>= rel-refill-cnt 1)
@@ -1096,17 +1099,18 @@
      #:workers (append pmin-ws pgas-ws-9)
      #:bases (list pb1 pb2) #:gas-buildings (list pg1 pg2 pg3)
      #:minerals-fields (list m1 m2 m3 m4)
-     #:gas-starvation-boost? #t))
+     #:mineral-demand-rate 1400.0 #:gas-demand-rate 240.0))
   (define pg2-empty (mk-g 11 36.0 24.0 #:type 'assimilator #:asgn 0 #:ideal 3 #:base 1))
   (define pg3-empty (mk-g 12 62.0 24.0 #:type 'assimilator #:asgn 0 #:ideal 3 #:base 2))
   (define pgas-ws-3
     (for/list ([i (in-range 3)]) (mk-w (+ 200 i) 30.0 25.0 #:type 'probe #:tgt 10)))
   (define ds-p-hold
     (evaluate-worker-saturation-policy!
-     pst #:loop 8320 #:race 'Protoss #:minerals 145 #:gas 160
+     pst #:loop 8300 #:race 'Protoss #:minerals 145 #:gas 160
      #:workers (append pmin-ws pgas-ws-3)
      #:bases (list pb1 pb2) #:gas-buildings (list pg1 pg2-empty pg3-empty)
-     #:minerals-fields (list m1 m2 m3 m4)))
+     #:minerals-fields (list m1 m2 m3 m4)
+     #:mineral-demand-rate 900.0 #:gas-demand-rate 450.0))
   (define p-hold-refill
     (for/sum ([d (in-list ds-p-hold)]
               #:when (and (eq? (sat-directive-kind d) 'harvest-gather)
@@ -1117,13 +1121,14 @@
      pst #:loop 8360 #:race 'Protoss #:minerals 210 #:gas 160
      #:workers (append pmin-ws pgas-ws-3)
      #:bases (list pb1 pb2) #:gas-buildings (list pg1 pg2-empty pg3-empty)
-     #:minerals-fields (list m1 m2 m3 m4)))
+     #:minerals-fields (list m1 m2 m3 m4)
+     #:mineral-demand-rate 900.0 #:gas-demand-rate 450.0))
   (define p-rel-refill
     (for/sum ([d (in-list ds-p-rel)]
               #:when (and (eq? (sat-directive-kind d) 'harvest-gather)
                           (memv (sat-directive-target-tag d) '(10 11 12))))
       (length (sat-directive-unit-tags d))))
-  ;; Terran mid-push at 165G / 100M (>= 160G & < 105M & >= 4 gas workers)
+  ;; Terran mid-push at 165G / 100M under mineral-heavy Marine push demand -> pulls >= 3 SCVs!
   (define tb1 (mk-b 1 30.0 30.0 #:type 'orbital-command #:asgn 12 #:ideal 16 #:patches '(501 502)))
   (define tb2 (mk-b 2 62.0 30.0 #:type 'orbital-command #:asgn 10 #:ideal 16 #:patches '(503 504)))
   (define tg1 (mk-g 10 30.0 24.0 #:type 'refinery #:asgn 3 #:ideal 3 #:base 1))
@@ -1141,7 +1146,7 @@
      #:workers (append tmin-ws tgas-ws-6)
      #:bases (list tb1 tb2) #:gas-buildings (list tg1 tg2)
      #:minerals-fields (list m1 m2 m3 m4)
-     #:gas-starvation-boost? #t))
+     #:mineral-demand-rate 1400.0 #:gas-demand-rate 180.0))
   (check! (and (>= (gas-pull-worker-count ds-p-pull) 3)
                (= p-hold-refill 0)
                (>= p-rel-refill 1)

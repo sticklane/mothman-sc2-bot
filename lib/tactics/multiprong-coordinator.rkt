@@ -882,6 +882,7 @@
          #:role-leases [role-leases #f]
          #:defensive-muster-active? [defensive-muster-active? #f]
          #:combat-suppress-attack? [combat-suppress-attack? #f]
+         #:delay-harass-allowed? [delay-harass-allowed? #f]
          #:endgame-hunt-active? [endgame-hunt-active? #f]
          #:enemy-main-cleared? [enemy-main-cleared? #f]
          #:enemy-buildings [enemy-buildings '()]
@@ -1250,11 +1251,47 @@
                                #:attention-tier 0
                                #:rationale (cons 'defensive-split (cons ex ey))))))))))
 
-     ;; --- Helper: Select a 10-20% Mobile Raid / Secondary Prong Pack ---
-     (define (select-mobile-pack exclude-tags target-pt [max-sup 12.0])
+     ;; Bounded (`<= 15%`) delay harass decoupled from main-army `'regroup-stage` / `'pre-arc-hold`
+     ;; holds: strictly blocked during losing home-breach defense (`home-defense-deficit?`,
+     ;; `major-home-push?`, active Mode 1 defense, or active engaged home-defense battle).
+     (define active-home-defense-engaged?
+       (and (pair? ally-th-pts)
+            (pair? enemy-xy-vecs)
+            (let ([home-enemies
+                   (for/list ([ev (in-list enemy-xy-vecs)]
+                              #:when (for/or ([ab (in-list ally-th-pts)])
+                                       (fl<= (dist2d-fl (vector-ref ev 0) (vector-ref ev 1)
+                                                        (car ab) (cdr ab))
+                                             30.0)))
+                     ev)])
+              (and (pair? home-enemies)
+                   (let-values ([(ec esup)
+                                 (for/fold ([c 0] [s 0.0]) ([u (in-list all-mobile-combat)])
+                                   (define ux (uvec-x u))
+                                   (define uy (uvec-y u))
+                                   (if (for/or ([ev (in-list home-enemies)])
+                                         (fl<= (dist2d-fl ux uy (vector-ref ev 0) (vector-ref ev 1)) 18.0))
+                                       (values (add1 c) (fl+ s (uvec-sup u)))
+                                       (values c s)))])
+                     (or (>= ec 3) (fl>= esup 6.0)))))))
+     (define delay-harass-mode?
+       (and delay-harass-allowed?
+            (or defensive-muster-active? combat-suppress-attack?)
+            (not home-defense-deficit?)
+            (not major-home-push?)
+            (not active-home-defense-engaged?)
+            (not (and ground-eligible? mode1-proposal #t))))
+
+     ;; --- Helper: Select a Bounded Mobile Raid / Secondary Prong Pack ---
+     (define (select-mobile-pack exclude-tags target-pt [max-sup 12.0]
+                                 #:max-frac [max-frac 0.22]
+                                 #:min-cap [min-cap 6.0])
        (define tx (car target-pt))
        (define ty (cdr target-pt))
-       (define target-sup (flmin max-sup (flmax 4.0 (fl* 0.16 total-combat-sup))))
+       (define hard-cap (flmin (exact->inexact max-sup)
+                               (flmax (exact->inexact min-cap)
+                                      (fl* (exact->inexact max-frac) total-combat-sup))))
+       (define target-sup (flmin hard-cap (flmax 2.0 (fl* (exact->inexact max-frac) total-combat-sup))))
        (define avail
          (filter (lambda (u)
                    (define tid (rec-id u))
@@ -1280,7 +1317,9 @@
            (define us (uvec-sup u))
            (cond
              [(and (pair? acc) (fl>= sup target-sup)) (values acc sup)]
-             [(and (pair? acc) (fl> (fl+ sup us) (flmax 6.0 (fl* 0.22 total-combat-sup))))
+             [(and (pair? acc) (fl> (fl+ sup us) hard-cap))
+              (values acc sup)]
+             [(and (null? acc) (fl> us (flmax 2.0 hard-cap)))
               (values acc sup)]
              [else (values (cons u acc) (fl+ sup us))])))
        (values (reverse picked-rev) acc-sup))
@@ -1304,7 +1343,10 @@
               (< (- cur-frame (multiprong-state-backstab-start-frame st))
                  MULTIPRONG-BACKSTAB-TIMEOUT-FRAMES)))
        (cond
-         [(or defensive-muster-active? combat-suppress-attack? home-defense-deficit? major-home-push?)
+         [(or home-defense-deficit?
+              major-home-push?
+              (and (or defensive-muster-active? combat-suppress-attack?)
+                   (not delay-harass-mode?)))
           (when continuing?
             (set-multiprong-state-backstab-tags! st (seteqv))
             (set-multiprong-state-backstab-target! st #f)
@@ -1378,19 +1420,21 @@
               #:rationale (list 'counter-backstab existing-tgt (if strike-now? 'strike 'flank)))])]
          [(and (>= (- cur-frame (multiprong-state-last-backstab-frame st))
                    MULTIPRONG-BACKSTAB-COOLDOWN-FRAMES)
-               ;; Loop 65D (`#1891`/`#1892`): Require >= 32 sup & >= 0.90x visible enemy army!
-               (fl>= total-combat-sup 32.0)
-               (not (and (fl> enemy-army-sup 0.0)
-                         (fl< total-combat-sup (fl* 0.90 enemy-army-sup))))
-               (or forced-target
-                   (and (>= (length enemy-combat-recs) 4)
-                        (fl>= enemy-army-sup 10.0))))
+               (if delay-harass-mode?
+                   (fl>= total-combat-sup 16.0)
+                   (and (fl>= total-combat-sup 32.0)
+                        (not (and (fl> enemy-army-sup 0.0)
+                                  (fl< total-combat-sup (fl* 0.90 enemy-army-sup))))
+                        (or forced-target
+                            (and (>= (length enemy-combat-recs) 4)
+                                 (fl>= enemy-army-sup 10.0))))))
           (define exposed-bases
             (if forced-target
                 (list (cons forced-target 0.0))
                 (for/list ([bpt (in-list enemy-base-pts)]
-                           #:when (fl>= (dist2d-fl en-cx en-cy (car bpt) (cdr bpt))
-                                        MULTIPRONG-BACKSTAB-ENEMY-DIST))
+                           #:when (or (and delay-harass-mode? (null? enemy-xy-vecs))
+                                      (fl>= (dist2d-fl en-cx en-cy (car bpt) (cdr bpt))
+                                            MULTIPRONG-BACKSTAB-ENEMY-DIST)))
                   (define-values (ec _ev _sv tot-v) (enemy-base-defense-info bpt))
                   (and (<= ec 4)
                        (not (and (procedure? choke-bl-fn) (choke-bl-fn bpt)))
@@ -1408,7 +1452,14 @@
                                              (fl< (cdr a) (cdr b)))))))]
                       [pack-and-sup
                        (call-with-values
-                        (lambda () (select-mobile-pack (seteqv) best-b (flmin 10.0 (fl* 0.25 total-combat-sup))))
+                        (lambda ()
+                          (if delay-harass-mode?
+                              (select-mobile-pack (seteqv) best-b
+                                                  (flmin 8.0 (fl* 0.15 total-combat-sup))
+                                                  #:max-frac 0.15
+                                                  #:min-cap 2.0)
+                              (select-mobile-pack (seteqv) best-b
+                                                  (flmin 10.0 (fl* 0.25 total-combat-sup)))))
                         cons)]
                       [pack (car pack-and-sup)]
                       [min-req (if (ormap (lambda (u) (memq (rec-sym u) '(dark-templar banshee oracle))) pack)
@@ -1441,9 +1492,58 @@
      ;; --- Mode 3: Offensive Base-to-Base Army Rotation Proposal Builder ---
      (define (build-offensive-rotate-proposal [prio 510.0])
        (cond
-         [(or defensive-muster-active? combat-suppress-attack? off-veto-cooled?
-              (< (length enemy-base-pts) 2))
+         [(or off-veto-cooled?
+              (< (length enemy-base-pts) 2)
+              (and (or defensive-muster-active? combat-suppress-attack?)
+                   (not delay-harass-mode?)))
           #f]
+         ;; Under `delay-harass-mode?`, never rotate the main holding army; instead send a
+         ;; bounded (`<= 15%`) mobile flank pack to rotate onto the softest unguarded outer base!
+         [delay-harass-mode?
+          (and (fl>= total-combat-sup 18.0)
+               (let* ([scored-bs
+                       (for/list ([bpt (in-list enemy-base-pts)]
+                                  #:when (not (and (procedure? choke-bl-fn) (choke-bl-fn bpt))))
+                         (define-values (ec _ev _sv tot-v) (enemy-base-defense-info bpt))
+                         (and (<= ec 4)
+                              (or (null? enemy-xy-vecs)
+                                  (fl>= (dist2d-fl en-cx en-cy (car bpt) (cdr bpt))
+                                        MULTIPRONG-BACKSTAB-ENEMY-DIST))
+                              (cons bpt (enemy-base-target-rank bpt tot-v))))]
+                      [clean-bs (sort (filter pair? scored-bs)
+                                      (lambda (a b) (fl< (cdr a) (cdr b))))])
+                 (and (pair? clean-bs)
+                      (let* ([b1 (car (first clean-bs))]
+                             [pack-and-sup
+                              (call-with-values
+                               (lambda ()
+                                 (select-mobile-pack (seteqv) b1
+                                                     (flmin 8.0 (fl* 0.15 total-combat-sup))
+                                                     #:max-frac 0.15
+                                                     #:min-cap 2.0))
+                               cons)]
+                             [pack (car pack-and-sup)])
+                        (and (>= (length pack) 2)
+                             (let-values ([(px py) (centroid-of pack base-x base-y)])
+                               (define-values (wx wy)
+                                 (compute-flank-waypoint px py (car b1) (cdr b1)
+                                                         en-cx en-cy map-w map-h
+                                                         #:clearance MULTIPRONG-FLANK-CLEARANCE
+                                                         #:bfs-dist-fn bfs-dist-fn))
+                               (make-proposal
+                                'mp-offensive-rotate
+                                'multiprong-coordinator
+                                'ops
+                                prio
+                                (lambda (chosen)
+                                  (fast-build-squad-actions chosen wx wy #:style 'flank))
+                                #:claim (make-proposal-claim (map rec-id pack)
+                                                             #:role 'strike-group
+                                                             #:lease-ttl MULTIPRONG-STRIKE-LEASE-TTL
+                                                             #:allow-partial? #t
+                                                             #:min-units 2)
+                                #:attention-tier 2
+                                #:rationale (list 'offensive-rotate b1 #f #f))))))))]
          ;; Continue active rotation inside 224f minimum dwell window (zero oscillation!)
          ;; Loop 65D (`#1891`/`#1892`): Abort dwell early if >= 35% of mobile army is engaged <= 12t!
          [(and (multiprong-state-rotation-to-xy st)
@@ -1851,7 +1951,7 @@
             ;; Loop 65H (`#1948`): During home defense (`defensive-muster-active?`/`home-defense-deficit?`/
             ;; `major-home-push?`/`mode1-proposal`), NEVER drop the `'strike-group` lease of an already
             ;; deployed forward Prism (`phasing-at-enemy-pocket?` OR active mission `> 45.0t` from home)!
-            [(or defensive-muster-active?
+            [(or (and defensive-muster-active? (not delay-harass-mode?))
                  home-defense-deficit?
                  major-home-push?
                  (and ground-eligible? mode1-proposal #t))
@@ -2031,7 +2131,9 @@
                 (hasheq 'reason 'prism-aa-close))]
          [(and (eq? pid 'mp-prism-warp-backstab) prism-deployed-forward-hold?)
           #f]
-         [(or major-home-push? defensive-muster-active? (and ground-eligible? mode1-proposal #t))
+         [(or major-home-push?
+              (and defensive-muster-active? (not delay-harass-mode?))
+              (and ground-eligible? mode1-proposal #t))
           (list 'home-defense-threat-veto
                 'home-defense
                 900.0
@@ -2207,6 +2309,7 @@
          (define p-tags (if (proposal-claim? cl) (proposal-claim-unit-tags cl) '()))
          (when (and (> p-ttl 0)
                     (or (not combat-suppress-attack?)
+                        delay-harass-mode?
                         (not (eq? p-role 'strike-group))
                         (eq? pid 'mp-prism-warp-retreat)
                         (and (eq? pid 'mp-prism-warp-backstab)
