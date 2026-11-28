@@ -2757,13 +2757,19 @@ class EvalDaemon:
             "--stream-jsonl",
             str(stream_jsonl),
         ]
-        proc = subprocess.Popen(
-            cmd,
-            cwd=snap_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        shard_log = out_json.with_suffix(".log")
+        log_fh = shard_log.open("w", encoding="utf-8", errors="replace")
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=snap_dir,
+                stdout=log_fh,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        except Exception:
+            log_fh.close()
+            raise
         with self._procs_lock:
             self._child_procs.add(proc)
 
@@ -2808,12 +2814,13 @@ class EvalDaemon:
                     break
                 time.sleep(1.0)
             try:
-                proc.communicate(timeout=15)
+                proc.wait(timeout=15)
             except subprocess.TimeoutExpired:
                 proc.kill()
-                proc.communicate()
+                proc.wait()
             _drain_jsonl()
         finally:
+            log_fh.close()
             with self._procs_lock:
                 self._child_procs.discard(proc)
 
