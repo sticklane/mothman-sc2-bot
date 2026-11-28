@@ -1,0 +1,2041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Development &amp; Testing Speed — Mothman</title>
+  <style>
+:root {
+  --bg: #FAF9F5;
+  --surface: #F4F2EA;
+  --surface-alt: #EFECE3;
+  --surface-input: #FFFFFF;
+  --border: #E5E2D8;
+  --border-strong: #262522;
+  --ink: #141413;
+  --ink-2: #4A4945;
+  --muted: #7A7870;
+  --accent: #C4633E;
+  --accent-hover: #A34E2E;
+  --slate: #4A6B82;
+  --win: #2F6B48;
+  --loss: #A83E32;
+  --warn: #A35B1F;
+  --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16.5px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 3px;
+}
+a:hover {
+  color: var(--accent-hover);
+  text-decoration-color: var(--accent-hover);
+}
+.num, table { font-variant-numeric: tabular-nums; }
+
+/* Header — static document flow, minimal, never blocks mobile viewport */
+.site-header {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.header-inner {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.wordmark {
+  font-family: var(--serif);
+  font-size: 1.18rem;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.wordmark:hover { color: var(--ink); text-decoration: none; }
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+}
+.nav-link {
+  font-size: 0.9rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+  padding: 0.2rem 0;
+  border-bottom: 2px solid transparent;
+  text-decoration: none;
+}
+.nav-link:hover { color: var(--ink); text-decoration: none; }
+.nav-link.active {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.nav-toggle {
+  display: none;
+  background: transparent;
+  border: 0;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.35rem 0.25rem;
+  cursor: pointer;
+}
+.nav-toggle:hover { color: var(--ink); }
+
+.mobile-drawer {
+  display: none;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0.4rem 1.25rem 0.8rem;
+}
+.mobile-drawer.open { display: block; }
+.mobile-drawer a {
+  display: block;
+  padding: 0.6rem 0;
+  color: var(--ink);
+  font-size: 0.96rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.mobile-drawer a:last-child { border-bottom: 0; }
+.mobile-drawer a.active { color: var(--accent); font-weight: 600; }
+
+/* Page containers — centered editorial essay column with wider figure breakouts */
+.page-wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4.75rem;
+}
+.page-grid {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 2.25rem 1.25rem 4.75rem;
+  display: grid;
+  grid-template-columns: 215px minmax(0, 1fr);
+  gap: 2.75rem;
+}
+.content { min-width: 0; }
+.prose-col {
+  max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.wide-col {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.prose { max-width: 680px; }
+
+/* Sidebar TOC (Desktop) + Collapsible TOC (Mobile) */
+.toc-sidebar {
+  position: sticky;
+  top: 1.5rem;
+  align-self: start;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  padding-right: 0.85rem;
+  border-right: 1px solid var(--border);
+  font-size: 0.84rem;
+}
+.toc-heading {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin: 0 0 0.65rem;
+}
+.toc-list { list-style: none; padding: 0; margin: 0; }
+.toc-list li { margin: 0.44rem 0; line-height: 1.38; }
+.toc-list a { color: var(--ink-2); text-decoration: none; }
+.toc-list a:hover { color: var(--accent); }
+.toc-latest {
+  display: block;
+  font-weight: 600;
+  color: var(--accent);
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.latest-jump-bar {
+  font-size: 0.9rem;
+  margin: -0.2rem 0 1.25rem;
+}
+.toc-mobile { display: none; margin-bottom: 1.5rem; }
+
+/* Typography */
+h1, h2, h3 {
+  font-family: var(--serif);
+  color: var(--ink);
+  font-weight: 500;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+}
+h1 {
+  font-size: 2.3rem;
+  margin: 0 0 0.7rem;
+}
+h2 {
+  font-size: 1.5rem;
+  margin: 3.1rem 0 0.85rem;
+}
+.page-grid h2 {
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+h3 {
+  font-size: 1.16rem;
+  margin: 2rem 0 0.55rem;
+  font-weight: 600;
+}
+h4 {
+  font-family: var(--sans);
+  font-size: 0.98rem;
+  font-weight: 600;
+  margin: 0 0 0.45rem;
+  line-height: 1.38;
+  color: var(--ink);
+}
+p { margin: 0 0 1.1rem; color: var(--ink-2); }
+strong { color: var(--ink); font-weight: 600; }
+ul, ol { margin: 0.5rem 0 1.15rem; padding-left: 1.3rem; color: var(--ink-2); }
+li { margin: 0.4rem 0; }
+.content > p, .content > ul, .content > ol, .content > blockquote { max-width: 680px; }
+.anchor {
+  color: var(--muted);
+  opacity: 0;
+  font-family: var(--sans);
+  font-size: 0.76em;
+  margin-left: 0.35rem;
+  font-weight: 400;
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+.anchor::after { content: "#"; }
+h1:hover .anchor, h2:hover .anchor, h3:hover .anchor, h4:hover .anchor, .anchor:focus { opacity: 0.55; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+
+/* Editorial Opening (Front Page & Subpages) */
+.eyebrow {
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+.masthead {
+  margin-bottom: 2.2rem;
+}
+.masthead h1 {
+  font-size: 2.55rem;
+  margin: 0 0 0.65rem;
+}
+.lead {
+  color: var(--ink-2);
+  font-size: 1.08rem;
+  line-height: 1.62;
+  margin: 0;
+}
+.section-rule {
+  border-top: 1px solid var(--border);
+  padding-top: 2.4rem;
+  margin-top: 2.8rem;
+}
+.section-kicker {
+  font-family: var(--serif);
+  font-size: 1.48rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0 0 0.75rem;
+}
+
+/* Inline code & code blocks */
+code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--surface);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  color: var(--ink);
+}
+.callout code, .clip-card code, details code {
+  background: #EAE6DA;
+  padding: 0.08rem 0.3rem;
+  box-shadow: inset 0 0 0 1px rgba(38, 37, 34, 0.11);
+}
+.code-block {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 1.1rem 0;
+  overflow-x: auto;
+}
+.code-block pre { margin: 0; padding: 0.95rem 1.1rem; }
+.code-block code { background: none; padding: 0; box-shadow: none; font-size: 0.84rem; }
+.code-lang {
+  position: absolute; top: 6px; right: 10px;
+  font-size: 0.7rem; text-transform: uppercase; color: var(--muted);
+}
+.mermaid-wrap {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 1.1rem;
+  margin: 1.25rem 0;
+  overflow-x: auto;
+}
+
+/* Editorial Callouts */
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  border-radius: 0 6px 6px 0;
+  padding: 0.95rem 1.2rem;
+  margin: 1.35rem 0;
+  max-width: 680px;
+}
+.callout-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+.callout-warning, .callout-caution { border-left-color: var(--warn); }
+.callout-warning .callout-label, .callout-caution .callout-label { color: var(--warn); }
+.callout-body > p:first-child { margin-top: 0; }
+.callout-body > p:last-child { margin-bottom: 0; }
+
+blockquote {
+  margin: 1.25rem 0;
+  padding: 0.25rem 0 0.25rem 1.15rem;
+  border-left: 2px solid var(--accent);
+  color: var(--ink-2);
+}
+
+/* Collapsible Sections (<details>) */
+details {
+  margin: 1.4rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 0;
+}
+summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--ink);
+  font-size: 0.95rem;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: "+";
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-weight: 400;
+}
+details[open] > summary::before { content: "−"; }
+details[open] > summary { margin-bottom: 0.85rem; }
+
+/* Tufte Horizontal-Rule Tables */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0.9rem 0 1.1rem;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+}
+thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 0.65rem 0.7rem;
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+  background: transparent;
+}
+td {
+  padding: 0.68rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--ink-2);
+}
+tbody tr:last-child td { border-bottom: 0; }
+.table-note {
+  font-size: 0.87rem;
+  color: var(--muted);
+  margin: 0.6rem 0 0;
+  line-height: 1.55;
+}
+.t-win { color: var(--win); font-weight: 600; }
+.t-loss { color: var(--loss); font-weight: 600; }
+.t-muted { color: var(--muted); }
+.nw { white-space: nowrap; }
+.table-flywheel table { font-size: 0.75rem; }
+.table-flywheel thead th {
+  font-size: 0.72rem;
+  line-height: 1.2;
+  padding: 0.36rem 0.26rem;
+  white-space: normal;
+  vertical-align: bottom;
+}
+.table-flywheel td {
+  padding: 0.36rem 0.26rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.36;
+}
+.table-flywheel td:first-child { white-space: nowrap; }
+
+/* Responsive Stacked Mobile Standings (< 700px) */
+.standings-mobile {
+  display: none;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+  margin: 0.75rem 0 0.85rem;
+}
+.standing-row { padding: 0.78rem 0; border-bottom: 1px solid var(--border); }
+.standing-row:last-child { border-bottom: 0; }
+.standing-top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
+.standing-bot { font-weight: 600; color: var(--ink); font-size: 0.98rem; }
+.standing-race { color: var(--muted); font-weight: 400; font-size: 0.88rem; }
+.standing-elo { font-weight: 600; font-size: 1rem; font-variant-numeric: tabular-nums; color: var(--ink); }
+.standing-stats { font-size: 0.87rem; color: var(--ink-2); margin-top: 0.16rem; font-variant-numeric: tabular-nums; }
+.standing-note { font-size: 0.87rem; color: var(--muted); margin: 0.28rem 0 0; line-height: 1.46; }
+
+/* Anthropic-Style Warm Sand Figures */
+.figure-block {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.35rem 1.45rem 1.15rem;
+  margin: 1.5rem auto 1.75rem;
+  max-width: 780px;
+}
+.figure-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 0.25rem;
+}
+.figure-title {
+  font-family: var(--serif);
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin: 0 0 0.75rem;
+  color: var(--ink);
+}
+.chart-svg { width: 100%; height: auto; display: block; }
+.figure-caption {
+  font-size: 0.86rem;
+  color: var(--ink-2);
+  margin: 0.75rem 0 0;
+  line-height: 1.52;
+}
+
+/* Clean Typographic Reading Lists */
+.doc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.65rem 0 1.85rem;
+  border-top: 1px solid var(--border);
+}
+.doc-item {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 0.25rem 1.75rem;
+  align-items: baseline;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border);
+  margin: 0;
+}
+.doc-item-title {
+  font-family: var(--serif);
+  font-size: 1.02rem;
+  font-weight: 500;
+  display: inline-block;
+}
+.doc-item-desc {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.52;
+}
+
+/* Replays & Video Figures */
+.clip-gallery { margin: 1.25rem 0 2rem; }
+.clip-gallery-grid, .featured-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.35rem;
+}
+.clip-card {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1rem 1.05rem;
+  display: flex;
+  flex-direction: column;
+}
+.clip-index {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+.clip-figure { margin: 0.4rem 0 0; }
+.clip-img, .clip-video {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 6px;
+  background: #141413;
+}
+.clip-img { cursor: zoom-in; min-height: 150px; }
+.clip-figure figcaption {
+  font-size: 0.85rem;
+  color: var(--ink-2);
+  margin-top: 0.55rem;
+  line-height: 1.48;
+}
+.video-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.84rem;
+}
+.text-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 2px;
+}
+.text-btn:hover { color: var(--accent-hover); text-decoration-color: var(--accent-hover); }
+.media-link {
+  font-size: 0.86rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Video Gallery Filter Controls */
+.gallery-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+  padding: 1rem 0 1.25rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin: 1.25rem 0 1.5rem;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.filter-group label {
+  font-size: 0.74rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.filter-select, .filter-input {
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--surface-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.44rem 0.65rem;
+  min-width: 135px;
+}
+.filter-input { min-width: 210px; }
+.gallery-count {
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin: 0 0 1rem;
+}
+.gallery-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+.show-more-wrap { text-align: center; margin-top: 1.75rem; }
+.editorial-btn {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 1.2rem;
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.editorial-btn:hover { background: var(--surface-alt); }
+
+/* Lightbox & Video Theater Modals */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(20, 20, 19, 0.92);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 1.25rem;
+}
+.modal-overlay.open { display: flex; }
+.modal-overlay img, .modal-overlay video {
+  max-width: 94vw;
+  max-height: 80vh;
+  border-radius: 6px;
+  background: #000;
+}
+.modal-caption {
+  color: #F4F2EA;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  text-align: center;
+  max-width: 820px;
+}
+.modal-controls {
+  position: fixed;
+  top: 1rem;
+  right: 1.25rem;
+  display: flex;
+  gap: 0.5rem;
+}
+.modal-btn {
+  background: #262522;
+  color: #FAF9F5;
+  border: 1px solid #44423C;
+  border-radius: 6px;
+  padding: 0.4rem 0.78rem;
+  cursor: pointer;
+  font-size: 0.86rem;
+  text-decoration: none;
+}
+.modal-btn:hover { background: #3B3934; color: #FFFFFF; text-decoration: none; }
+
+/* Footer */
+.site-footer {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1.6rem 1.25rem 3.25rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.84rem;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+
+@media (max-width: 1020px) {
+  .page-grid { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .toc-sidebar { display: none; }
+  .toc-mobile { display: block; }
+}
+@media (max-width: 820px) {
+  .clip-gallery-grid, .featured-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 799px) {
+  body { font-size: 15.5px; }
+  .header-inner { height: 50px; }
+  .nav-links { display: none; }
+  .nav-toggle { display: inline-block; }
+  .page-wrap, .page-grid { padding: 1.35rem 1rem 3.5rem; }
+  .masthead { margin-bottom: 1.45rem; }
+  .masthead h1 { font-size: 1.85rem; margin-bottom: 0.45rem; }
+  .lead { font-size: 0.98rem; line-height: 1.56; }
+  h1 { font-size: 1.7rem; }
+  h2, .section-kicker { font-size: 1.3rem; }
+  .section-rule { padding-top: 1.85rem; margin-top: 2.1rem; }
+  .figure-block { padding: 1.05rem 0.95rem 0.95rem; border-radius: 8px; }
+  .doc-item { grid-template-columns: minmax(0, 1fr); gap: 0.2rem; }
+  .filter-input { min-width: 0; width: 100%; }
+  .filter-group { flex: 1 1 140px; }
+}
+@media (max-width: 699px) {
+  .standings-desktop { display: none; }
+  .standings-mobile { display: block; }
+}
+
+/* Structured Section Headers */
+.section-head { max-width: 720px; margin-bottom: 1.35rem; }
+.section-num {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin: 0 0 0.25rem;
+}
+.section-intro { font-size: 0.98rem; color: var(--ink-2); margin: 0; line-height: 1.58; }
+.prose-tight { max-width: 700px; font-size: 0.95rem; margin: 0 0 0.9rem; line-height: 1.58; }
+
+/* Quick Section Jump Bar */
+.jump-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.95rem;
+  margin-top: 0.95rem;
+  font-size: 0.88rem;
+}
+.jump-bar a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--border); padding-bottom: 1px; }
+.jump-bar a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Interactive Panels & Detail Drawers */
+.interactive-panel {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin-bottom: 1.4rem;
+}
+/* Interactive SVG Diagrams & Walkthroughs */
+.diagram-stage {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem 0.65rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.diagram-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  font-family: var(--sans);
+}
+.svg-node { cursor: pointer; outline: none; transition: opacity 0.18s ease; }
+.svg-node .node-bg {
+  fill: #FAF9F5;
+  stroke: #D6D2C6;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, fill 0.15s, stroke-width 0.15s;
+}
+.svg-node .node-bg-accent {
+  fill: #FDF4F0;
+  stroke: #DFB5A5;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, fill 0.15s, stroke-width 0.15s;
+}
+.svg-node .node-bg-fw {
+  fill: #FDF4F0;
+  stroke: #C4633E;
+  stroke-width: 1.8;
+  stroke-dasharray: 5,3;
+  transition: stroke 0.15s, fill 0.15s;
+}
+.svg-node .node-bg-dark {
+  fill: #262522;
+  stroke: #262522;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, stroke-width 0.15s;
+}
+.svg-node:hover .node-bg,
+.svg-node:hover .node-bg-accent,
+.svg-node:hover .node-bg-fw { stroke: #C4633E; }
+.svg-node.is-active .node-bg,
+.svg-node.is-active .node-bg-accent,
+.svg-node.is-active .node-bg-fw {
+  fill: #FFFFFF;
+  stroke: #C4633E;
+  stroke-width: 2.6;
+}
+.svg-node.is-active .node-bg-dark {
+  stroke: #C4633E;
+  stroke-width: 2.8;
+}
+.svg-node.is-dim { opacity: 0.34; }
+.node-title { fill: #141413; font-size: 13px; font-weight: 600; }
+.node-sub { fill: #5E5D59; font-size: 11px; }
+.node-kicker-fw { fill: #C4633E; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
+
+.walk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+  margin-bottom: 0.8rem;
+}
+.walk-steps {
+  margin: 0.45rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.56;
+}
+.walk-steps li { margin: 0.45rem 0; }
+.detail-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: #FDF4F0;
+  border: 1px solid #EBD1C6;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  white-space: nowrap;
+}
+.explain-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.detail-drawer {
+  margin-top: 0.95rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.15rem;
+}
+.detail-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.45rem;
+}
+.detail-title { font-family: var(--serif); font-size: 1.08rem; font-weight: 600; color: var(--ink); }
+.detail-file { font-family: var(--mono); font-size: 0.76rem; color: var(--muted); }
+.detail-body { font-size: 0.92rem; color: var(--ink-2); margin: 0 0 0.65rem; line-height: 1.56; }
+.detail-metric {
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--surface);
+  padding: 0.45rem 0.7rem;
+  border-radius: 6px;
+  border-left: 3px solid var(--accent);
+}
+.compact-list { margin: 0.35rem 0 0.75rem; padding-left: 1.2rem; font-size: 0.89rem; color: var(--ink-2); }
+.compact-list li { margin: 0.25rem 0; line-height: 1.48; }
+
+.subsys-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.15rem;
+}
+.subsys-card {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+}
+.subsys-card h3 { margin: 0 0 0.4rem; font-size: 1.02rem; }
+.subsys-card p { font-size: 0.89rem; margin: 0 0 0.65rem; line-height: 1.52; }
+.mini-stat {
+  font-size: 0.82rem;
+  color: var(--ink-2);
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+
+/* Interactive Category & Matchup Pills */
+.cat-pills, .race-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+.race-toggle { margin-bottom: 0.85rem; }
+.cat-pill {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.36rem 0.68rem;
+  font-family: var(--sans);
+  font-size: 0.83rem;
+  font-weight: 500;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.cat-pill:hover { border-color: var(--accent); color: var(--ink); }
+.cat-pill.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+}
+.cat-pill .pill-n { font-size: 0.76rem; opacity: 0.75; margin-left: 0.2rem; }
+
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0.55rem 0 0.85rem;
+}
+.metric-strip-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.m-chip {
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+.m-lbl { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.m-chip strong { font-size: 0.9rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.mu-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1.25rem;
+}
+.mini-kicker {
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.eval-subsection { margin-top: 2rem; }
+.eval-subsection h3 { margin: 0 0 0.45rem; font-size: 1.12rem; }
+.charts-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.15rem;
+}
+
+/* Opening Build Order & Histograms + Base Layout Photos */
+.bo-box {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  margin: 0.75rem 0;
+}
+.bo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.75rem;
+  margin-bottom: 0.55rem;
+}
+.style-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.style-chip {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.14rem 0.55rem;
+}
+.bo-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 0.45rem;
+}
+.bo-step {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.42rem 0.52rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+}
+.bo-time { font-family: var(--mono); font-size: 0.7rem; color: var(--accent); font-weight: 600; }
+.bo-step strong { font-size: 0.84rem; color: var(--ink); line-height: 1.25; }
+.bo-pct { font-size: 0.71rem; color: var(--muted); }
+.hist-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-top: 0.65rem;
+}
+.hist-card {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem 0.6rem;
+}
+.hist-foot {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
+  font-variant-numeric: tabular-nums;
+}
+.base-layout-photo {
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Case Study Cards */
+.case-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.15rem;
+}
+.case-card {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.1rem 1.2rem;
+}
+.case-wide { grid-column: 1 / -1; }
+.case-tag {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.25rem;
+}
+.case-card h3 { margin: 0 0 0.5rem; font-size: 1.06rem; }
+.case-card p { font-size: 0.9rem; margin: 0 0 0.55rem; line-height: 1.54; }
+.case-card p:last-child { margin-bottom: 0; }
+.case-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);
+  gap: 1.2rem;
+  align-items: start;
+}
+
+/* Current-State Cohort Strip, Arena Filters & Open Gaps */
+.cohort-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.65rem;
+  margin: 0.75rem 0 1.25rem;
+}
+.cohort-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.16rem;
+}
+.cohort-card strong {
+  font-size: 1.12rem;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.cohort-sub {
+  font-size: 0.76rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.arena-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.9rem;
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+.arena-filter-group {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
+  gap: 0.35rem;
+}
+.arena-search-input {
+  flex: 1 1 220px;
+  min-width: 190px;
+  padding: 0.36rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #FFFFFF;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+}
+.arena-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.meta-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.spell-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 0.08rem 0.48rem;
+  white-space: nowrap;
+}
+.spell-ok {
+  color: #1F6E43;
+  background: #E9F6EE;
+  border: 1px solid #BFE3CD;
+}
+.spell-miss {
+  color: #9A3426;
+  background: #FCECE9;
+  border: 1px solid #EBC4BE;
+}
+.sid-pill {
+  font-family: var(--mono);
+  font-size: 0.71rem;
+  color: var(--muted);
+  margin: -0.15rem 0 0.42rem;
+  word-break: break-all;
+}
+.gaps-list {
+  margin: 0.45rem 0 0;
+  padding-left: 1.2rem;
+  max-width: 780px;
+  font-size: 0.94rem;
+  color: var(--ink-2);
+  line-height: 1.58;
+}
+.gaps-list li { margin: 0.48rem 0; }
+.cohort-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
+  margin: 1.15rem 0 0.45rem;
+}
+.cohort-heading h3 { margin: 0; font-size: 1.06rem; }
+.cohort-tag {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.history-cta {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+}
+.history-cta p { margin: 0; font-size: 0.94rem; color: var(--ink-2); }
+.history-cta a {
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent);
+  padding-bottom: 1px;
+  white-space: nowrap;
+}
+
+/* Section 2.4 Performance Curves & Timings vs. Opponents & Pros */
+.table-wrap.table-compact table { font-size: 0.82rem; }
+.table-wrap.table-compact th, .table-wrap.table-compact td { padding: 0.42rem 0.48rem; white-space: nowrap; }
+.site-curves-panel { padding: 1.05rem 1.15rem; max-width: 100%; min-width: 0; overflow-x: clip; }
+.site-curves-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.9rem;
+}
+.site-curves-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 1.1rem;
+  margin: 0.65rem 0 0.85rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.83rem;
+  color: var(--ink-2);
+}
+.sc-leg-item { display: inline-flex; align-items: center; gap: 0.42rem; white-space: nowrap; }
+.sc-leg-line { display: inline-block; width: 20px; height: 0; border-top: 2.6px solid #C4633E; }
+.sc-leg-line.m { border-top-color: #C4633E; }
+.sc-leg-line.p { border-top: 2.2px dashed #3B6E9C; }
+.sc-leg-line.o { border-top: 2.2px solid #7A5A8E; }
+.sc-leg-band { margin-left: auto; font-size: 0.78rem; }
+.site-curves-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.site-curve-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.78rem 0.9rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+}
+.site-curve-card.site-curve-span-2 { grid-column: 1 / -1; }
+.site-curve-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.site-curve-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.site-curve-badge {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.site-curve-meds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  color: var(--ink-2);
+}
+.sc-mpill { display: inline-flex; align-items: center; gap: 0.32rem; }
+.sc-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.sc-dot.m { background: #C4633E; }
+.sc-dot.p { background: #3B6E9C; }
+.sc-dot.o { background: #7A5A8E; }
+.site-curve-svg { width: 100%; height: auto; display: block; overflow: visible; user-select: none; touch-action: pan-y; }
+.site-timings-box {
+  margin-top: 1.05rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 0.95rem 0.75rem;
+  max-width: 100%;
+  min-width: 0;
+}
+.site-timings-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.55rem 0.9rem;
+}
+.site-timings-sub { font-size: 0.82rem; color: var(--muted); margin-top: 0.12rem; }
+.site-timings-wrap { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.st-row-hit { fill: transparent; cursor: crosshair; }
+.st-row-hit:hover { fill: rgba(196, 99, 62, 0.06); }
+.site-curve-tooltip {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  background: #1C1B18;
+  color: #FAF9F5;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.78rem;
+  line-height: 1.42;
+  box-shadow: 0 10px 26px rgba(20, 20, 19, 0.32);
+  max-width: 285px;
+}
+.site-curve-tooltip strong { color: #FFFFFF; font-weight: 700; }
+.sct-head {
+  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  padding-bottom: 0.22rem;
+  margin-bottom: 0.28rem;
+}
+.sct-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+.sct-lbl { display: inline-flex; align-items: center; gap: 0.36rem; font-family: var(--sans); }
+.sct-sub { font-size: 0.7rem; opacity: 0.76; margin-top: 0.2rem; }
+
+/* 5-Tab 22-Graph Pro Comparison Observatory (Warm Editorial Light Theme) */
+.obs-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.obs-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.35rem;
+}
+.obs-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  font-weight: 500;
+  padding: 0.42rem 0.78rem;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.obs-tab:hover { background: var(--surface); color: var(--ink); }
+.obs-tab.is-active {
+  background: rgba(196, 99, 62, 0.12);
+  color: #A84A27;
+  border-color: rgba(196, 99, 62, 0.36);
+  font-weight: 600;
+}
+.obs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.45rem 0.85rem;
+}
+.obs-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.32rem;
+}
+.obs-pill {
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 0.22rem 0.68rem;
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.obs-pill:hover { border-color: var(--accent); color: var(--ink); }
+.obs-pill.is-active {
+  background: var(--ink);
+  color: #FAF9F5;
+  border-color: var(--ink);
+  font-weight: 600;
+}
+.obs-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 1.05rem;
+  padding: 0.5rem 0.75rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.81rem;
+  color: var(--ink-2);
+}
+.obs-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+.obs-line {
+  display: inline-block;
+  width: 18px;
+  height: 2.6px;
+  border-radius: 2px;
+}
+.obs-line.obs-dash {
+  height: 0;
+  background: transparent !important;
+  border-top: 2.2px dashed;
+}
+.obs-leg-note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.76rem;
+  white-space: normal !important;
+}
+.obs-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+.obs-kpi {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.62rem 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.obs-kpi-primary {
+  border-color: rgba(196, 99, 62, 0.42);
+  background: linear-gradient(180deg, rgba(196, 99, 62, 0.06), #FFFFFF);
+}
+.obs-kpi-lbl {
+  font-size: 0.63rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obs-kpi strong {
+  font-family: var(--mono);
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.obs-kpi-sub {
+  font-size: 0.73rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.obs-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.82rem 0.95rem 0.72rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow: hidden;
+}
+.obs-card.obs-span-2 { grid-column: 1 / -1; }
+.obs-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+}
+.obs-card-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.obs-card-sub {
+  font-size: 0.79rem;
+  color: var(--muted);
+  margin-top: 0.12rem;
+  line-height: 1.38;
+}
+.obs-badge {
+  font-family: var(--mono);
+  font-size: 0.73rem;
+  padding: 0.12rem 0.48rem;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.obs-meds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  color: var(--ink-2);
+}
+.obs-meds > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  white-space: nowrap;
+}
+.obs-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.obs-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+  user-select: none;
+  touch-action: pan-y;
+}
+.obs-split-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.obs-mini-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 0.25rem;
+}
+.obs-empty {
+  padding: 1.2rem 0.75rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+.obs-missing-box {
+  margin-top: 0.55rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 7px;
+  background: rgba(180, 60, 46, 0.06);
+  border: 1px solid rgba(180, 60, 46, 0.22);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.79rem;
+}
+.obs-missing-lbl {
+  font-weight: 600;
+  color: #B43C2E;
+  margin-right: 0.2rem;
+}
+.obs-missing-pill {
+  display: inline-block;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.73rem;
+}
+.obs-creep-strip {
+  margin-top: 0.45rem;
+  padding: 0.62rem 0.8rem;
+  border-radius: 7px;
+  background: var(--surface);
+  border-left: 3px solid #B43C2E;
+  font-size: 0.83rem;
+  color: var(--ink);
+}
+.obs-tip-head {
+  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  padding-bottom: 0.22rem;
+  margin-bottom: 0.28rem;
+}
+.obs-tip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+.obs-tip-row > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+  font-family: var(--sans);
+}
+.obs-tip-sub {
+  font-size: 0.7rem;
+  opacity: 0.76;
+  margin-top: 0.2rem;
+}
+
+/* Editorial Visual Explainers, Annotated Stills, Release Highlights & Base Control Strip */
+.release-highlights {
+  background: #FAF6F1;
+  border: 1px solid #E8D9CF;
+  border-left: 3.5px solid var(--accent);
+  border-radius: 9px;
+  padding: 0.9rem 1.15rem;
+  margin: 0.55rem 0 0.85rem;
+}
+.rh-kicker {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.45rem;
+}
+.rh-list {
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 0.91rem;
+  line-height: 1.56;
+  color: var(--ink);
+}
+.rh-list li { margin: 0.34rem 0; }
+
+.visual-explainer-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 1.1rem 1.2rem;
+  margin-bottom: 1.2rem;
+}
+.ve-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.9rem;
+  margin-bottom: 0.8rem;
+}
+.ve-header h4 {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.ve-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.ve-col { min-width: 0; }
+.ve-svg-wrap {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.45rem;
+}
+.ve-cap {
+  margin: 0.5rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.48;
+  color: var(--ink-2);
+}
+
+.still-tabs {
+  display: inline-flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.still-tab {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.28rem 0.68rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.still-tab:hover { border-color: var(--accent); color: var(--accent); }
+.still-tab.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+  font-weight: 600;
+}
+.still-annotated {
+  position: relative;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #141413;
+}
+.still-annotated .clip-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: none;
+  border-radius: 0;
+}
+.still-compact { margin-top: 0.55rem; }
+.still-callout {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(20, 20, 19, 0.84);
+  color: #FAF9F5;
+  border: 1px solid rgba(250, 249, 245, 0.28);
+  border-left: 3px solid #E58158;
+  border-radius: 6px;
+  padding: 0.2rem 0.52rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+  max-width: 58%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.still-callout-muted {
+  border-left-color: #8BA4B8;
+  color: #E7E5DE;
+}
+.still-callout-good {
+  border-left-color: #54B882;
+}
+
+.tech-drawer {
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.65rem;
+}
+.tech-drawer summary {
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  list-style-position: outside;
+}
+.tech-drawer summary:hover { color: var(--accent); }
+
+.base-control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 0.9rem;
+  margin-top: 0.85rem;
+  align-items: stretch;
+}
+.base-control-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.base-control-stack .base-control-card {
+  flex: 1;
+  justify-content: center;
+}
+.base-control-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+}
+.base-control-card p {
+  margin: 0.35rem 0 0;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.bc-kicker {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.wall-bp-sub {
+  font-size: 0.82rem;
+  color: var(--ink-2);
+}
+.wall-blueprint-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.95rem;
+  align-items: start;
+}
+.wall-bp-card { min-width: 0; }
+.wall-clips-group { margin: 1.25rem 0 1.35rem; }
+.wall-row-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.02rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.wall-row-desc {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  line-height: 1.48;
+  color: var(--ink-2);
+}
+.wall-clips-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.95rem;
+  align-items: stretch;
+}
+.wall-clips-grid .clip-card {
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+.wall-clips-grid .clip-card h5 {
+  margin: 0.25rem 0 0.35rem;
+  font-size: 0.96rem;
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.arena-more-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+.arena-more-wrap .cat-pill {
+  font-weight: 600;
+  padding: 0.45rem 1.15rem;
+}
+
+@media (max-width: 1060px) {
+  .wall-blueprint-grid, .wall-clips-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .subsys-grid, .charts-pair, .case-grid, .case-split, .mu-two-col, .explain-grid, .hist-pair, .site-curves-grid, .obs-grid, .obs-split-2, .ve-grid, .base-control-grid, .wall-blueprint-grid, .wall-clips-grid { grid-template-columns: minmax(0, 1fr); }
+  .site-curve-card.site-curve-span-2, .obs-card.obs-span-2 { grid-column: auto; }
+  .obs-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 699px) {
+  .still-callout { font-size: 0.66rem; padding: 0.16rem 0.42rem; max-width: 66%; }
+  .visual-explainer-card { padding: 0.85rem; }
+  .interactive-panel { padding: 0.9rem 0.75rem; }
+  .detail-drawer { padding: 0.85rem; }
+  .diagram-stage { padding: 0.5rem 0.35rem; }
+  .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cohort-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .obs-tab { font-size: 0.78rem; padding: 0.36rem 0.58rem; }
+  .obs-leg-note { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+<header class="site-header"><div class="header-inner"><a class="wordmark" href="./index.html">Mothman</a><nav class="nav-links" aria-label="Primary"><a class="nav-link" href="./index.html">Current State</a><a class="nav-link active" href="./history.html">History &amp; Fixes</a><a class="nav-link" href="./video-gallery.html">Replays</a><a class="nav-link" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav><button type="button" class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="mobile-drawer">Menu</button></div><nav class="mobile-drawer" id="mobile-drawer" aria-label="Mobile menu"><a class="" href="./index.html">Current State</a><a class="active" href="./history.html">History &amp; Fixes</a><a class="" href="./video-gallery.html">Replays</a><a class="" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav></header>
+<div class="page-grid"><aside class="toc-sidebar" aria-label="Table of contents"><div class="toc-heading">Contents</div><ul class="toc-list"><li><a href="#summary">Summary</a></li><li><a href="#1-where-time-goes-each-run-loops-3488">1. Where Time Goes Each Run (Loops 34…</a></li><li><a href="#2-agent-steps-errors-and-retries-loops-1988">2. Agent Steps, Errors, and Retries (…</a></li><li><a href="#3-why-held-builds-failed-amp-repeated-edits">3. Why Held Builds Failed &amp; Repeated…</a></li><li><a href="#4-time-saved-by-reordering-gates-loops-3488">4. Time Saved by Reordering Gates (Lo…</a></li><li><a href="#5-workflow-changes-applied">5. Workflow Changes Applied</a></li><li><a href="#6-cycle-time-bottleneck-audit">6. Cycle-Time Bottleneck Audit</a></li></ul></aside><main class="content"><details class="toc-mobile"><summary>Contents</summary><ul class="toc-list"><li><a href="#summary">Summary</a></li><li><a href="#1-where-time-goes-each-run-loops-3488">1. Where Time Goes Each Run (Loops 34…</a></li><li><a href="#2-agent-steps-errors-and-retries-loops-1988">2. Agent Steps, Errors, and Retries (…</a></li><li><a href="#3-why-held-builds-failed-amp-repeated-edits">3. Why Held Builds Failed &amp; Repeated…</a></li><li><a href="#4-time-saved-by-reordering-gates-loops-3488">4. Time Saved by Reordering Gates (Lo…</a></li><li><a href="#5-workflow-changes-applied">5. Workflow Changes Applied</a></li><li><a href="#6-cycle-time-bottleneck-audit">6. Cycle-Time Bottleneck Audit</a></li></ul></details><h1 id="development-amp-testing-speed">Development &amp; Testing Speed<a class="anchor" href="#development-amp-testing-speed" aria-label="Link to section"></a></h1>
+<blockquote><p>Generated 2026-11-28 03:55 UTC from 110 logged runs (Loops 19–88).</p></blockquote>
+<h2 id="summary">Summary<a class="anchor" href="#summary" aria-label="Link to section"></a></h2>
+<ul><li><strong>Release Rate (Loops 34–88, n=93):</strong> 28 shipped (30.1%) vs 65 held (recent 90 runs Loops 37–88: 26 shipped / 64 held = 28.9%).</li><li><strong>Mean Run Wall Time (Loops 34–88):</strong> 95.6 min (shipped 114.6m | held 81.9m | GPU active 31.0% | overlapped post-benchmark work saved 151.7m).</li><li><strong>Estimated Time Saved (Loops 34–88):</strong> Reordering gates and checks would have saved <strong>1555.4 min (25.92 hours)</strong>; wall time per release drops from <strong>324.2 min to 268.7 min (1.21×)</strong> and Gate-2 release rate rises from <strong>30.1% to 58.3%</strong>.</li></ul>
+<h2 id="1-where-time-goes-each-run-loops-3488">1. Where Time Goes Each Run (Loops 34–88)<a class="anchor" href="#1-where-time-goes-each-run-loops-3488" aria-label="Link to section"></a></h2>
+<div class="table-wrap table-flywheel"><table><thead><tr><th style="text-align:left">Phase</th><th style="text-align:right">Total Min (n=95)</th><th style="text-align:right">Mean Min</th><th style="text-align:right">Median Min</th><th style="text-align:right">P90 Min</th><th style="text-align:right">Share of Wall</th><th style="text-align:right">Shipped Mean</th><th style="text-align:right">Held Mean</th></tr></thead><tbody><tr><td style="text-align:left">Idle gaps between phases</td><td style="text-align:right">3387.7</td><td style="text-align:right">35.7</td><td style="text-align:right">15.4</td><td style="text-align:right">84.0</td><td style="text-align:right">37.3%</td><td style="text-align:right">48.0</td><td style="text-align:right">24.5</td></tr><tr><td style="text-align:left">Engineering changes</td><td style="text-align:right">2408.7</td><td style="text-align:right">25.4</td><td style="text-align:right">20.9</td><td style="text-align:right">48.5</td><td style="text-align:right">26.5%</td><td style="text-align:right">26.1</td><td style="text-align:right">24.8</td></tr><tr><td style="text-align:left">84-match benchmark</td><td style="text-align:right">2330.0</td><td style="text-align:right">24.5</td><td style="text-align:right">28.3</td><td style="text-align:right">32.7</td><td style="text-align:right">25.7%</td><td style="text-align:right">31.2</td><td style="text-align:right">22.1</td></tr><tr><td style="text-align:left">Build &amp; test verification</td><td style="text-align:right">432.2</td><td style="text-align:right">4.5</td><td style="text-align:right">2.5</td><td style="text-align:right">4.4</td><td style="text-align:right">4.8%</td><td style="text-align:right">4.9</td><td style="text-align:right">4.5</td></tr><tr><td style="text-align:left">Replay forensics</td><td style="text-align:right">288.9</td><td style="text-align:right">3.0</td><td style="text-align:right">0.0</td><td style="text-align:right">10.4</td><td style="text-align:right">3.2%</td><td style="text-align:right">1.6</td><td style="text-align:right">3.7</td></tr><tr><td style="text-align:left">Combat drills</td><td style="text-align:right">244.2</td><td style="text-align:right">2.6</td><td style="text-align:right">0.0</td><td style="text-align:right">8.4</td><td style="text-align:right">2.7%</td><td style="text-align:right">2.8</td><td style="text-align:right">2.4</td></tr><tr><td style="text-align:left">Video rendering</td><td style="text-align:right">114.6</td><td style="text-align:right">1.2</td><td style="text-align:right">0.0</td><td style="text-align:right">6.2</td><td style="text-align:right">1.3%</td><td style="text-align:right">0.9</td><td style="text-align:right">1.4</td></tr><tr><td style="text-align:left">Head-to-head gate</td><td style="text-align:right">114.1</td><td style="text-align:right">1.2</td><td style="text-align:right">0.0</td><td style="text-align:right">4.1</td><td style="text-align:right">1.3%</td><td style="text-align:right">2.0</td><td style="text-align:right">0.9</td></tr><tr><td style="text-align:left">Site &amp; release publishing</td><td style="text-align:right">112.1</td><td style="text-align:right">1.2</td><td style="text-align:right">0.0</td><td style="text-align:right">4.3</td><td style="text-align:right">1.2%</td><td style="text-align:right">2.8</td><td style="text-align:right">0.5</td></tr></tbody></table></div>
+<p>Across Loops 34–88, engineering changes (26.5%) and the 84-match benchmark (25.7%) are the two largest active phases, while the head-to-head gate averages <strong>3.3 min</strong> when run and catches most held regressions early.</p>
+<h2 id="2-agent-steps-errors-and-retries-loops-1988">2. Agent Steps, Errors, and Retries (Loops 19–88)<a class="anchor" href="#2-agent-steps-errors-and-retries-loops-1988" aria-label="Link to section"></a></h2>
+<div class="table-wrap table-flywheel"><table><thead><tr><th style="text-align:left">Role</th><th style="text-align:right">Runs</th><th style="text-align:right">Steps</th><th style="text-align:right">Tool Calls</th><th style="text-align:right">Tool Errs</th><th style="text-align:right">Edit Miss</th><th style="text-align:right">Cmd Fail</th><th style="text-align:right">Builds</th><th style="text-align:right">Test Runs</th><th style="text-align:right">Large Reads</th><th style="text-align:right">Handoffs</th><th style="text-align:right">Compacts</th><th style="text-align:right">Cache</th></tr></thead><tbody><tr><td style="text-align:left">Runtime micro</td><td style="text-align:right">100</td><td style="text-align:right">23,533</td><td style="text-align:right">13,944</td><td style="text-align:right">113 (0.8%)</td><td style="text-align:right">108</td><td style="text-align:right">825</td><td style="text-align:right">295</td><td style="text-align:right">437</td><td style="text-align:right">3272</td><td style="text-align:right">4</td><td style="text-align:right">62</td><td style="text-align:right">97.6%</td></tr><tr><td style="text-align:left">Watchdog monitor</td><td style="text-align:right">110</td><td style="text-align:right">20,446</td><td style="text-align:right">9,573</td><td style="text-align:right">3 (0.0%)</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">21</td><td style="text-align:right">98.1%</td></tr><tr><td style="text-align:left">Macro &amp; scouting</td><td style="text-align:right">86</td><td style="text-align:right">14,814</td><td style="text-align:right">8,933</td><td style="text-align:right">55 (0.6%)</td><td style="text-align:right">50</td><td style="text-align:right">535</td><td style="text-align:right">304</td><td style="text-align:right">380</td><td style="text-align:right">1828</td><td style="text-align:right">1</td><td style="text-align:right">38</td><td style="text-align:right">96.9%</td></tr><tr><td style="text-align:left">Coordinator</td><td style="text-align:right">110</td><td style="text-align:right">12,792</td><td style="text-align:right">5,835</td><td style="text-align:right">12 (0.2%)</td><td style="text-align:right">2</td><td style="text-align:right">61</td><td style="text-align:right">35</td><td style="text-align:right">14</td><td style="text-align:right">32</td><td style="text-align:right">0</td><td style="text-align:right">20</td><td style="text-align:right">96.1%</td></tr><tr><td style="text-align:left">SC2 protocol wire</td><td style="text-align:right">75</td><td style="text-align:right">10,644</td><td style="text-align:right">6,214</td><td style="text-align:right">39 (0.6%)</td><td style="text-align:right">36</td><td style="text-align:right">300</td><td style="text-align:right">169</td><td style="text-align:right">78</td><td style="text-align:right">1090</td><td style="text-align:right">1</td><td style="text-align:right">28</td><td style="text-align:right">96.2%</td></tr><tr><td style="text-align:left">Replay analyzer</td><td style="text-align:right">101</td><td style="text-align:right">9,914</td><td style="text-align:right">5,721</td><td style="text-align:right">5 (0.1%)</td><td style="text-align:right">0</td><td style="text-align:right">290</td><td style="text-align:right">13</td><td style="text-align:right">1</td><td style="text-align:right">621</td><td style="text-align:right">0</td><td style="text-align:right">42</td><td style="text-align:right">94.2%</td></tr><tr><td style="text-align:left">Process review</td><td style="text-align:right">89</td><td style="text-align:right">9,730</td><td style="text-align:right">5,525</td><td style="text-align:right">25 (0.5%)</td><td style="text-align:right">8</td><td style="text-align:right">205</td><td style="text-align:right">50</td><td style="text-align:right">99</td><td style="text-align:right">804</td><td style="text-align:right">0</td><td style="text-align:right">27</td><td style="text-align:right">94.4%</td></tr><tr><td style="text-align:left">Match harness</td><td style="text-align:right">109</td><td style="text-align:right">5,898</td><td style="text-align:right">2,296</td><td style="text-align:right">1 (0.0%)</td><td style="text-align:right">0</td><td style="text-align:right">82</td><td style="text-align:right">4</td><td style="text-align:right">0</td><td style="text-align:right">4</td><td style="text-align:right">0</td><td style="text-align:right">13</td><td style="text-align:right">95.0%</td></tr><tr><td style="text-align:left">Test verifier</td><td style="text-align:right">99</td><td style="text-align:right">4,705</td><td style="text-align:right">2,002</td><td style="text-align:right">0 (0.0%)</td><td style="text-align:right">0</td><td style="text-align:right">56</td><td style="text-align:right">177</td><td style="text-align:right">199</td><td style="text-align:right">35</td><td style="text-align:right">0</td><td style="text-align:right">9</td><td style="text-align:right">93.4%</td></tr><tr><td style="text-align:left">Report publisher</td><td style="text-align:right">59</td><td style="text-align:right">4,388</td><td style="text-align:right">2,433</td><td style="text-align:right">9 (0.4%)</td><td style="text-align:right">5</td><td style="text-align:right">56</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">13</td><td style="text-align:right">93.7%</td></tr><tr><td style="text-align:left">Combat drill runner</td><td style="text-align:right">51</td><td style="text-align:right">3,456</td><td style="text-align:right">1,752</td><td style="text-align:right">5 (0.3%)</td><td style="text-align:right">2</td><td style="text-align:right">30</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">7</td><td style="text-align:right">0</td><td style="text-align:right">8</td><td style="text-align:right">93.5%</td></tr><tr><td style="text-align:left">Opponent setup</td><td style="text-align:right">8</td><td style="text-align:right">820</td><td style="text-align:right">456</td><td style="text-align:right">7 (1.5%)</td><td style="text-align:right">7</td><td style="text-align:right">22</td><td style="text-align:right">13</td><td style="text-align:right">0</td><td style="text-align:right">13</td><td style="text-align:right">0</td><td style="text-align:right">2</td><td style="text-align:right">95.6%</td></tr><tr><td style="text-align:left">Editorial review</td><td style="text-align:right">6</td><td style="text-align:right">337</td><td style="text-align:right">175</td><td style="text-align:right">4 (2.3%)</td><td style="text-align:right">1</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">1</td><td style="text-align:right">78.7%</td></tr></tbody></table></div>
+<h2 id="3-why-held-builds-failed-amp-repeated-edits">3. Why Held Builds Failed &amp; Repeated Edits<a class="anchor" href="#3-why-held-builds-failed-amp-repeated-edits" aria-label="Link to section"></a></h2>
+<h3 id="3a-held-builds-loops-3488">3a. Held Builds (Loops 34–88)<a class="anchor" href="#3a-held-builds-loops-3488" aria-label="Link to section"></a></h3>
+<div class="table-wrap table-flywheel"><table><thead><tr><th style="text-align:right">Loop</th><th style="text-align:left">H2H</th><th style="text-align:left">H2H Early Catch?</th><th style="text-align:right">Bench Min</th><th style="text-align:left">Root Cause</th><th style="text-align:left">Summary</th></tr></thead><tbody><tr><td style="text-align:right">L35</td><td style="text-align:left">1–5</td><td style="text-align:left">YES</td><td style="text-align:right">16.8</td><td style="text-align:left">Head-to-head regression</td><td style="text-align:left">External and drill scores improved, while head-to-head against the live build regressed</td></tr><tr><td style="text-align:right">L38</td><td style="text-align:left">3–3</td><td style="text-align:left">YES</td><td style="text-align:right">30.4</td><td style="text-align:left">Head-to-head regression</td><td style="text-align:left">External and drill scores improved, while head-to-head against the live build regressed</td></tr><tr><td style="text-align:right">L39</td><td style="text-align:left">1–5</td><td style="text-align:left">YES</td><td style="text-align:right">28.2</td><td style="text-align:left">Head-to-head regression</td><td style="text-align:left">External and drill scores improved, while head-to-head against the live build regressed</td></tr><tr><td style="text-align:right">L41</td><td style="text-align:left">2–4</td><td style="text-align:left">YES</td><td style="text-align:right">29.0</td><td style="text-align:left">Head-to-head regression</td><td style="text-align:left">External and drill scores improved, while head-to-head against the live build regressed</td></tr><tr><td style="text-align:right">L43</td><td style="text-align:left">4–2</td><td style="text-align:left">YES</td><td style="text-align:right">29.2</td><td style="text-align:left">Macro/micro interaction</td><td style="text-align:left">Protoss macro/micro interaction (Blink into Tanks, Gateway overbuild, or missing Colossi)</td></tr><tr><td style="text-align:right">L44</td><td style="text-align:left">3–3</td><td style="text-align:left">YES</td><td style="text-align:right">30.2</td><td style="text-align:left">Global micro heuristic</td><td style="text-align:left">Global light-harass split lacked a main-army strength guard (Terran TvP 0–8)</td></tr><tr><td style="text-align:right">L46</td><td style="text-align:left">2–4</td><td style="text-align:left">YES</td><td style="text-align:right">29.4</td><td style="text-align:left">Macro/micro interaction</td><td style="text-align:left">Protoss macro/micro interaction (Blink into Tanks, Gateway overbuild, or missing Colossi)</td></tr><tr><td style="text-align:right">L47</td><td style="text-align:left">3–3</td><td style="text-align:left">YES</td><td style="text-align:right">31.4</td><td style="text-align:left">Planner vs. runtime cap mismatch</td><td style="text-align:left">Macro planner vs. runtime cap or unit-priority mismatch</td></tr><tr><td style="text-align:right">L49</td><td style="text-align:left">5–1</td><td style="text-align:left">no</td><td style="text-align:right">32.1</td><td style="text-align:left">Expansion escrow &amp; TvP stall</td><td style="text-align:left">Expansion savings and Starport gas-yield guard stalled Terran 1-1-1 openings in TvP (fixed in Loop 50)</td></tr><tr><td style="text-align:right">L52</td><td style="text-align:left">3–3</td><td style="text-align:left">YES</td><td style="text-align:right">29.6</td><td style="text-align:left">Expansion escrow &amp; TvP stall</td><td style="text-align:left">Expansion savings and Starport gas-yield guard stalled Terran 1-1-1 openings in TvP (fixed in Loop 50)</td></tr><tr><td style="text-align:right">L53</td><td style="text-align:left">4–2</td><td style="text-align:left">no</td><td style="text-align:right">28.9</td><td style="text-align:left">Expansion escrow &amp; TvP stall</td><td style="text-align:left">Expansion savings and Starport gas-yield guard stalled Terran 1-1-1 openings in TvP (fixed in Loop 50)</td></tr><tr><td style="text-align:right">L54</td><td style="text-align:left">5–1</td><td style="text-align:left">no</td><td style="text-align:right">28.4</td><td style="text-align:left">Expansion escrow &amp; TvP stall</td><td style="text-align:left">Expansion savings and Starport gas-yield guard stalled Terran 1-1-1 openings in TvP (fixed in Loop 50)</td></tr><tr><td style="text-align:right">L55</td><td style="text-align:left">3–3</td><td style="text-align:left">YES</td><td style="text-align:right">30.1</td><td style="text-align:left">Expansion escrow &amp; TvP stall</td><td style="text-align:left">Expansion savings and Starport gas-yield guard stalled Terran 1-1-1 openings in TvP (fixed in Loop 50)</td></tr><tr><td style="text-align:right">L56</td><td style="text-align:left">4–2</td><td style="text-align:left">no</td><td style="text-align:right">28.8</td><td style="text-align:left">Planner vs. runtime cap mismatch</td><td style="text-align:left">Macro planner vs. runtime cap or unit-priority mismatch</td></tr><tr><td style="text-align:right">L58</td><td style="text-align:left">6–6</td><td style="text-align:left">YES</td><td style="text-align:right">31.7</td><td style="text-align:left">Planner vs. runtime cap mismatch</td><td style="text-align:left">Macro planner vs. runtime cap or unit-priority mismatch</td></tr><tr><td style="text-align:right">L65C</td><td style="text-align:left">6–6</td><td style="text-align:left">YES</td><td style="text-align:right">33.8</td><td style="text-align:left">Mixed match regression</td><td style="text-align:left">Mixed head-to-head and external regression below release threshold</td></tr><tr><td style="text-align:right">L65D</td><td style="text-align:left">5–7</td><td style="text-align:left">YES</td><td style="text-align:right">4.1</td><td style="text-align:left">Mixed match regression</td><td style="text-align:left">Mixed head-to-head and external regression below release threshold</td></tr><tr><td style="text-align:right">L65E</td><td style="text-align:left">6–6</td><td style="text-align:left">YES</td><td style="text-align:right">27.9</td><td style="text-align:left">Planner vs. runtime cap mismatch</td><td style="text-align:left">Macro planner vs. runtime cap or unit-priority mismatch</td></tr><tr><td style="text-align:right">L65F</td><td style="text-align:left">5–7</td><td style="text-align:left">YES</td><td style="text-align:right">5.6</td><td style="text-align:left">Mixed match regression</td><td style="text-align:left">Mixed head-to-head and external regression below release threshold</td></tr><tr><td style="text-align:right">L65G</td><td style="text-align:left">5–7</td><td style="text-align:left">YES</td><td style="text-align:right">30.9</td><td style="text-align:left">Mixed match regression</td><td style="text-align:left">Mixed head-to-head and external regression below release threshold</td></tr><tr><td style="text-align:right">L67A</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.8</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Stopped at the 18-match canary gate before the 84-match roster</td></tr><tr><td style="text-align:right">L68A</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">7.9</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Stopped at the 18-match canary gate before the 84-match roster</td></tr><tr><td style="text-align:right">L68B</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.8</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Stopped at the 18-match canary gate before the 84-match roster</td></tr><tr><td style="text-align:right">L69A</td><td style="text-align:left">Canary pass</td><td style="text-align:left">no</td><td style="text-align:right">29.3</td><td style="text-align:left">Planner vs. runtime cap mismatch</td><td style="text-align:left">Macro planner vs. runtime cap or unit-priority mismatch</td></tr><tr><td style="text-align:right">L69B</td><td style="text-align:left">Canary pass</td><td style="text-align:left">no</td><td style="text-align:right">32.4</td><td style="text-align:left">Planner vs. runtime cap mismatch</td><td style="text-align:left">Macro planner vs. runtime cap or unit-priority mismatch</td></tr><tr><td style="text-align:right">L69C</td><td style="text-align:left">Canary pass</td><td style="text-align:left">no</td><td style="text-align:right">26.5</td><td style="text-align:left">Full-roster benchmark gate</td><td style="text-align:left">Passed 18-match canary, then fell short of release threshold on full 84-match roster</td></tr><tr><td style="text-align:right">L70</td><td style="text-align:left">Canary pass</td><td style="text-align:left">no</td><td style="text-align:right">28.2</td><td style="text-align:left">Planner vs. runtime cap mismatch</td><td style="text-align:left">Macro planner vs. runtime cap or unit-priority mismatch</td></tr><tr><td style="text-align:right">L70B</td><td style="text-align:left">Canary pass</td><td style="text-align:left">no</td><td style="text-align:right">26.0</td><td style="text-align:left">Full-roster benchmark gate</td><td style="text-align:left">Passed 18-match canary, then fell short of release threshold on full 84-match roster</td></tr><tr><td style="text-align:right">L71</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.7</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Stopped at the 18-match canary gate before the 84-match roster</td></tr><tr><td style="text-align:right">L71B</td><td style="text-align:left">Canary pass</td><td style="text-align:left">no</td><td style="text-align:right">26.8</td><td style="text-align:left">Full-roster benchmark gate</td><td style="text-align:left">Passed 18-match canary, then fell short of release threshold on full 84-match roster</td></tr><tr><td style="text-align:right">L72</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.8</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Stopped at the 18-match canary gate before the 84-match roster</td></tr><tr><td style="text-align:right">L72B</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.8</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Stopped at the 18-match canary gate before the 84-match roster</td></tr><tr><td style="text-align:right">L72C</td><td style="text-align:left">Canary pass</td><td style="text-align:left">no</td><td style="text-align:right">30.6</td><td style="text-align:left">Full-roster benchmark gate</td><td style="text-align:left">Passed 18-match canary, then fell short of release threshold on full 84-match roster</td></tr><tr><td style="text-align:right">L74</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.8</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Stopped at the 18-match canary gate before the 84-match roster</td></tr><tr><td style="text-align:right">L74B</td><td style="text-align:left">Canary pass</td><td style="text-align:left">no</td><td style="text-align:right">26.0</td><td style="text-align:left">Full-roster benchmark gate</td><td style="text-align:left">Passed 18-match canary, then fell short of release threshold on full 84-match roster</td></tr><tr><td style="text-align:right">L75</td><td style="text-align:left">Canary pass</td><td style="text-align:left">no</td><td style="text-align:right">27.5</td><td style="text-align:left">Full-roster benchmark gate</td><td style="text-align:left">Passed 18-match canary, then fell short of release threshold on full 84-match roster</td></tr><tr><td style="text-align:right">L76</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.7</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Stopped at the 18-match canary gate before the 84-match roster</td></tr><tr><td style="text-align:right">L76B</td><td style="text-align:left">Canary pass</td><td style="text-align:left">no</td><td style="text-align:right">27.5</td><td style="text-align:left">Full-roster benchmark gate</td><td style="text-align:left">Passed 18-match canary, then fell short of release threshold on full 84-match roster</td></tr><tr><td style="text-align:right">L77</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.7</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Stopped at the 18-match canary gate before the 84-match roster</td></tr><tr><td style="text-align:right">L77B</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.4</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Stopped at the 18-match canary gate before the 84-match roster</td></tr><tr><td style="text-align:right">L77C</td><td style="text-align:left">Canary pass</td><td style="text-align:left">no</td><td style="text-align:right">29.3</td><td style="text-align:left">Full-roster benchmark gate</td><td style="text-align:left">Passed 18-match canary, then fell short of release threshold on full 84-match roster</td></tr><tr><td style="text-align:right">L78</td><td style="text-align:left">Canary pass</td><td style="text-align:left">no</td><td style="text-align:right">26.5</td><td style="text-align:left">Full-roster benchmark gate</td><td style="text-align:left">Passed 18-match canary, then fell short of release threshold on full 84-match roster</td></tr><tr><td style="text-align:right">L79</td><td style="text-align:left">Canary pass</td><td style="text-align:left">no</td><td style="text-align:right">25.3</td><td style="text-align:left">Full-roster benchmark gate</td><td style="text-align:left">Passed 18-match canary, then fell short of release threshold on full 84-match roster</td></tr><tr><td style="text-align:right">L80</td><td style="text-align:left">1–5</td><td style="text-align:left">YES</td><td style="text-align:right">27.3</td><td style="text-align:left">Micro command scatter</td><td style="text-align:left">Mid-fight per-unit attack-position scatter halved batched unit-attack commands and dropped 26% of Tank sieges</td></tr><tr><td style="text-align:right">L80B</td><td style="text-align:left">3–3</td><td style="text-align:left">no</td><td style="text-align:right">25.9</td><td style="text-align:left">Held for ladder fixes</td><td style="text-align:left">Reverted scatter (31–44–3 external, Protoss 12–14); held to bundle Division 8 replay-audit fixes before shipping</td></tr><tr><td style="text-align:right">L81</td><td style="text-align:left">Canary-24</td><td style="text-align:left">YES</td><td style="text-align:right">12.3</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Stopped at the 24-match canary gate before the 84-match roster</td></tr><tr><td style="text-align:right">L81B</td><td style="text-align:left">2–4</td><td style="text-align:left">YES</td><td style="text-align:right">32.5</td><td style="text-align:left">Timing &amp; hold guards</td><td style="text-align:left">Passive 4:00–6:30 PvP hold, 5:30 Robotics Bay rush, and unguarded 5:18 Terran 3rd Command Center hurt mirror defense (fixed in L81C)</td></tr><tr><td style="text-align:right">L82</td><td style="text-align:left">1–5</td><td style="text-align:left">YES</td><td style="text-align:right">33.6</td><td style="text-align:left">Wall wire &amp; fog guards</td><td style="text-align:left">Doorway wire check rejected Protoss walls and fogged Terran ramps triggered false open-wall punishes (fixed in L82B)</td></tr><tr><td style="text-align:right">L85</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">4.8</td><td style="text-align:left">Pre-check cheese gate</td><td style="text-align:left">Stopped at the 18-match cheese-defense pre-check (3–7–8) before full-roster testing (tightened in L85B)</td></tr><tr><td style="text-align:right">L85B</td><td style="text-align:left">3–3</td><td style="text-align:left">YES</td><td style="text-align:right">35.7</td><td style="text-align:left">Rush false alarms &amp; PvT</td><td style="text-align:left">Loose proxy and early-pool thresholds inflated rush alerts 9.7× and starved Protoss Stargate and 3rd Nexus (fixed in L85C)</td></tr><tr><td style="text-align:right">L86A</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.7</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Stopped at the 18-match anti-greed canary gate (2–9–1 external) before full-roster testing (refined in L86B)</td></tr><tr><td style="text-align:right">L86B</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.8</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Stopped at the 18-match canary gate (3–8–1 external) while tuning expansion and targeting thresholds (refined in L86C)</td></tr><tr><td style="text-align:right">L86C</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.8</td><td style="text-align:left">Fog base dedup gate</td><td style="text-align:left">Stopped at the 18-match canary gate (2–8–2 external) before adding fog-of-war enemy base spatial deduplication in L86D</td></tr><tr><td style="text-align:right">L86D</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.8</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Stopped at the 18-match canary gate (4–6–2 external) for final gas-valve and escort polish before shipping L86E</td></tr><tr><td style="text-align:right">L87A</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.7</td><td style="text-align:left">7-dim belief baseline</td><td style="text-align:left">Established the 7-dimension enemy-belief baseline (10–7–1 canary, 5–1 head-to-head, 0.512 upgrade F1) before Loop 87B calibration</td></tr><tr><td style="text-align:right">L87B</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">10.7</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Lifted enemy upgrade belief F1 to 0.643 (1.82% supply-blocked), then held at the 18-match canary gate (4–11–3) for further calibration</td></tr><tr><td style="text-align:right">L87C</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">9.0</td><td style="text-align:left">Stage 1 canary gate</td><td style="text-align:left">Pushed enemy upgrade belief F1 to 0.855 (4–2 head-to-head) and ran the first 78-match Version C radar (26–34–18), held to add follow-up playbooks</td></tr><tr><td style="text-align:right">L87D</td><td style="text-align:left">Version C 78g</td><td style="text-align:left">YES</td><td style="text-align:right">18.7</td><td style="text-align:left">Version C playbook gate</td><td style="text-align:left">Tested 18 early-pressure follow-up transitions across 78 Version C games (18–38–22, 1.39% supply-blocked), held to fix Protoss cannon walling</td></tr><tr><td style="text-align:right">L87E</td><td style="text-align:left">Version C 78g</td><td style="text-align:left">YES</td><td style="text-align:right">18.5</td><td style="text-align:left">Version C playbook gate</td><td style="text-align:left">Lifted Mothman-TC to 10–9–7 and Mothman-ZC to 8–11–7 (0.35% supply-blocked) across 78 games, held for Protoss Ground-BFS cannon solver</td></tr><tr><td style="text-align:right">L87F</td><td style="text-align:left">4–2</td><td style="text-align:left">YES</td><td style="text-align:right">33.3</td><td style="text-align:left">Gas pull &amp; APM-500 drops</td><td style="text-align:left">Beat Release #26 4–2 head-to-head with Terran at 11–13–2, but aggressive gas-worker floors tripled mineral starvation (11 to 34) and routine micro crowded urgent macro (fixed in L87G)</td></tr><tr><td style="text-align:right">L88A</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">5.7</td><td style="text-align:left">Flow-gas &amp; hold tuning</td><td style="text-align:left">Cleared Zerg Spire bank freezes (2.53× win), then stopped at the 18-match canary gate (6–12) to refine early gas demand and stacked operation holds</td></tr><tr><td style="text-align:right">L88B</td><td style="text-align:left">Canary-18</td><td style="text-align:left">YES</td><td style="text-align:right">7.6</td><td style="text-align:left">Tech Lab cancel &amp; horizon</td><td style="text-align:left">Lifted canary play to 9–8–1 with Terran flipping oberon (2.46×), then held to remove Factory Tech Lab cancels and double-counted gas horizons</td></tr><tr><td style="text-align:right">L88C</td><td style="text-align:left">Full-84</td><td style="text-align:left">YES</td><td style="text-align:right">30.5</td><td style="text-align:left">Zerg cohesion &amp; gas pull</td><td style="text-align:left">Cleared all self-cancels (0) and pushed Protoss to 9–14–3, then held after multi-hatchery Zerg cohesion double-penalties and mineral starvation</td></tr><tr><td style="text-align:right">L88D</td><td style="text-align:left">Full-84</td><td style="text-align:left">YES</td><td style="text-align:right">29.0</td><td style="text-align:left">Zerg pullback &amp; escrow cap</td><td style="text-align:left">Cut urgent command drops 94% and pushed Terran to 13–13 (50.0% wins, 1.02× trade), then held to fix Zerg Queen retention and additive escrow floors</td></tr><tr><td style="text-align:right">L88E</td><td style="text-align:left">2–3–1</td><td style="text-align:left">YES</td><td style="text-align:right">47.4</td><td style="text-align:left">Host-load rerun</td><td style="text-align:left">Beat Release #27 overall and hit 0.87 upgrade belief F1, then reran cleanly as L88E Clean after concurrent host load caused seven step timeouts</td></tr></tbody></table></div>
+<h3 id="3b-repeatedly-edited-rules-3-loop-clusters">3b. Repeatedly Edited Rules (3-Loop Clusters)<a class="anchor" href="#3b-repeatedly-edited-rules-3-loop-clusters" aria-label="Link to section"></a></h3>
+<div class="table-wrap table-flywheel"><table><thead><tr><th style="text-align:left">Subsystem</th><th style="text-align:left">Loops Touched</th><th style="text-align:right">Touches</th><th style="text-align:left">Check Before Re-Editing</th></tr></thead><tbody><tr><td style="text-align:left"><strong>Production Placement / Brain-Runtime Cap Mismatch (production stall)</strong></td><td style="text-align:left">L34, L37, L40, L41, L42, L44, L46, L47, L48, L50, L53, L54, L55, L56, L57, L58, L59</td><td style="text-align:right">17</td><td style="text-align:left">Gate 1 macro trace</td></tr><tr><td style="text-align:left"><strong>Terran/Protoss 1-Base Lockout (1-base lock)</strong></td><td style="text-align:left">L38, L40, L41, L42, L44, L45, L48, L50, L52, L53, L54, L56, L58</td><td style="text-align:right">13</td><td style="text-align:left">Gate 1 macro trace</td></tr><tr><td style="text-align:left"><strong>Protoss PvP Natural Expansion Delay (PvP natural expansion delay)</strong></td><td style="text-align:left">L42, L43, L46, L47, L50, L52, L53</td><td style="text-align:right">7</td><td style="text-align:left">Gate 1 macro trace</td></tr><tr><td style="text-align:left"><strong>Protoss 0-Colossus / Robotics Bay Escrow &amp; Urgency</strong></td><td style="text-align:left">L38, L39, L41, L44, L46, L47</td><td style="text-align:right">6</td><td style="text-align:left">Gate 1 macro trace</td></tr><tr><td style="text-align:left"><strong>Detection-First PF Raid (Dark Templar Blink raid)</strong></td><td style="text-align:left">L41, L42, L43, L44, L46, L47</td><td style="text-align:right">6</td><td style="text-align:left">Gate 1 macro trace</td></tr><tr><td style="text-align:left"><strong>Stalker Blink-Forward Restraint (Blink-forward into Siege Tanks)</strong></td><td style="text-align:left">L35, L36, L38, L41, L43, L46</td><td style="text-align:right">6</td><td style="text-align:left">25s drill A/B</td></tr><tr><td style="text-align:left"><strong>Stalker Blink-Forward Restraint (Blink-forward into Siege Tanks)</strong></td><td style="text-align:left">L53, L56, L57, L58</td><td style="text-align:right">4</td><td style="text-align:left">25s drill A/B</td></tr><tr><td style="text-align:left"><strong>Mineral Defense (worker mineral-walk disengage)</strong></td><td style="text-align:left">L38, L40, L41, L42</td><td style="text-align:right">4</td><td style="text-align:left">25s drill A/B</td></tr><tr><td style="text-align:left"><strong>Arena/Live Worker-Rush Defense (worker-rush drills)</strong></td><td style="text-align:left">L60, L61, L62</td><td style="text-align:right">3</td><td style="text-align:left">25s drill A/B</td></tr><tr><td style="text-align:left"><strong>Mutalisk Magic-Box vs Thors (Mutalisk spread &amp; Hold Position)</strong></td><td style="text-align:left">L39, L42, L43</td><td style="text-align:right">3</td><td style="text-align:left">25s drill A/B</td></tr><tr><td style="text-align:left"><strong>Arena/Live Worker-Rush Defense (worker-rush drills)</strong></td><td style="text-align:left">L39, L41, L42</td><td style="text-align:right">3</td><td style="text-align:left">25s drill A/B</td></tr></tbody></table></div>
+<p>Rule: any micro drill touched twice in 3 runs requires a 25-second targeted drill A/B pass before editing thresholds again; any macro subsystem requires a closed-loop Gate 1 contract or trace test.</p>
+<h2 id="4-time-saved-by-reordering-gates-loops-3488">4. Time Saved by Reordering Gates (Loops 34–88)<a class="anchor" href="#4-time-saved-by-reordering-gates-loops-3488" aria-label="Link to section"></a></h2>
+<div class="table-wrap table-flywheel"><table><thead><tr><th style="text-align:left">ID</th><th style="text-align:left">Process Change</th><th style="text-align:right">Standalone Saved (Min)</th><th style="text-align:right">Min Saved / Release</th><th style="text-align:left">Affected Loops</th></tr></thead><tbody><tr><td style="text-align:left">IF-1</td><td style="text-align:left"><strong>Head-to-head gate before 84-match roster</strong></td><td style="text-align:right">446.1</td><td style="text-align:right">15.9</td><td style="text-align:left">L35, L38, L39, L41, L43, L44, L46, L47, L52, L55, L58, L65 (×6)</td></tr><tr><td style="text-align:left">IF-2</td><td style="text-align:left"><strong>Planner vs. runtime cap contract check (&lt;3s)</strong></td><td style="text-align:right">742.5</td><td style="text-align:right">26.5</td><td style="text-align:left">L43, L46, L47, L56, L58, L65, L69 (×2), L70, L71, L72, L80 (×2), L81 (×2)</td></tr><tr><td style="text-align:left">IF-3</td><td style="text-align:left"><strong>Targeted 25s combat drill pre-check</strong></td><td style="text-align:right">74.0</td><td style="text-align:right">2.6</td><td style="text-align:left">L35, L38, L39, L41, L43, L44, L46, L47, L49, L52, L53, L54, L55, L58, L76, L88</td></tr><tr><td style="text-align:left">IF-4</td><td style="text-align:left"><strong>Fast unit validation + solo timing gate</strong></td><td style="text-align:right">705.5</td><td style="text-align:right">25.2</td><td style="text-align:left">L34, L35, L36, L38, L39, L40, L41, L42, L43, L44, L45, L46, L47, L48, L49, L50, L51, L52, L53, L54, L55, L56, L57, L58, L59, L60, L61, L62, L63, L64, L65 (×2), L66, L67, L68 (×3), L69 (×3), L70, L71, L72, L73, L74, L76, L77 (×3), L78, L81 (×2), L82 (×2), L84, L85 (×2), L86 (×4), L87 (×4), L88 (×4)</td></tr><tr><td style="text-align:left">IF-5</td><td style="text-align:left"><strong>Pre-assigned test file ownership</strong></td><td style="text-align:right">12.0</td><td style="text-align:right">0.4</td><td style="text-align:left">L40, L43, L44, L47, L48</td></tr></tbody></table></div>
+<ul><li><strong>Combined Non-Double-Counted Savings (Loops 34–88):</strong> <strong>1555.4 min (25.92 h)</strong>; total wall time drops from 9078.5m to 7523.2m (<strong>324.2m to 268.7m per release</strong>, <strong>1.21×</strong>).</li></ul>
+<h2 id="5-workflow-changes-applied">5. Workflow Changes Applied<a class="anchor" href="#5-workflow-changes-applied" aria-label="Link to section"></a></h2>
+<ol><li><strong>Run 2-Minute Head-to-Head Check Before the 30-Minute Roster</strong><ul><li><strong>Impact:</strong> Saves 446 min across Loops 34–88 (15.9 min/release); catches regressions in 2 min instead of 31 min.</li><li><strong>Check:</strong> H2H runs first; stops early if H2H finishes ≤ 3–3 or any race goes 0–2.</li></ul></li><li><strong>Brain and Runtime Production-Cap Contract Check (&lt;3s in Gate 1)</strong><ul><li><strong>Impact:</strong> Prevents split-brain held builds and lifts Gate-2 release rate 30.1% → 58.3%.</li><li><strong>Check:</strong> Gate 1 asserts runtime production caps ≥ brain caps and Colossus &gt; Phoenix &gt; Stalker.</li></ul></li><li><strong>25-Second Targeted Drill Pre-Check for Repeatedly Edited Rules</strong><ul><li><strong>Impact:</strong> Flags 11 repeatedly edited rules before changes land; saves 74 min in wasted full drill runs.</li><li><strong>Check:</strong> Any rule touched in ≥ 2 of the last 3 runs requires a 25-second targeted drill A/B pass before the full benchmark.</li></ul></li><li><strong>Pre-Assigned Test Ownership and Fast Unit-Test Mode</strong><ul><li><strong>Impact:</strong> Removes ownership wait pauses (12 min) and CPU-contention timing retries (706 min across Loops 34–88).</li><li><strong>Check:</strong> Authors edit their own track tests directly; the verifier owns wall-clock timing checks on an idle CPU.</li></ul></li><li><strong>Post-Run Log Review, Trade Video Contact Sheets &amp; Quiet Polling</strong><ul><li><strong>Impact:</strong> Updates timing logs in &lt;3s after each run, pairs worst fights with 6-frame video sheets, and cuts idle monitor polling (watchdog polling previously logged 20,446 steps for 8 alerts).</li><li><strong>Check:</strong> Each run appends to the run timing log and produces replay and video trade review packs.</li></ul></li></ol>
+<h2 id="6-cycle-time-bottleneck-audit">6. Cycle-Time Bottleneck Audit<a class="anchor" href="#6-cycle-time-bottleneck-audit" aria-label="Link to section"></a></h2>
+<ul><li><strong>Sub-iterations Logged:</strong> 47 (L87B, L87C, L87D, L87E, L87F, L87G, L88A, L88B, L88C, L88D, L88E, L88E Clean)</li><li><strong>Profiled Shell Commands:</strong> 3039 (62 non-SC2 commands over 30 s, total 2874.0s) | <strong>Bench Runs Audited:</strong> 63 (avg CPU util 35.3%, avg tail overhead 11.6%) | <strong>Open-Ended Findings:</strong> 24</li></ul>
+<h3 id="6a-slowest-non-match-commands">6a. Slowest Non-Match Commands<a class="anchor" href="#6a-slowest-non-match-commands" aria-label="Link to section"></a></h3>
+<div class="table-wrap table-flywheel"><table><thead><tr><th style="text-align:right">Rank</th><th style="text-align:left">Iteration</th><th style="text-align:left">Role</th><th style="text-align:right">Duration (s)</th><th style="text-align:left">Category</th><th style="text-align:left">Task</th></tr></thead><tbody><tr><td style="text-align:right">1</td><td style="text-align:left">L88A</td><td style="text-align:left">Macro &amp; scouting</td><td style="text-align:right">150.0</td><td style="text-align:left">Scoped lane test</td><td style="text-align:left">Long-running analysis script</td></tr><tr><td style="text-align:right">2</td><td style="text-align:left">L65E</td><td style="text-align:left">Replay analyzer</td><td style="text-align:right">90.0</td><td style="text-align:left">Ad-hoc analysis</td><td style="text-align:left">Ad-hoc SQLite and replay forensics query</td></tr><tr><td style="text-align:right">3</td><td style="text-align:left">L65E</td><td style="text-align:left">Replay analyzer</td><td style="text-align:right">88.0</td><td style="text-align:left">Ad-hoc analysis</td><td style="text-align:left">Ad-hoc SQLite and replay forensics query</td></tr><tr><td style="text-align:right">4</td><td style="text-align:left">L65E</td><td style="text-align:left">Replay analyzer</td><td style="text-align:right">70.0</td><td style="text-align:left">Ad-hoc analysis</td><td style="text-align:left">Ad-hoc SQLite and replay forensics query</td></tr><tr><td style="text-align:right">5</td><td style="text-align:left">L87B</td><td style="text-align:left">SC2 protocol wire</td><td style="text-align:right">69.0</td><td style="text-align:left">Ad-hoc analysis</td><td style="text-align:left">Long-running analysis script</td></tr><tr><td style="text-align:right">6</td><td style="text-align:left">L87B</td><td style="text-align:left">Replay analyzer</td><td style="text-align:right">64.0</td><td style="text-align:left">Ad-hoc analysis</td><td style="text-align:left">Long-running analysis script</td></tr><tr><td style="text-align:right">7</td><td style="text-align:left">L65C</td><td style="text-align:left">Match harness</td><td style="text-align:right">62.0</td><td style="text-align:left">Ad-hoc analysis</td><td style="text-align:left">Ad-hoc replay protocol inspection script</td></tr><tr><td style="text-align:right">8</td><td style="text-align:left">L65E</td><td style="text-align:left">Replay analyzer</td><td style="text-align:right">62.0</td><td style="text-align:left">Ad-hoc analysis</td><td style="text-align:left">Ad-hoc SQLite and replay forensics query</td></tr><tr><td style="text-align:right">9</td><td style="text-align:left">L65G</td><td style="text-align:left">Match harness</td><td style="text-align:right">62.0</td><td style="text-align:left">Ad-hoc analysis</td><td style="text-align:left">Parallel replay feature audit script</td></tr><tr><td style="text-align:right">10</td><td style="text-align:left">L88A</td><td style="text-align:left">Runtime micro</td><td style="text-align:right">62.0</td><td style="text-align:left">Scoped lane test</td><td style="text-align:left">Long-running analysis script</td></tr></tbody></table></div>
+<h3 id="6b-benchmark-utilization-and-scheduling">6b. Benchmark Utilization and Scheduling<a class="anchor" href="#6b-benchmark-utilization-and-scheduling" aria-label="Link to section"></a></h3>
+<div class="table-wrap table-flywheel"><table><thead><tr><th style="text-align:left">Iteration</th><th style="text-align:right">Matches</th><th style="text-align:left">Workers / Threads</th><th style="text-align:right">CPU Util</th><th style="text-align:left">Schedule</th><th style="text-align:right">Wall Min</th><th style="text-align:right">Ideal Min</th><th style="text-align:right">Tail Overhead</th><th style="text-align:right">Timeouts</th></tr></thead><tbody><tr><td style="text-align:left">L65C</td><td style="text-align:right">84</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Default</td><td style="text-align:right">33.8</td><td style="text-align:right">30.8</td><td style="text-align:right">8.6% (175s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L65D</td><td style="text-align:right">12</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Default</td><td style="text-align:right">4.1</td><td style="text-align:right">2.7</td><td style="text-align:right">34.3% (84s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L65E</td><td style="text-align:right">84</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Default</td><td style="text-align:right">27.9</td><td style="text-align:right">26.3</td><td style="text-align:right">5.8% (97s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L65F</td><td style="text-align:right">12</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Default</td><td style="text-align:right">5.6</td><td style="text-align:right">2.9</td><td style="text-align:right">48.4% (163s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L65G</td><td style="text-align:right">84</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Default</td><td style="text-align:right">30.9</td><td style="text-align:right">28.9</td><td style="text-align:right">6.4% (119s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L65H</td><td style="text-align:right">84</td><td style="text-align:left">14/32</td><td style="text-align:right">43.8%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">28.1</td><td style="text-align:right">25.8</td><td style="text-align:right">7.9% (133s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L66</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">28.0</td><td style="text-align:right">27.2</td><td style="text-align:right">2.9% (50s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L67A</td><td style="text-align:right">18</td><td style="text-align:left">14/32</td><td style="text-align:right">43.8%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.8</td><td style="text-align:right">8.0</td><td style="text-align:right">25.8% (167s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L67B</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">26.5</td><td style="text-align:right">26.0</td><td style="text-align:right">1.7% (27s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L68A</td><td style="text-align:right">18</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">7.9</td><td style="text-align:right">7.6</td><td style="text-align:right">3.8% (18s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L68B</td><td style="text-align:right">18</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.8</td><td style="text-align:right">9.5</td><td style="text-align:right">12.0% (77s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L68C</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">30.9</td><td style="text-align:right">28.0</td><td style="text-align:right">9.3% (173s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L69A</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">29.3</td><td style="text-align:right">27.7</td><td style="text-align:right">5.4% (96s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L69B</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">32.4</td><td style="text-align:right">31.7</td><td style="text-align:right">2.1% (40s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L69C</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">26.5</td><td style="text-align:right">26.2</td><td style="text-align:right">1.3% (20s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L70</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">28.2</td><td style="text-align:right">27.1</td><td style="text-align:right">3.7% (63s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L70B</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">26.0</td><td style="text-align:right">25.4</td><td style="text-align:right">2.2% (35s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L71</td><td style="text-align:right">18</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.7</td><td style="text-align:right">8.6</td><td style="text-align:right">19.7% (127s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L71B</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">26.8</td><td style="text-align:right">26.0</td><td style="text-align:right">2.9% (47s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L72</td><td style="text-align:right">18</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.8</td><td style="text-align:right">9.0</td><td style="text-align:right">17.0% (110s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L72B</td><td style="text-align:right">18</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.8</td><td style="text-align:right">8.1</td><td style="text-align:right">24.9% (161s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L72C</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">30.6</td><td style="text-align:right">24.4</td><td style="text-align:right">20.0% (366s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L73</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">26.4</td><td style="text-align:right">25.5</td><td style="text-align:right">3.6% (57s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L74</td><td style="text-align:right">18</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.8</td><td style="text-align:right">8.2</td><td style="text-align:right">23.8% (154s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L74B</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">26.0</td><td style="text-align:right">24.9</td><td style="text-align:right">4.1% (64s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L75</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">27.5</td><td style="text-align:right">26.6</td><td style="text-align:right">3.5% (57s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L76</td><td style="text-align:right">18</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.7</td><td style="text-align:right">8.4</td><td style="text-align:right">22.3% (144s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L76B</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">27.5</td><td style="text-align:right">26.6</td><td style="text-align:right">3.0% (50s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L77</td><td style="text-align:right">18</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.7</td><td style="text-align:right">8.7</td><td style="text-align:right">19.0% (123s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L77B</td><td style="text-align:right">18</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.4</td><td style="text-align:right">7.2</td><td style="text-align:right">30.9% (194s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L77C</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">29.3</td><td style="text-align:right">28.6</td><td style="text-align:right">2.4% (42s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L78</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">26.5</td><td style="text-align:right">25.6</td><td style="text-align:right">3.5% (55s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L79</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">25.3</td><td style="text-align:right">24.9</td><td style="text-align:right">1.6% (24s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L79B</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">28.5</td><td style="text-align:right">27.4</td><td style="text-align:right">4.0% (68s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L80</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">27.3</td><td style="text-align:right">26.6</td><td style="text-align:right">2.5% (41s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L80B</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">25.9</td><td style="text-align:right">25.5</td><td style="text-align:right">1.7% (26s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L81</td><td style="text-align:right">24</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">12.3</td><td style="text-align:right">10.8</td><td style="text-align:right">11.6% (86s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L81B</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">32.5</td><td style="text-align:right">30.4</td><td style="text-align:right">6.6% (128s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L81C</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">31.2</td><td style="text-align:right">28.3</td><td style="text-align:right">9.4% (176s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L82</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">33.6</td><td style="text-align:right">31.1</td><td style="text-align:right">7.5% (150s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L82B</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">25.2</td><td style="text-align:right">24.9</td><td style="text-align:right">1.3% (20s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L84</td><td style="text-align:right">78</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">16.7</td><td style="text-align:right">16.2</td><td style="text-align:right">2.9% (29s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L85</td><td style="text-align:right">18</td><td style="text-align:left">8/32</td><td style="text-align:right">25.0%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">4.8</td><td style="text-align:right">3.9</td><td style="text-align:right">18.7% (54s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L85B</td><td style="text-align:right">84</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">35.7</td><td style="text-align:right">30.9</td><td style="text-align:right">13.3% (284s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L85C</td><td style="text-align:right">84</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">41.5</td><td style="text-align:right">36.3</td><td style="text-align:right">12.6% (314s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L86A</td><td style="text-align:right">18</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.7</td><td style="text-align:right">7.6</td><td style="text-align:right">29.3% (189s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L86B</td><td style="text-align:right">18</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.8</td><td style="text-align:right">7.6</td><td style="text-align:right">29.1% (188s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L86C</td><td style="text-align:right">18</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.8</td><td style="text-align:right">8.6</td><td style="text-align:right">20.2% (130s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L86D</td><td style="text-align:right">18</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.8</td><td style="text-align:right">8.8</td><td style="text-align:right">18.5% (120s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L86E</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">31.9</td><td style="text-align:right">31.1</td><td style="text-align:right">2.5% (47s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L87A</td><td style="text-align:right">18</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.7</td><td style="text-align:right">6.6</td><td style="text-align:right">38.8% (250s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L87B</td><td style="text-align:right">18</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">10.7</td><td style="text-align:right">8.6</td><td style="text-align:right">20.1% (130s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L87C</td><td style="text-align:right">18</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">9.0</td><td style="text-align:right">6.8</td><td style="text-align:right">24.0% (129s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L87D</td><td style="text-align:right">78</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">18.7</td><td style="text-align:right">18.4</td><td style="text-align:right">1.7% (19s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L87E</td><td style="text-align:right">78</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">18.5</td><td style="text-align:right">18.3</td><td style="text-align:right">1.4% (15s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L87F</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">33.3</td><td style="text-align:right">30.7</td><td style="text-align:right">7.9% (159s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L87G</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">29.9</td><td style="text-align:right">28.9</td><td style="text-align:right">3.4% (62s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L88A</td><td style="text-align:right">18</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">5.7</td><td style="text-align:right">4.9</td><td style="text-align:right">13.5% (46s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L88B</td><td style="text-align:right">18</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">7.6</td><td style="text-align:right">6.1</td><td style="text-align:right">20.2% (93s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L88C</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">30.5</td><td style="text-align:right">29.1</td><td style="text-align:right">4.4% (81s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L88D</td><td style="text-align:right">84</td><td style="text-align:left">12/32</td><td style="text-align:right">37.5%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">29.0</td><td style="text-align:right">27.5</td><td style="text-align:right">5.3% (93s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L88E</td><td style="text-align:right">84</td><td style="text-align:left">10/32</td><td style="text-align:right">31.2%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">47.4</td><td style="text-align:right">42.9</td><td style="text-align:right">9.5% (271s)</td><td style="text-align:right">0 (0s)</td></tr><tr><td style="text-align:left">L88E Clean</td><td style="text-align:right">84</td><td style="text-align:left">8/32</td><td style="text-align:right">25.0%</td><td style="text-align:left">Longest-first (LPT)</td><td style="text-align:right">48.9</td><td style="text-align:right">47.5</td><td style="text-align:right">2.8% (83s)</td><td style="text-align:right">0 (0s)</td></tr></tbody></table></div>
+<h3 id="6c-role-think-time-vs-tool-time">6c. Role Think-Time vs. Tool-Time<a class="anchor" href="#6c-role-think-time-vs-tool-time" aria-label="Link to section"></a></h3>
+<div class="table-wrap table-flywheel"><table><thead><tr><th style="text-align:left">Role</th><th style="text-align:right">Think (s)</th><th style="text-align:right">Tool (s)</th><th style="text-align:right">Think Share</th><th style="text-align:right">Turns/Sess</th><th style="text-align:right">Cmds/Sess</th><th style="text-align:right">Max Cmds/Sess</th><th style="text-align:right">Max Post-Bench Turns</th></tr></thead><tbody><tr><td style="text-align:left">Runtime micro</td><td style="text-align:right">37437.0</td><td style="text-align:right">13749.0</td><td style="text-align:right">73.1%</td><td style="text-align:right">35.5</td><td style="text-align:right">17.8</td><td style="text-align:right">92</td><td style="text-align:right">51</td></tr><tr><td style="text-align:left">Replay analyzer</td><td style="text-align:right">24157.0</td><td style="text-align:right">7379.0</td><td style="text-align:right">76.6%</td><td style="text-align:right">14.0</td><td style="text-align:right">12.0</td><td style="text-align:right">75</td><td style="text-align:right">16</td></tr><tr><td style="text-align:left">Process review</td><td style="text-align:right">22821.0</td><td style="text-align:right">5685.0</td><td style="text-align:right">80.1%</td><td style="text-align:right">14.4</td><td style="text-align:right">7.6</td><td style="text-align:right">56</td><td style="text-align:right">29</td></tr><tr><td style="text-align:left">Watchdog monitor</td><td style="text-align:right">17554.0</td><td style="text-align:right">6599.0</td><td style="text-align:right">72.7%</td><td style="text-align:right">4.1</td><td style="text-align:right">0.0</td><td style="text-align:right">0</td><td style="text-align:right">0</td></tr><tr><td style="text-align:left">SC2 protocol wire</td><td style="text-align:right">17162.0</td><td style="text-align:right">6141.0</td><td style="text-align:right">73.6%</td><td style="text-align:right">28.5</td><td style="text-align:right">13.2</td><td style="text-align:right">49</td><td style="text-align:right">0</td></tr><tr><td style="text-align:left">Coordinator</td><td style="text-align:right">17434.0</td><td style="text-align:right">2767.0</td><td style="text-align:right">86.3%</td><td style="text-align:right">6.0</td><td style="text-align:right">1.3</td><td style="text-align:right">33</td><td style="text-align:right">34</td></tr><tr><td style="text-align:left">Macro &amp; scouting</td><td style="text-align:right">13802.0</td><td style="text-align:right">5980.0</td><td style="text-align:right">69.8%</td><td style="text-align:right">32.8</td><td style="text-align:right">15.8</td><td style="text-align:right">38</td><td style="text-align:right">23</td></tr><tr><td style="text-align:left">Match harness</td><td style="text-align:right">9708.0</td><td style="text-align:right">1490.0</td><td style="text-align:right">86.7%</td><td style="text-align:right">6.7</td><td style="text-align:right">3.0</td><td style="text-align:right">10</td><td style="text-align:right">13</td></tr><tr><td style="text-align:left">Test verifier</td><td style="text-align:right">5158.0</td><td style="text-align:right">803.0</td><td style="text-align:right">86.5%</td><td style="text-align:right">6.8</td><td style="text-align:right">3.6</td><td style="text-align:right">14</td><td style="text-align:right">19</td></tr><tr><td style="text-align:left">Opponent setup</td><td style="text-align:right">3957.0</td><td style="text-align:right">941.0</td><td style="text-align:right">80.8%</td><td style="text-align:right">12.4</td><td style="text-align:right">6.8</td><td style="text-align:right">44</td><td style="text-align:right">18</td></tr><tr><td style="text-align:left">Combat drill runner</td><td style="text-align:right">1866.0</td><td style="text-align:right">436.0</td><td style="text-align:right">81.1%</td><td style="text-align:right">20.3</td><td style="text-align:right">8.4</td><td style="text-align:right">30</td><td style="text-align:right">5</td></tr><tr><td style="text-align:left">Report publisher</td><td style="text-align:right">1666.0</td><td style="text-align:right">211.0</td><td style="text-align:right">88.8%</td><td style="text-align:right">20.0</td><td style="text-align:right">6.7</td><td style="text-align:right">23</td><td style="text-align:right">1</td></tr><tr><td style="text-align:left">Editorial review</td><td style="text-align:right">823.0</td><td style="text-align:right">53.0</td><td style="text-align:right">93.9%</td><td style="text-align:right">9.9</td><td style="text-align:right">2.6</td><td style="text-align:right">3</td><td style="text-align:right">0</td></tr></tbody></table></div>
+<h3 id="6d-key-bottleneck-findings-and-fixes">6d. Key Bottleneck Findings and Fixes<a class="anchor" href="#6d-key-bottleneck-findings-and-fixes" aria-label="Link to section"></a></h3>
+<ol><li><strong>Benchmark concurrency:</strong> Earlier runs used 10 of 32 threads (31.2% utilization). Both 18-match 3-race canaries and full 84-match runs now target 12 concurrent workers to avoid CPU-contention timeouts.</li><li><strong>Match scheduling:</strong> Five earlier runs launched matches in fixed order. Longest-first (LPT) scheduling is now enabled by default so slow opponents start in Wave 1 and cut tail wait to 7.9% in L65H, 2.9% in L66, and 1.7% in L67B.</li><li><strong>Drill runner model tier:</strong> The combat drill runner spent extra reasoning time (1866 s, 81.1% of active time); switching mechanical runners to a lighter tier reduces command turnaround latency.</li><li><strong>Post-match handoffs:</strong> Multi-turn serial post-benchmark steps (up to 12 turns in earlier runs) were collapsed into a single parallel post-benchmark pipeline.</li><li><strong>Ad-hoc replay scripts:</strong> Repeated 60 to 90 s inline replay analysis scripts are being replaced by cached reusable diff tools.</li><li><strong>Scoped lane tests:</strong> One scoped lane test pass took 33.0 s in L80B; keeping per-lane bytecode caches warm avoids cold recompilation.</li><li><strong>Serial post-match scripts:</strong> Serial scoring and replay extraction took 56 to 61 s per run; the parallel pipeline now completes the full pass in 29.0 s.</li><li><strong>Full test suite:</strong> 5 author runs of the full test suite exceeded 30 s (max 35.0 s); authors now run targeted lane tests while the verifier runs the full suite once per pass.</li><li><strong>Full-tree builds:</strong> Full bytecode rebuilds took 33 s; scoped lane test runners compile only edited modules and target tests.</li><li><strong>Uncompiled test runs:</strong> Source-only Racket test runs reached 43 s; isolated per-lane bytecode caches eliminate repeated cold compilation.</li><li><strong>Short-gate tail wait:</strong> 7 short canary or head-to-head runs spent over 25% of wall time waiting on the slowest match (worst 48.4% in L65F); longest-first ordering prioritizes historically long pairings first.</li><li><strong>Replay forensics diffs:</strong> One replay diff pass took 37.0 s in L67B; caching per-match features keeps future diffs under 10 s.</li><li><strong>High-command sessions:</strong> 11 roles exceeded 15 shell commands in a single loop session (peak 96 commands by Coordinator in L48); reusable scoring and diff tools replace those manual loops.</li></ol></main></div>
+<footer class="site-footer">
+  <div>Mothman · StarCraft II bots on AI Arena</div>
+  <div>Updated 2026-11-28 04:04 UTC · <a href="https://github.com/sticklane/mothman-sc2-bot/releases" target="_blank" rel="noopener noreferrer">Replay Archives</a></div>
+</footer>
+
+<script>
+(function() {
+  // 1. Mobile menu toggle
+  const toggle = document.getElementById('nav-toggle');
+  const drawer = document.getElementById('mobile-drawer');
+  if (toggle && drawer) {
+    toggle.addEventListener('click', function() {
+      const open = drawer.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.textContent = open ? 'Close' : 'Menu';
+    });
+  }
+
+  // 2. Auto-pause other videos when one starts playing
+  document.addEventListener('play', function(e) {
+    if (e.target && e.target.tagName === 'VIDEO') {
+      document.querySelectorAll('video').forEach(function(v) {
+        if (v !== e.target && !v.paused) v.pause();
+      });
+    }
+  }, true);
+
+  // 3. Image Lightbox Modal
+  const imgs = Array.from(document.querySelectorAll('img.clip-img'));
+  if (imgs.length) {
+    const lb = document.createElement('div');
+    lb.className = 'modal-overlay';
+    lb.innerHTML =
+      '<div class="modal-controls">' +
+        '<button class="modal-btn" id="lb-prev">Prev</button>' +
+        '<button class="modal-btn" id="lb-next">Next</button>' +
+        '<a class="modal-btn" id="lb-raw" target="_blank" rel="noopener noreferrer">Open file</a>' +
+        '<button class="modal-btn" id="lb-close">Close</button>' +
+      '</div>' +
+      '<img id="lb-img" alt="" />' +
+      '<div class="modal-caption" id="lb-cap"></div>';
+    document.body.appendChild(lb);
+    const lbImg = document.getElementById('lb-img');
+    const lbCap = document.getElementById('lb-cap');
+    const lbRaw = document.getElementById('lb-raw');
+    let cur = 0;
+    function show(i) {
+      cur = (i + imgs.length) % imgs.length;
+      const src = imgs[cur].getAttribute('data-lightbox-src') || imgs[cur].src;
+      const alt = imgs[cur].getAttribute('data-lightbox-alt') || imgs[cur].alt || '';
+      lbImg.src = src;
+      lbImg.alt = alt;
+      lbRaw.href = src;
+      lbCap.textContent = (cur + 1) + ' of ' + imgs.length + (alt ? ' — ' + alt : '');
+      lb.classList.add('open');
+    }
+    function closeLb() { lb.classList.remove('open'); }
+    imgs.forEach(function(im, idx) { im.addEventListener('click', function() { show(idx); }); });
+    document.getElementById('lb-prev').addEventListener('click', function(e) { e.stopPropagation(); show(cur - 1); });
+    document.getElementById('lb-next').addEventListener('click', function(e) { e.stopPropagation(); show(cur + 1); });
+    document.getElementById('lb-close').addEventListener('click', function(e) { e.stopPropagation(); closeLb(); });
+    lb.addEventListener('click', function(e) { if (e.target === lb) closeLb(); });
+    document.addEventListener('keydown', function(e) {
+      if (!lb.classList.contains('open')) return;
+      if (e.key === 'Escape') closeLb();
+      else if (e.key === 'ArrowRight') show(cur + 1);
+      else if (e.key === 'ArrowLeft') show(cur - 1);
+    });
+  }
+
+  // 4. Video Theater Modal (delegated for both report videos and dynamic gallery cards)
+  const vm = document.createElement('div');
+  vm.className = 'modal-overlay';
+  vm.innerHTML =
+    '<div class="modal-controls">' +
+      '<a class="modal-btn" id="vm-raw" target="_blank" rel="noopener noreferrer">Download MP4</a>' +
+      '<button class="modal-btn" id="vm-close">Close</button>' +
+    '</div>' +
+    '<video id="vm-video" controls playsinline webkit-playsinline preload="metadata"></video>' +
+    '<div class="modal-caption" id="vm-cap"></div>';
+  document.body.appendChild(vm);
+  const vmVideo = document.getElementById('vm-video');
+  const vmCap = document.getElementById('vm-cap');
+  const vmRaw = document.getElementById('vm-raw');
+  function closeVm() {
+    vmVideo.pause();
+    vmVideo.innerHTML = '';
+    vmVideo.removeAttribute('src');
+    vmVideo.load();
+    vm.classList.remove('open');
+  }
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest('.video-theater-btn');
+    if (!btn) return;
+    const src = btn.getAttribute('data-video-src') || '';
+    const poster = btn.getAttribute('data-video-poster') || '';
+    const title = btn.getAttribute('data-video-title') || '';
+    if (!src) return;
+    document.querySelectorAll('video').forEach(function(v) { if (!v.paused) v.pause(); });
+    vmVideo.innerHTML = '';
+    const sourceEl = document.createElement('source');
+    sourceEl.src = src;
+    sourceEl.type = 'video/mp4';
+    vmVideo.appendChild(sourceEl);
+    if (poster) vmVideo.poster = poster; else vmVideo.removeAttribute('poster');
+    vmVideo.load();
+    vmRaw.href = src;
+    vmCap.textContent = title;
+    vm.classList.add('open');
+    vmVideo.play().catch(function() {});
+  });
+  document.getElementById('vm-close').addEventListener('click', function(e) { e.stopPropagation(); closeVm(); });
+  vm.addEventListener('click', function(e) { if (e.target === vm) closeVm(); });
+  document.addEventListener('keydown', function(e) {
+    if (vm.classList.contains('open') && e.key === 'Escape') closeVm();
+  });
+
+  // 5. Open ancestor <details> when jumping to an in-page hash anchor (e.g. archived Loops 29-40)
+  function openDetailsForHash(hash) {
+    if (!hash || hash.length < 2) return;
+    const el = document.getElementById(decodeURIComponent(hash.slice(1)));
+    if (!el) return;
+    let p = el.parentElement;
+    while (p) {
+      if (p.tagName === 'DETAILS') p.open = true;
+      p = p.parentElement;
+    }
+  }
+  window.addEventListener('hashchange', function() { openDetailsForHash(window.location.hash); });
+  if (window.location.hash) openDetailsForHash(window.location.hash);
+  document.addEventListener('click', function(e) {
+    const a = e.target.closest('a[href^="#"]');
+    if (a) openDetailsForHash(a.getAttribute('href'));
+  });
+})();
+</script>
+
+
+
+</body>
+</html>

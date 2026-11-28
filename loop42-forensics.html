@@ -1,0 +1,2038 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Loop 42 Release &amp; Live Build 40 Notes — Mothman</title>
+  <style>
+:root {
+  --bg: #FAF9F5;
+  --surface: #F4F2EA;
+  --surface-alt: #EFECE3;
+  --surface-input: #FFFFFF;
+  --border: #E5E2D8;
+  --border-strong: #262522;
+  --ink: #141413;
+  --ink-2: #4A4945;
+  --muted: #7A7870;
+  --accent: #C4633E;
+  --accent-hover: #A34E2E;
+  --slate: #4A6B82;
+  --win: #2F6B48;
+  --loss: #A83E32;
+  --warn: #A35B1F;
+  --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16.5px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 3px;
+}
+a:hover {
+  color: var(--accent-hover);
+  text-decoration-color: var(--accent-hover);
+}
+.num, table { font-variant-numeric: tabular-nums; }
+
+/* Header — static document flow, minimal, never blocks mobile viewport */
+.site-header {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.header-inner {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.wordmark {
+  font-family: var(--serif);
+  font-size: 1.18rem;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.wordmark:hover { color: var(--ink); text-decoration: none; }
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+}
+.nav-link {
+  font-size: 0.9rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+  padding: 0.2rem 0;
+  border-bottom: 2px solid transparent;
+  text-decoration: none;
+}
+.nav-link:hover { color: var(--ink); text-decoration: none; }
+.nav-link.active {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.nav-toggle {
+  display: none;
+  background: transparent;
+  border: 0;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.35rem 0.25rem;
+  cursor: pointer;
+}
+.nav-toggle:hover { color: var(--ink); }
+
+.mobile-drawer {
+  display: none;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0.4rem 1.25rem 0.8rem;
+}
+.mobile-drawer.open { display: block; }
+.mobile-drawer a {
+  display: block;
+  padding: 0.6rem 0;
+  color: var(--ink);
+  font-size: 0.96rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.mobile-drawer a:last-child { border-bottom: 0; }
+.mobile-drawer a.active { color: var(--accent); font-weight: 600; }
+
+/* Page containers — centered editorial essay column with wider figure breakouts */
+.page-wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4.75rem;
+}
+.page-grid {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 2.25rem 1.25rem 4.75rem;
+  display: grid;
+  grid-template-columns: 215px minmax(0, 1fr);
+  gap: 2.75rem;
+}
+.content { min-width: 0; }
+.prose-col {
+  max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.wide-col {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.prose { max-width: 680px; }
+
+/* Sidebar TOC (Desktop) + Collapsible TOC (Mobile) */
+.toc-sidebar {
+  position: sticky;
+  top: 1.5rem;
+  align-self: start;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  padding-right: 0.85rem;
+  border-right: 1px solid var(--border);
+  font-size: 0.84rem;
+}
+.toc-heading {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin: 0 0 0.65rem;
+}
+.toc-list { list-style: none; padding: 0; margin: 0; }
+.toc-list li { margin: 0.44rem 0; line-height: 1.38; }
+.toc-list a { color: var(--ink-2); text-decoration: none; }
+.toc-list a:hover { color: var(--accent); }
+.toc-latest {
+  display: block;
+  font-weight: 600;
+  color: var(--accent);
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.latest-jump-bar {
+  font-size: 0.9rem;
+  margin: -0.2rem 0 1.25rem;
+}
+.toc-mobile { display: none; margin-bottom: 1.5rem; }
+
+/* Typography */
+h1, h2, h3 {
+  font-family: var(--serif);
+  color: var(--ink);
+  font-weight: 500;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+}
+h1 {
+  font-size: 2.3rem;
+  margin: 0 0 0.7rem;
+}
+h2 {
+  font-size: 1.5rem;
+  margin: 3.1rem 0 0.85rem;
+}
+.page-grid h2 {
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+h3 {
+  font-size: 1.16rem;
+  margin: 2rem 0 0.55rem;
+  font-weight: 600;
+}
+h4 {
+  font-family: var(--sans);
+  font-size: 0.98rem;
+  font-weight: 600;
+  margin: 0 0 0.45rem;
+  line-height: 1.38;
+  color: var(--ink);
+}
+p { margin: 0 0 1.1rem; color: var(--ink-2); }
+strong { color: var(--ink); font-weight: 600; }
+ul, ol { margin: 0.5rem 0 1.15rem; padding-left: 1.3rem; color: var(--ink-2); }
+li { margin: 0.4rem 0; }
+.content > p, .content > ul, .content > ol, .content > blockquote { max-width: 680px; }
+.anchor {
+  color: var(--muted);
+  opacity: 0;
+  font-family: var(--sans);
+  font-size: 0.76em;
+  margin-left: 0.35rem;
+  font-weight: 400;
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+.anchor::after { content: "#"; }
+h1:hover .anchor, h2:hover .anchor, h3:hover .anchor, h4:hover .anchor, .anchor:focus { opacity: 0.55; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+
+/* Editorial Opening (Front Page & Subpages) */
+.eyebrow {
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+.masthead {
+  margin-bottom: 2.2rem;
+}
+.masthead h1 {
+  font-size: 2.55rem;
+  margin: 0 0 0.65rem;
+}
+.lead {
+  color: var(--ink-2);
+  font-size: 1.08rem;
+  line-height: 1.62;
+  margin: 0;
+}
+.section-rule {
+  border-top: 1px solid var(--border);
+  padding-top: 2.4rem;
+  margin-top: 2.8rem;
+}
+.section-kicker {
+  font-family: var(--serif);
+  font-size: 1.48rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0 0 0.75rem;
+}
+
+/* Inline code & code blocks */
+code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--surface);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  color: var(--ink);
+}
+.callout code, .clip-card code, details code {
+  background: #EAE6DA;
+  padding: 0.08rem 0.3rem;
+  box-shadow: inset 0 0 0 1px rgba(38, 37, 34, 0.11);
+}
+.code-block {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 1.1rem 0;
+  overflow-x: auto;
+}
+.code-block pre { margin: 0; padding: 0.95rem 1.1rem; }
+.code-block code { background: none; padding: 0; box-shadow: none; font-size: 0.84rem; }
+.code-lang {
+  position: absolute; top: 6px; right: 10px;
+  font-size: 0.7rem; text-transform: uppercase; color: var(--muted);
+}
+.mermaid-wrap {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 1.1rem;
+  margin: 1.25rem 0;
+  overflow-x: auto;
+}
+
+/* Editorial Callouts */
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  border-radius: 0 6px 6px 0;
+  padding: 0.95rem 1.2rem;
+  margin: 1.35rem 0;
+  max-width: 680px;
+}
+.callout-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+.callout-warning, .callout-caution { border-left-color: var(--warn); }
+.callout-warning .callout-label, .callout-caution .callout-label { color: var(--warn); }
+.callout-body > p:first-child { margin-top: 0; }
+.callout-body > p:last-child { margin-bottom: 0; }
+
+blockquote {
+  margin: 1.25rem 0;
+  padding: 0.25rem 0 0.25rem 1.15rem;
+  border-left: 2px solid var(--accent);
+  color: var(--ink-2);
+}
+
+/* Collapsible Sections (<details>) */
+details {
+  margin: 1.4rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 0;
+}
+summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--ink);
+  font-size: 0.95rem;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: "+";
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-weight: 400;
+}
+details[open] > summary::before { content: "−"; }
+details[open] > summary { margin-bottom: 0.85rem; }
+
+/* Tufte Horizontal-Rule Tables */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0.9rem 0 1.1rem;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+}
+thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 0.65rem 0.7rem;
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+  background: transparent;
+}
+td {
+  padding: 0.68rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--ink-2);
+}
+tbody tr:last-child td { border-bottom: 0; }
+.table-note {
+  font-size: 0.87rem;
+  color: var(--muted);
+  margin: 0.6rem 0 0;
+  line-height: 1.55;
+}
+.t-win { color: var(--win); font-weight: 600; }
+.t-loss { color: var(--loss); font-weight: 600; }
+.t-muted { color: var(--muted); }
+.nw { white-space: nowrap; }
+.table-flywheel table { font-size: 0.75rem; }
+.table-flywheel thead th {
+  font-size: 0.72rem;
+  line-height: 1.2;
+  padding: 0.36rem 0.26rem;
+  white-space: normal;
+  vertical-align: bottom;
+}
+.table-flywheel td {
+  padding: 0.36rem 0.26rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.36;
+}
+.table-flywheel td:first-child { white-space: nowrap; }
+
+/* Responsive Stacked Mobile Standings (< 700px) */
+.standings-mobile {
+  display: none;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+  margin: 0.75rem 0 0.85rem;
+}
+.standing-row { padding: 0.78rem 0; border-bottom: 1px solid var(--border); }
+.standing-row:last-child { border-bottom: 0; }
+.standing-top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
+.standing-bot { font-weight: 600; color: var(--ink); font-size: 0.98rem; }
+.standing-race { color: var(--muted); font-weight: 400; font-size: 0.88rem; }
+.standing-elo { font-weight: 600; font-size: 1rem; font-variant-numeric: tabular-nums; color: var(--ink); }
+.standing-stats { font-size: 0.87rem; color: var(--ink-2); margin-top: 0.16rem; font-variant-numeric: tabular-nums; }
+.standing-note { font-size: 0.87rem; color: var(--muted); margin: 0.28rem 0 0; line-height: 1.46; }
+
+/* Anthropic-Style Warm Sand Figures */
+.figure-block {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.35rem 1.45rem 1.15rem;
+  margin: 1.5rem auto 1.75rem;
+  max-width: 780px;
+}
+.figure-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 0.25rem;
+}
+.figure-title {
+  font-family: var(--serif);
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin: 0 0 0.75rem;
+  color: var(--ink);
+}
+.chart-svg { width: 100%; height: auto; display: block; }
+.figure-caption {
+  font-size: 0.86rem;
+  color: var(--ink-2);
+  margin: 0.75rem 0 0;
+  line-height: 1.52;
+}
+
+/* Clean Typographic Reading Lists */
+.doc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.65rem 0 1.85rem;
+  border-top: 1px solid var(--border);
+}
+.doc-item {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 0.25rem 1.75rem;
+  align-items: baseline;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border);
+  margin: 0;
+}
+.doc-item-title {
+  font-family: var(--serif);
+  font-size: 1.02rem;
+  font-weight: 500;
+  display: inline-block;
+}
+.doc-item-desc {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.52;
+}
+
+/* Replays & Video Figures */
+.clip-gallery { margin: 1.25rem 0 2rem; }
+.clip-gallery-grid, .featured-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.35rem;
+}
+.clip-card {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1rem 1.05rem;
+  display: flex;
+  flex-direction: column;
+}
+.clip-index {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+.clip-figure { margin: 0.4rem 0 0; }
+.clip-img, .clip-video {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 6px;
+  background: #141413;
+}
+.clip-img { cursor: zoom-in; min-height: 150px; }
+.clip-figure figcaption {
+  font-size: 0.85rem;
+  color: var(--ink-2);
+  margin-top: 0.55rem;
+  line-height: 1.48;
+}
+.video-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.84rem;
+}
+.text-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 2px;
+}
+.text-btn:hover { color: var(--accent-hover); text-decoration-color: var(--accent-hover); }
+.media-link {
+  font-size: 0.86rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Video Gallery Filter Controls */
+.gallery-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+  padding: 1rem 0 1.25rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin: 1.25rem 0 1.5rem;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.filter-group label {
+  font-size: 0.74rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.filter-select, .filter-input {
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--surface-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.44rem 0.65rem;
+  min-width: 135px;
+}
+.filter-input { min-width: 210px; }
+.gallery-count {
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin: 0 0 1rem;
+}
+.gallery-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+.show-more-wrap { text-align: center; margin-top: 1.75rem; }
+.editorial-btn {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 1.2rem;
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.editorial-btn:hover { background: var(--surface-alt); }
+
+/* Lightbox & Video Theater Modals */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(20, 20, 19, 0.92);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 1.25rem;
+}
+.modal-overlay.open { display: flex; }
+.modal-overlay img, .modal-overlay video {
+  max-width: 94vw;
+  max-height: 80vh;
+  border-radius: 6px;
+  background: #000;
+}
+.modal-caption {
+  color: #F4F2EA;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  text-align: center;
+  max-width: 820px;
+}
+.modal-controls {
+  position: fixed;
+  top: 1rem;
+  right: 1.25rem;
+  display: flex;
+  gap: 0.5rem;
+}
+.modal-btn {
+  background: #262522;
+  color: #FAF9F5;
+  border: 1px solid #44423C;
+  border-radius: 6px;
+  padding: 0.4rem 0.78rem;
+  cursor: pointer;
+  font-size: 0.86rem;
+  text-decoration: none;
+}
+.modal-btn:hover { background: #3B3934; color: #FFFFFF; text-decoration: none; }
+
+/* Footer */
+.site-footer {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1.6rem 1.25rem 3.25rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.84rem;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+
+@media (max-width: 1020px) {
+  .page-grid { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .toc-sidebar { display: none; }
+  .toc-mobile { display: block; }
+}
+@media (max-width: 820px) {
+  .clip-gallery-grid, .featured-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 799px) {
+  body { font-size: 15.5px; }
+  .header-inner { height: 50px; }
+  .nav-links { display: none; }
+  .nav-toggle { display: inline-block; }
+  .page-wrap, .page-grid { padding: 1.35rem 1rem 3.5rem; }
+  .masthead { margin-bottom: 1.45rem; }
+  .masthead h1 { font-size: 1.85rem; margin-bottom: 0.45rem; }
+  .lead { font-size: 0.98rem; line-height: 1.56; }
+  h1 { font-size: 1.7rem; }
+  h2, .section-kicker { font-size: 1.3rem; }
+  .section-rule { padding-top: 1.85rem; margin-top: 2.1rem; }
+  .figure-block { padding: 1.05rem 0.95rem 0.95rem; border-radius: 8px; }
+  .doc-item { grid-template-columns: minmax(0, 1fr); gap: 0.2rem; }
+  .filter-input { min-width: 0; width: 100%; }
+  .filter-group { flex: 1 1 140px; }
+}
+@media (max-width: 699px) {
+  .standings-desktop { display: none; }
+  .standings-mobile { display: block; }
+}
+
+/* Structured Section Headers */
+.section-head { max-width: 720px; margin-bottom: 1.35rem; }
+.section-num {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin: 0 0 0.25rem;
+}
+.section-intro { font-size: 0.98rem; color: var(--ink-2); margin: 0; line-height: 1.58; }
+.prose-tight { max-width: 700px; font-size: 0.95rem; margin: 0 0 0.9rem; line-height: 1.58; }
+
+/* Quick Section Jump Bar */
+.jump-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.95rem;
+  margin-top: 0.95rem;
+  font-size: 0.88rem;
+}
+.jump-bar a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--border); padding-bottom: 1px; }
+.jump-bar a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Interactive Panels & Detail Drawers */
+.interactive-panel {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin-bottom: 1.4rem;
+}
+/* Interactive SVG Diagrams & Walkthroughs */
+.diagram-stage {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem 0.65rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.diagram-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  font-family: var(--sans);
+}
+.svg-node { cursor: pointer; outline: none; transition: opacity 0.18s ease; }
+.svg-node .node-bg {
+  fill: #FAF9F5;
+  stroke: #D6D2C6;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, fill 0.15s, stroke-width 0.15s;
+}
+.svg-node .node-bg-accent {
+  fill: #FDF4F0;
+  stroke: #DFB5A5;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, fill 0.15s, stroke-width 0.15s;
+}
+.svg-node .node-bg-fw {
+  fill: #FDF4F0;
+  stroke: #C4633E;
+  stroke-width: 1.8;
+  stroke-dasharray: 5,3;
+  transition: stroke 0.15s, fill 0.15s;
+}
+.svg-node .node-bg-dark {
+  fill: #262522;
+  stroke: #262522;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, stroke-width 0.15s;
+}
+.svg-node:hover .node-bg,
+.svg-node:hover .node-bg-accent,
+.svg-node:hover .node-bg-fw { stroke: #C4633E; }
+.svg-node.is-active .node-bg,
+.svg-node.is-active .node-bg-accent,
+.svg-node.is-active .node-bg-fw {
+  fill: #FFFFFF;
+  stroke: #C4633E;
+  stroke-width: 2.6;
+}
+.svg-node.is-active .node-bg-dark {
+  stroke: #C4633E;
+  stroke-width: 2.8;
+}
+.svg-node.is-dim { opacity: 0.34; }
+.node-title { fill: #141413; font-size: 13px; font-weight: 600; }
+.node-sub { fill: #5E5D59; font-size: 11px; }
+.node-kicker-fw { fill: #C4633E; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
+
+.walk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+  margin-bottom: 0.8rem;
+}
+.walk-steps {
+  margin: 0.45rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.56;
+}
+.walk-steps li { margin: 0.45rem 0; }
+.detail-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: #FDF4F0;
+  border: 1px solid #EBD1C6;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  white-space: nowrap;
+}
+.explain-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.detail-drawer {
+  margin-top: 0.95rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.15rem;
+}
+.detail-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.45rem;
+}
+.detail-title { font-family: var(--serif); font-size: 1.08rem; font-weight: 600; color: var(--ink); }
+.detail-file { font-family: var(--mono); font-size: 0.76rem; color: var(--muted); }
+.detail-body { font-size: 0.92rem; color: var(--ink-2); margin: 0 0 0.65rem; line-height: 1.56; }
+.detail-metric {
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--surface);
+  padding: 0.45rem 0.7rem;
+  border-radius: 6px;
+  border-left: 3px solid var(--accent);
+}
+.compact-list { margin: 0.35rem 0 0.75rem; padding-left: 1.2rem; font-size: 0.89rem; color: var(--ink-2); }
+.compact-list li { margin: 0.25rem 0; line-height: 1.48; }
+
+.subsys-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.15rem;
+}
+.subsys-card {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+}
+.subsys-card h3 { margin: 0 0 0.4rem; font-size: 1.02rem; }
+.subsys-card p { font-size: 0.89rem; margin: 0 0 0.65rem; line-height: 1.52; }
+.mini-stat {
+  font-size: 0.82rem;
+  color: var(--ink-2);
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+
+/* Interactive Category & Matchup Pills */
+.cat-pills, .race-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+.race-toggle { margin-bottom: 0.85rem; }
+.cat-pill {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.36rem 0.68rem;
+  font-family: var(--sans);
+  font-size: 0.83rem;
+  font-weight: 500;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.cat-pill:hover { border-color: var(--accent); color: var(--ink); }
+.cat-pill.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+}
+.cat-pill .pill-n { font-size: 0.76rem; opacity: 0.75; margin-left: 0.2rem; }
+
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0.55rem 0 0.85rem;
+}
+.metric-strip-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.m-chip {
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+.m-lbl { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.m-chip strong { font-size: 0.9rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.mu-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1.25rem;
+}
+.mini-kicker {
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.eval-subsection { margin-top: 2rem; }
+.eval-subsection h3 { margin: 0 0 0.45rem; font-size: 1.12rem; }
+.charts-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.15rem;
+}
+
+/* Opening Build Order & Histograms + Base Layout Photos */
+.bo-box {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  margin: 0.75rem 0;
+}
+.bo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.75rem;
+  margin-bottom: 0.55rem;
+}
+.style-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.style-chip {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.14rem 0.55rem;
+}
+.bo-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 0.45rem;
+}
+.bo-step {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.42rem 0.52rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+}
+.bo-time { font-family: var(--mono); font-size: 0.7rem; color: var(--accent); font-weight: 600; }
+.bo-step strong { font-size: 0.84rem; color: var(--ink); line-height: 1.25; }
+.bo-pct { font-size: 0.71rem; color: var(--muted); }
+.hist-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-top: 0.65rem;
+}
+.hist-card {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem 0.6rem;
+}
+.hist-foot {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
+  font-variant-numeric: tabular-nums;
+}
+.base-layout-photo {
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Case Study Cards */
+.case-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.15rem;
+}
+.case-card {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.1rem 1.2rem;
+}
+.case-wide { grid-column: 1 / -1; }
+.case-tag {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.25rem;
+}
+.case-card h3 { margin: 0 0 0.5rem; font-size: 1.06rem; }
+.case-card p { font-size: 0.9rem; margin: 0 0 0.55rem; line-height: 1.54; }
+.case-card p:last-child { margin-bottom: 0; }
+.case-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);
+  gap: 1.2rem;
+  align-items: start;
+}
+
+/* Current-State Cohort Strip, Arena Filters & Open Gaps */
+.cohort-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.65rem;
+  margin: 0.75rem 0 1.25rem;
+}
+.cohort-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.16rem;
+}
+.cohort-card strong {
+  font-size: 1.12rem;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.cohort-sub {
+  font-size: 0.76rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.arena-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.9rem;
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+.arena-filter-group {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
+  gap: 0.35rem;
+}
+.arena-search-input {
+  flex: 1 1 220px;
+  min-width: 190px;
+  padding: 0.36rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #FFFFFF;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+}
+.arena-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.meta-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.spell-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 0.08rem 0.48rem;
+  white-space: nowrap;
+}
+.spell-ok {
+  color: #1F6E43;
+  background: #E9F6EE;
+  border: 1px solid #BFE3CD;
+}
+.spell-miss {
+  color: #9A3426;
+  background: #FCECE9;
+  border: 1px solid #EBC4BE;
+}
+.sid-pill {
+  font-family: var(--mono);
+  font-size: 0.71rem;
+  color: var(--muted);
+  margin: -0.15rem 0 0.42rem;
+  word-break: break-all;
+}
+.gaps-list {
+  margin: 0.45rem 0 0;
+  padding-left: 1.2rem;
+  max-width: 780px;
+  font-size: 0.94rem;
+  color: var(--ink-2);
+  line-height: 1.58;
+}
+.gaps-list li { margin: 0.48rem 0; }
+.cohort-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
+  margin: 1.15rem 0 0.45rem;
+}
+.cohort-heading h3 { margin: 0; font-size: 1.06rem; }
+.cohort-tag {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.history-cta {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+}
+.history-cta p { margin: 0; font-size: 0.94rem; color: var(--ink-2); }
+.history-cta a {
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent);
+  padding-bottom: 1px;
+  white-space: nowrap;
+}
+
+/* Section 2.4 Performance Curves & Timings vs. Opponents & Pros */
+.table-wrap.table-compact table { font-size: 0.82rem; }
+.table-wrap.table-compact th, .table-wrap.table-compact td { padding: 0.42rem 0.48rem; white-space: nowrap; }
+.site-curves-panel { padding: 1.05rem 1.15rem; max-width: 100%; min-width: 0; overflow-x: clip; }
+.site-curves-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.9rem;
+}
+.site-curves-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 1.1rem;
+  margin: 0.65rem 0 0.85rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.83rem;
+  color: var(--ink-2);
+}
+.sc-leg-item { display: inline-flex; align-items: center; gap: 0.42rem; white-space: nowrap; }
+.sc-leg-line { display: inline-block; width: 20px; height: 0; border-top: 2.6px solid #C4633E; }
+.sc-leg-line.m { border-top-color: #C4633E; }
+.sc-leg-line.p { border-top: 2.2px dashed #3B6E9C; }
+.sc-leg-line.o { border-top: 2.2px solid #7A5A8E; }
+.sc-leg-band { margin-left: auto; font-size: 0.78rem; }
+.site-curves-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.site-curve-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.78rem 0.9rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+}
+.site-curve-card.site-curve-span-2 { grid-column: 1 / -1; }
+.site-curve-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.site-curve-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.site-curve-badge {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.site-curve-meds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  color: var(--ink-2);
+}
+.sc-mpill { display: inline-flex; align-items: center; gap: 0.32rem; }
+.sc-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.sc-dot.m { background: #C4633E; }
+.sc-dot.p { background: #3B6E9C; }
+.sc-dot.o { background: #7A5A8E; }
+.site-curve-svg { width: 100%; height: auto; display: block; overflow: visible; user-select: none; touch-action: pan-y; }
+.site-timings-box {
+  margin-top: 1.05rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 0.95rem 0.75rem;
+  max-width: 100%;
+  min-width: 0;
+}
+.site-timings-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.55rem 0.9rem;
+}
+.site-timings-sub { font-size: 0.82rem; color: var(--muted); margin-top: 0.12rem; }
+.site-timings-wrap { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.st-row-hit { fill: transparent; cursor: crosshair; }
+.st-row-hit:hover { fill: rgba(196, 99, 62, 0.06); }
+.site-curve-tooltip {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  background: #1C1B18;
+  color: #FAF9F5;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.78rem;
+  line-height: 1.42;
+  box-shadow: 0 10px 26px rgba(20, 20, 19, 0.32);
+  max-width: 285px;
+}
+.site-curve-tooltip strong { color: #FFFFFF; font-weight: 700; }
+.sct-head {
+  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  padding-bottom: 0.22rem;
+  margin-bottom: 0.28rem;
+}
+.sct-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+.sct-lbl { display: inline-flex; align-items: center; gap: 0.36rem; font-family: var(--sans); }
+.sct-sub { font-size: 0.7rem; opacity: 0.76; margin-top: 0.2rem; }
+
+/* 5-Tab 22-Graph Pro Comparison Observatory (Warm Editorial Light Theme) */
+.obs-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.obs-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.35rem;
+}
+.obs-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  font-weight: 500;
+  padding: 0.42rem 0.78rem;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.obs-tab:hover { background: var(--surface); color: var(--ink); }
+.obs-tab.is-active {
+  background: rgba(196, 99, 62, 0.12);
+  color: #A84A27;
+  border-color: rgba(196, 99, 62, 0.36);
+  font-weight: 600;
+}
+.obs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.45rem 0.85rem;
+}
+.obs-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.32rem;
+}
+.obs-pill {
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 0.22rem 0.68rem;
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.obs-pill:hover { border-color: var(--accent); color: var(--ink); }
+.obs-pill.is-active {
+  background: var(--ink);
+  color: #FAF9F5;
+  border-color: var(--ink);
+  font-weight: 600;
+}
+.obs-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 1.05rem;
+  padding: 0.5rem 0.75rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.81rem;
+  color: var(--ink-2);
+}
+.obs-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+.obs-line {
+  display: inline-block;
+  width: 18px;
+  height: 2.6px;
+  border-radius: 2px;
+}
+.obs-line.obs-dash {
+  height: 0;
+  background: transparent !important;
+  border-top: 2.2px dashed;
+}
+.obs-leg-note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.76rem;
+  white-space: normal !important;
+}
+.obs-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+.obs-kpi {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.62rem 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.obs-kpi-primary {
+  border-color: rgba(196, 99, 62, 0.42);
+  background: linear-gradient(180deg, rgba(196, 99, 62, 0.06), #FFFFFF);
+}
+.obs-kpi-lbl {
+  font-size: 0.63rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obs-kpi strong {
+  font-family: var(--mono);
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.obs-kpi-sub {
+  font-size: 0.73rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.obs-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.82rem 0.95rem 0.72rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow: hidden;
+}
+.obs-card.obs-span-2 { grid-column: 1 / -1; }
+.obs-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+}
+.obs-card-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.obs-card-sub {
+  font-size: 0.79rem;
+  color: var(--muted);
+  margin-top: 0.12rem;
+  line-height: 1.38;
+}
+.obs-badge {
+  font-family: var(--mono);
+  font-size: 0.73rem;
+  padding: 0.12rem 0.48rem;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.obs-meds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  color: var(--ink-2);
+}
+.obs-meds > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  white-space: nowrap;
+}
+.obs-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.obs-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+  user-select: none;
+  touch-action: pan-y;
+}
+.obs-split-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.obs-mini-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 0.25rem;
+}
+.obs-empty {
+  padding: 1.2rem 0.75rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+.obs-missing-box {
+  margin-top: 0.55rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 7px;
+  background: rgba(180, 60, 46, 0.06);
+  border: 1px solid rgba(180, 60, 46, 0.22);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.79rem;
+}
+.obs-missing-lbl {
+  font-weight: 600;
+  color: #B43C2E;
+  margin-right: 0.2rem;
+}
+.obs-missing-pill {
+  display: inline-block;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.73rem;
+}
+.obs-creep-strip {
+  margin-top: 0.45rem;
+  padding: 0.62rem 0.8rem;
+  border-radius: 7px;
+  background: var(--surface);
+  border-left: 3px solid #B43C2E;
+  font-size: 0.83rem;
+  color: var(--ink);
+}
+.obs-tip-head {
+  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  padding-bottom: 0.22rem;
+  margin-bottom: 0.28rem;
+}
+.obs-tip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+.obs-tip-row > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+  font-family: var(--sans);
+}
+.obs-tip-sub {
+  font-size: 0.7rem;
+  opacity: 0.76;
+  margin-top: 0.2rem;
+}
+
+/* Editorial Visual Explainers, Annotated Stills, Release Highlights & Base Control Strip */
+.release-highlights {
+  background: #FAF6F1;
+  border: 1px solid #E8D9CF;
+  border-left: 3.5px solid var(--accent);
+  border-radius: 9px;
+  padding: 0.9rem 1.15rem;
+  margin: 0.55rem 0 0.85rem;
+}
+.rh-kicker {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.45rem;
+}
+.rh-list {
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 0.91rem;
+  line-height: 1.56;
+  color: var(--ink);
+}
+.rh-list li { margin: 0.34rem 0; }
+
+.visual-explainer-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 1.1rem 1.2rem;
+  margin-bottom: 1.2rem;
+}
+.ve-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.9rem;
+  margin-bottom: 0.8rem;
+}
+.ve-header h4 {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.ve-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.ve-col { min-width: 0; }
+.ve-svg-wrap {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.45rem;
+}
+.ve-cap {
+  margin: 0.5rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.48;
+  color: var(--ink-2);
+}
+
+.still-tabs {
+  display: inline-flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.still-tab {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.28rem 0.68rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.still-tab:hover { border-color: var(--accent); color: var(--accent); }
+.still-tab.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+  font-weight: 600;
+}
+.still-annotated {
+  position: relative;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #141413;
+}
+.still-annotated .clip-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: none;
+  border-radius: 0;
+}
+.still-compact { margin-top: 0.55rem; }
+.still-callout {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(20, 20, 19, 0.84);
+  color: #FAF9F5;
+  border: 1px solid rgba(250, 249, 245, 0.28);
+  border-left: 3px solid #E58158;
+  border-radius: 6px;
+  padding: 0.2rem 0.52rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+  max-width: 58%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.still-callout-muted {
+  border-left-color: #8BA4B8;
+  color: #E7E5DE;
+}
+.still-callout-good {
+  border-left-color: #54B882;
+}
+
+.tech-drawer {
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.65rem;
+}
+.tech-drawer summary {
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  list-style-position: outside;
+}
+.tech-drawer summary:hover { color: var(--accent); }
+
+.base-control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 0.9rem;
+  margin-top: 0.85rem;
+  align-items: stretch;
+}
+.base-control-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.base-control-stack .base-control-card {
+  flex: 1;
+  justify-content: center;
+}
+.base-control-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+}
+.base-control-card p {
+  margin: 0.35rem 0 0;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.bc-kicker {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.wall-bp-sub {
+  font-size: 0.82rem;
+  color: var(--ink-2);
+}
+.wall-blueprint-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.95rem;
+  align-items: start;
+}
+.wall-bp-card { min-width: 0; }
+.wall-clips-group { margin: 1.25rem 0 1.35rem; }
+.wall-row-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.02rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.wall-row-desc {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  line-height: 1.48;
+  color: var(--ink-2);
+}
+.wall-clips-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.95rem;
+  align-items: stretch;
+}
+.wall-clips-grid .clip-card {
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+.wall-clips-grid .clip-card h5 {
+  margin: 0.25rem 0 0.35rem;
+  font-size: 0.96rem;
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.arena-more-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+.arena-more-wrap .cat-pill {
+  font-weight: 600;
+  padding: 0.45rem 1.15rem;
+}
+
+@media (max-width: 1060px) {
+  .wall-blueprint-grid, .wall-clips-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .subsys-grid, .charts-pair, .case-grid, .case-split, .mu-two-col, .explain-grid, .hist-pair, .site-curves-grid, .obs-grid, .obs-split-2, .ve-grid, .base-control-grid, .wall-blueprint-grid, .wall-clips-grid { grid-template-columns: minmax(0, 1fr); }
+  .site-curve-card.site-curve-span-2, .obs-card.obs-span-2 { grid-column: auto; }
+  .obs-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 699px) {
+  .still-callout { font-size: 0.66rem; padding: 0.16rem 0.42rem; max-width: 66%; }
+  .visual-explainer-card { padding: 0.85rem; }
+  .interactive-panel { padding: 0.9rem 0.75rem; }
+  .detail-drawer { padding: 0.85rem; }
+  .diagram-stage { padding: 0.5rem 0.35rem; }
+  .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cohort-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .obs-tab { font-size: 0.78rem; padding: 0.36rem 0.58rem; }
+  .obs-leg-note { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+<header class="site-header"><div class="header-inner"><a class="wordmark" href="./index.html">Mothman</a><nav class="nav-links" aria-label="Primary"><a class="nav-link" href="./index.html">Current State</a><a class="nav-link active" href="./history.html">History &amp; Fixes</a><a class="nav-link" href="./video-gallery.html">Replays</a><a class="nav-link" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav><button type="button" class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="mobile-drawer">Menu</button></div><nav class="mobile-drawer" id="mobile-drawer" aria-label="Mobile menu"><a class="" href="./index.html">Current State</a><a class="active" href="./history.html">History &amp; Fixes</a><a class="" href="./video-gallery.html">Replays</a><a class="" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav></header>
+<div class="page-grid"><aside class="toc-sidebar" aria-label="Table of contents"><div class="toc-heading">Contents</div><ul class="toc-list"><li><a href="#1-live-production-ai-arena-audit-loop-40-mwskxomlffb8aaf1-run-44895078896">1. Live Production AI Arena Audit — L…</a></li><li><a href="#2-loop-42-forensics-pinpointing-every-remaining-loop-43-target">2. Loop 42 Forensics — Pinpointing Ev…</a></li><li><a href="#3-strictly-disjoint-loop-43-blueprint-zero-file-overlap">3. Strictly Disjoint Loop 43 Blueprin…</a></li><li><a href="#4-loop-43-acceptance-gates">4. Loop 43 Acceptance Gates</a></li></ul></aside><main class="content"><details class="toc-mobile"><summary>Contents</summary><ul class="toc-list"><li><a href="#1-live-production-ai-arena-audit-loop-40-mwskxomlffb8aaf1-run-44895078896">1. Live Production AI Arena Audit — L…</a></li><li><a href="#2-loop-42-forensics-pinpointing-every-remaining-loop-43-target">2. Loop 42 Forensics — Pinpointing Ev…</a></li><li><a href="#3-strictly-disjoint-loop-43-blueprint-zero-file-overlap">3. Strictly Disjoint Loop 43 Blueprin…</a></li><li><a href="#4-loop-43-acceptance-gates">4. Loop 43 Acceptance Gates</a></li></ul></details><div class="callout callout-note"><div class="callout-label">Note</div><div class="callout-body"><p>Internal engineering notes and task breakdown recorded during Loop 42.</p></div></div>
+<h1 id="loop-42-live-ship-5-sign-off-live-ai-arena-audit-mwskxomlffb8aaf1-amp-loop-43-blueprint">Loop 42 Live Ship <code>#5</code> Sign-Off, Live AI Arena Audit (<code>mwskxoml_ffb8aaf1</code>) &amp; Loop 43 Blueprint<a class="anchor" href="#loop-42-live-ship-5-sign-off-live-ai-arena-audit-mwskxomlffb8aaf1-amp-loop-43-blueprint" aria-label="Link to section"></a></h1>
+<div class="callout callout-important"><div class="callout-label">Key Takeaway</div><div class="callout-body"><p><strong>Executive Verdict: UNCONDITIONAL <code>SHIP-ZIP</code> FOR COMBINED L41 + L42 LIVE SHIP <code>#5</code> (<code>womqlpsp_6917245e</code>) — ZERO BLOCKERS!</strong></p>
+<ol><li><strong>Ship-Gate <code>baseline_h2h</code> vs Live Loop 40 (<code>mwskxoml_ffb8aaf1</code>) ZIPs:</strong> <strong>CRUSHED <code>5W-1L-0T (83.3% WR)</code></strong>, <strong><code>agg 2.12x / med 3.09x</code></strong> (<code>0</code> DripFeed vs P2 <code>4</code>, <code>SB 2.8% vs 3.2%</code>, <code>max_step_ms 164.0ms vs 273.5ms</code>). <strong>Protoss SWEPT <code>3W-0L (3.49x, 0 sigs)</code></strong> — <code>#04 PvT</code> flipped <code>0.14x/0.25x -&gt; 2.38x</code> (<code>6</code> Colossi!), <code>#03 PvP</code> flipped <code>0.36x -&gt; 5.07x</code> (<code>10</code> Immortals!), <code>#05 PvZ</code> <code>6.09x</code>, <code>#01 ZvZ</code> <code>3.09x</code>, <code>#06 TvZ</code> <code>5.36x</code>.</li><li><strong>Full <code>84</code>-Match Roster (<code>iter42_wave42_full</code>, <code>83</code> clean):</strong><ul><li><strong><code>CORE14_cl (n=41)</code> SHATTERED ATH:</strong> <strong><code>20W-21L-0T (48.8% WR)</code></strong> <em>(+2W over 18W ceiling!)</em> + <strong>FIRST-EVER <code>1.00x</code> CORE TRADE</strong> (<code>CORE14_NC 1.02x</code>, Zerg <code>53.8%</code>, Terran <code>50.0% 1.05x</code>, Protoss <code>1.02x</code>, FOUR <code>3-0</code> core sweeps: <code>titania</code>, <code>monsterbot</code>, <code>puck</code>, <code>onlyfans</code>!).</li><li><strong><code>HIST12_cl (n=35)</code> SHATTERED ATH:</strong> <strong><code>17W-18L-0T (48.6% WR, 1.02x)</code></strong>.</li><li><strong><code>ALL_84_cl (n=83)</code> SHATTERED ATH:</strong> <strong><code>30W-50L-3T (36.1% WR, 0.77x Trade ATH [+0.09x!])</code></strong> + <strong><code>EXT_78_cl 24W-50L-3T (31.2% WR ATH)</code></strong>.</li><li><strong>HISTORIC 6-WAY ZERO ANOMALIES (<code>17/32</code> zero categories):</strong> <strong><code>CloakLoss 3-&gt;0</code></strong>, <strong><code>1BaseLock 4-&gt;0</code></strong>, <strong><code>SpireDrop 4-&gt;0</code></strong>, <strong><code>AirAAStarve 1-&gt;0</code></strong>, <strong><code>PvPNatDelay 3-&gt;0</code></strong>, <strong><code>IdleBankFreeze 1-&gt;0</code></strong>, <strong><code>ProdStall 5-&gt;1 (-80%)</code></strong>.</li><li><strong>NEW LATENCY ATLs &amp; TEXTBOOK 4-CORNER PARITY:</strong> <strong><code>ALL_84 max_step_ms = 192.4ms</code></strong>, <strong><code>CORE14 max_step_ms = 185.5ms</code></strong>, <code>0</code> crashes/faults/rejects/spikes; <strong>North <code>32.4%</code> (<code>0.72x</code>) vs South <code>30.0%</code> (<code>0.60x</code>)</strong>.</li><li><strong>Arena 2.0 (<code>58</code> scenarios / <code>116</code> full <code>.mp4</code> clips):</strong> <strong><code>z16</code> Muta Magic-Box SHATTERED ATH <code>1.47x</code> KO WIN (<code>10/16</code> alive, <code>18</code> Hold: <code>132</code>!)</strong>, <strong><code>p15</code> Dummy killed PF + South Turret + 1 Sieged Tank + 6 SCVs (<code>p2_lost=2,250</code>)</strong>, <strong><code>r05</code> doubled trade <code>0.31x -&gt; 0.69x</code> (<code>3685=0</code>)</strong>, and <strong><code>r02</code>/<code>r06</code> crushed <code>3666</code> down to <code>7–11</code></strong>!</li></ul></li><li><strong>Direct Live Prod ROI of Shipping <code>#5</code> Today:</strong> Live Loop 40 (<code>n=16</code> Ext) lost <code>2×</code> PvP to <code>PrismForge</code> (with <code>pvp_nat_delay</code> + only <code>3–6</code> Immortals), <code>2×</code> <code>rush_probe</code> to <code>Creepy_strategies</code>, and tied <code>titania</code> <code>45:00</code> — <strong>ALL THREE</strong> are directly stronger in L41+L42 (<code>PvPNatDelay=0</code>, <code>H2H PvP 5.07x / 10 Immortals</code>, <code>titania 3-0</code>, <code>Creepy_strategies 2-1</code>, <code>3666</code> auto-saturate guard active)!</li></ol>
+<p><strong>SQLite Status:</strong> <code>sync-prod --limit 40</code> (GH run <code>44895078896</code>) exited <code>0</code> cleanly (<code>25</code> matches ingested, <code>8/8</code> raw-extracted, <code>0</code> errors). <strong><code>arena_replays.sqlite</code> is 100% IDLE</strong> for <code>@loop-architect</code> Phase 2!</p></div></div>
+<hr />
+<h2 id="1-live-production-ai-arena-audit-loop-40-mwskxomlffb8aaf1-run-44895078896">1. Live Production AI Arena Audit — Loop 40 (<code>mwskxoml_ffb8aaf1</code>, Run <code>44895078896</code>)<a class="anchor" href="#1-live-production-ai-arena-audit-loop-40-mwskxomlffb8aaf1-run-44895078896" aria-label="Link to section"></a></h2>
+<h3 id="11-updated-summary-amp-live-bot-elos-livestatustxt-2026-11-21t1037z">1.1 Updated Summary &amp; Live Bot ELOs (<code>live_status.txt</code>, <code>2026-11-21T10:37Z</code>)<a class="anchor" href="#11-updated-summary-amp-live-bot-elos-livestatustxt-2026-11-21t1037z" aria-label="Link to section"></a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Scope (<code>mwskxoml_ffb8aaf1</code>, External <code>n=16</code>, + <code>1</code> SP)</th><th style="text-align:left">Record</th><th style="text-align:left">WR / NL</th><th style="text-align:left">Agg Trade</th><th style="text-align:left">Avg SB%</th><th style="text-align:left">Avg / Max Step</th></tr></thead><tbody><tr><td style="text-align:left"><strong>ALL External (<code>n=16</code>)</strong></td><td style="text-align:left"><strong><code>6W-9L-1T</code></strong></td><td style="text-align:left"><code>37.5% / 43.8%</code></td><td style="text-align:left"><code>0.55x</code> (<code>98.1k / 179.3k</code>)</td><td style="text-align:left"><code>5.67%</code></td><td style="text-align:left"><strong><code>3.20ms</code></strong> / <code>317.0ms</code></td></tr><tr><td style="text-align:left"><strong>Terran (<code>n=4</code>)</strong></td><td style="text-align:left"><strong><code>2W-1L-1T</code></strong></td><td style="text-align:left"><strong><code>50.0% / 75.0%</code></strong></td><td style="text-align:left"><strong><code>1.41x</code></strong></td><td style="text-align:left"><strong><code>0.83%</code></strong></td><td style="text-align:left">—</td></tr><tr><td style="text-align:left"><strong>Protoss (<code>n=6</code>)</strong></td><td style="text-align:left"><code>2W-4L-0T</code></td><td style="text-align:left"><code>33.3% / 33.3%</code></td><td style="text-align:left"><code>0.37x</code></td><td style="text-align:left"><code>6.85%</code></td><td style="text-align:left">—</td></tr><tr><td style="text-align:left"><strong>Zerg (<code>n=6</code>)</strong></td><td style="text-align:left"><code>2W-4L-0T</code></td><td style="text-align:left"><code>33.3% / 33.3%</code></td><td style="text-align:left"><code>0.40x</code></td><td style="text-align:left"><code>7.73%</code></td><td style="text-align:left">—</td></tr><tr><td style="text-align:left"><strong>North Spawns (<code>NW/NE</code>, <code>n=10</code>)</strong></td><td style="text-align:left"><code>4W-5L-1T</code></td><td style="text-align:left"><code>40.0% / 50.0%</code></td><td style="text-align:left"><strong><code>0.55x</code></strong></td><td style="text-align:left"><code>5.51%</code></td><td style="text-align:left">—</td></tr><tr><td style="text-align:left"><strong>South Spawns (<code>SW/SE</code>, <code>n=6</code>)</strong></td><td style="text-align:left"><code>2W-4L-0T</code></td><td style="text-align:left"><code>33.3% / 33.3%</code></td><td style="text-align:left"><strong><code>0.54x</code></strong></td><td style="text-align:left"><code>5.95%</code></td><td style="text-align:left">—</td></tr></tbody></table></div>
+<ul><li><strong>Live ELOs (<code>div=9</code>):</strong> <strong><code>Mothman-P</code>: <code>1284</code></strong>, <strong><code>Mothman-X</code>: <code>1273</code></strong> <em>(peaked <code>1277</code> after beating <code>Cortex</code>!)</em>, <strong><code>Mothman-T</code>: <code>1267</code></strong> <em>(NEW ATH!)</em>, <strong><code>Mothman-Z</code>: <code>1233</code></strong>.</li><li><strong>Zero-Rate Live Anomalies on L40 (<code>n=16</code>):</strong> <strong><code>0%</code></strong> <code>own_base_retreat</code>, <code>own_territory_retreat</code>, <code>prod_placement_stall</code>, <code>siege_range_zero_dps_loss</code>, <code>econ_eff_collapse</code>, <code>prod_idle_bank_freeze</code>, <code>early_opening_order_fault</code>, <code>gas_zero_harvest_freeze</code>, <code>tvt_zero_tank</code>, <code>non_combat_robo_waste</code>.</li><li><strong>Prod <code>4B</code> Map × Spawn Outliers (all-time <code>n=390</code>, <code>22</code> found):</strong> Still driven mostly by historical pre-L37 builds (<code>Ultralove NE 31.6% vs SW 4.8%</code>, <code>TvP|Pylon NW 66.7% vs SE 0.0%</code>, <code>TvZ|Persephone SW 100% vs NW 33.3%</code>, <code>TvT|Pylon SE 50% vs NW 0%</code>). On <strong>Loop 40 itself</strong>, North vs South trade (<code>0.55x</code> vs <code>0.54x</code>) and SB (<code>5.51%</code> vs <code>5.95%</code>) are virtually identical!</li></ul>
+<h3 id="12-all-8-brand-new-live-loop-40-matches-run44895078896">1.2 All <code>8</code> Brand-New Live Loop 40 Matches (<code>run_44895078896</code>)<a class="anchor" href="#12-all-8-brand-new-live-loop-40-matches-run44895078896" aria-label="Link to section"></a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Match</th><th style="text-align:left">Bot / Opponent [MU]</th><th style="text-align:left">Map [Spawn]</th><th style="text-align:left">Result</th><th style="text-align:left">Dur</th><th style="text-align:left">Trade (K/L)</th><th style="text-align:left">SB%</th><th style="text-align:left">Forensic Dissection</th></tr></thead><tbody><tr><td style="text-align:left"><strong><code>#5138531</code></strong></td><td style="text-align:left"><strong><code>Mothman-X(Z)</code> vs <code>Cortex</code></strong> <code>ZvT</code></td><td style="text-align:left"><code>Ultralove [NE]</code></td><td style="text-align:left"><strong>WIN!!</strong></td><td style="text-align:left"><code>17:53</code></td><td style="text-align:left"><code>0.49x</code> (<code>15.6k/31.8k</code>)</td><td style="text-align:left"><code>2.0%</code></td><td style="text-align:left"><strong>Brood Lord endgame victory (<code>ELO=1277</code>):</strong> <code>Broodling:75</code>, <code>Roach:103</code>, <code>Ravager:49</code>, <code>Hydra:36</code>, <code>Ling:470</code> ground down <code>14</code> Tanks + <code>9</code> Liberators + <code>108</code> Marines + <code>47/48</code> SCVs!</td></tr><tr><td style="text-align:left"><strong><code>#5140053</code></strong></td><td style="text-align:left"><code>Mothman-T</code> vs <code>titania</code> <code>TvZ</code></td><td style="text-align:left"><code>Pylon [NW]</code></td><td style="text-align:left"><strong>TIE</strong></td><td style="text-align:left"><code>45:00</code></td><td style="text-align:left"><strong><code>1.32x</code></strong> (<code>4.7k/3.6k</code>)</td><td style="text-align:left"><strong><code>0.3%</code></strong></td><td style="text-align:left"><code>loop_cap_30m</code> stalemate: wiped <code>128/128</code> Lings &amp; <code>10/10</code> Roaches with <code>5</code> Tanks (<code>0</code> lost!) + <code>43</code> Marines, then stopped pushing after <code>4</code> Medivacs died while <code>titania</code> camped <code>102</code> Drones/<code>13</code> Queens. <em>(L42 swept <code>titania 3-0</code>!)</em></td></tr><tr><td style="text-align:left"><strong><code>#5138710</code></strong></td><td style="text-align:left"><code>Mothman-P</code> vs <code>PrismForge (1444)</code> <code>PvP</code></td><td style="text-align:left"><code>Torches [NE]</code></td><td style="text-align:left"><strong>LOSS</strong></td><td style="text-align:left"><code>14:46</code></td><td style="text-align:left"><code>0.08x</code> (<code>1.7k/21.7k</code>)</td><td style="text-align:left"><code>10.4%</code></td><td style="text-align:left"><code>pvp_nat_delay</code> + <code>gas_rich</code>: <code>PrismForge</code> scaled <code>11</code> Gateways (<code>5</code> Nexuses, <code>65</code> Stalkers) vs our <code>6</code> Gateways (<code>23</code> Stalkers, <code>6</code> Immortals). <em>(Fixed in L42: <code>PvPNatDelay=0</code>, <code>H2H PvP 5.07x</code>!)</em></td></tr><tr><td style="text-align:left"><strong><code>#5138711</code></strong></td><td style="text-align:left"><code>Mothman-X(P)</code> vs <code>PrismForge (1444)</code> <code>PvP</code></td><td style="text-align:left"><code>Ley Lines [SW]</code></td><td style="text-align:left"><strong>LOSS</strong></td><td style="text-align:left"><code>12:29</code></td><td style="text-align:left"><code>0.04x</code> (<code>0.7k/19.4k</code>)</td><td style="text-align:left"><code>7.6%</code></td><td style="text-align:left">Only <code>4</code> Gateways, <code>3</code> Immortals, and <strong><code>9</code> Phoenixes (<code>-9</code>)</strong> built into <code>57</code> Stalkers (<code>11</code> Gateways)!</td></tr><tr><td style="text-align:left"><strong><code>#5138605</code></strong></td><td style="text-align:left"><code>Mothman-Z</code> vs <code>PrismForge (1444)</code> <code>ZvP</code></td><td style="text-align:left"><code>Ultralove [SW]</code></td><td style="text-align:left"><strong>LOSS</strong></td><td style="text-align:left"><code>20:42</code></td><td style="text-align:left"><code>0.12x</code> (<code>2.4k/21.4k</code>)</td><td style="text-align:left"><code>4.6%</code></td><td style="text-align:left"><code>gas_rich_min_starved</code>: <code>PrismForge</code> scaled <code>5</code> bases / <code>11</code> Gateways (<code>46</code> Zealots + <code>20</code> Stalkers + <code>13</code> Adepts) while Zerg sat at <code>2</code> bases (<code>m10: B=2/5</code>).</td></tr><tr><td style="text-align:left"><strong><code>#5138804</code></strong></td><td style="text-align:left"><code>Mothman-X(Z)</code> vs <code>ThorTripel</code> <code>ZvT</code></td><td style="text-align:left"><code>Ley Lines [NE]</code></td><td style="text-align:left"><strong>LOSS</strong></td><td style="text-align:left"><code>10:54</code></td><td style="text-align:left"><code>0.18x</code> (<code>2.6k/14.3k</code>)</td><td style="text-align:left"><code>9.7%</code></td><td style="text-align:left"><code>24</code> Siege Tanks + <code>55</code> Marines + <code>12</code> Medivacs overwhelmed <code>50</code> Lings / <code>9</code> Hydras (<code>0</code> Broods/Lurkers; spent <code>8</code> OverlordTransports).</td></tr><tr><td style="text-align:left"><strong><code>#5138580</code></strong></td><td style="text-align:left"><code>Mothman-T</code> vs <code>Myztery</code> <code>TvZ</code></td><td style="text-align:left"><code>Persephone [NW]</code></td><td style="text-align:left"><strong>LOSS</strong></td><td style="text-align:left"><code>13:00</code></td><td style="text-align:left"><code>0.30x</code> (<code>5.3k/17.9k</code>)</td><td style="text-align:left"><code>0.9%</code></td><td style="text-align:left"><code>terran_111_opening_stall</code>: <code>206</code> Lings + <code>43</code> Banelings + <code>17</code> Hydras overran <code>56</code> Marines + <code>10</code> Medivacs + <code>6</code> Tanks (<code>2</code> Rax before Factory delayed Tanks to <code>290s</code>).</td></tr><tr><td style="text-align:left"><code>#5138614</code></td><td style="text-align:left"><code>Mothman-T</code> vs <code>Mothman-Z</code> <em>(SP)</em> <code>ZvT</code></td><td style="text-align:left"><code>Incorporeal [NW]</code></td><td style="text-align:left">WIN</td><td style="text-align:left"><code>12:15</code></td><td style="text-align:left"><code>0.19x</code></td><td style="text-align:left"><code>9.6%</code></td><td style="text-align:left">Internal AI Arena self-play (excluded from external stats).</td></tr></tbody></table></div>
+<hr />
+<h2 id="2-loop-42-forensics-pinpointing-every-remaining-loop-43-target">2. Loop 42 Forensics — Pinpointing Every Remaining Loop 43 Target<a class="anchor" href="#2-loop-42-forensics-pinpointing-every-remaining-loop-43-target" aria-label="Link to section"></a></h2>
+<ol><li><strong>Sole H2H Loss — <code>#02 TvT</code> (<code>Ultralove NE</code>, <code>0.61x</code>, <code>Siege0DPS(Tank:8)</code>, <code>GasRich</code>):</strong><ul><li>L42 (<code>P1</code>): <code>Marine:98</code>, <code>Marauder:26</code>, <strong><code>Medivac:15</code> (<code>1,500G</code>!)</strong>, <strong><code>VikingFighter:14</code></strong>, <strong><code>SiegeTank:5</code></strong> (<code>saving: siege-tank(73), cc(57), viking-fighter(30)</code>).</li><li>L40 (<code>P2</code>): <code>Marine:128</code>, <code>Marauder:35</code>, <strong><code>VikingFighter:32</code></strong>, <code>Medivac:12</code>, <strong><code>SiegeTank:8</code></strong>.</li><li><strong>Root Cause:</strong> L42 over-built <strong><code>15</code> Medivacs</strong>, falling behind in BOTH <strong>Viking air control (<code>14 vs 32</code>)</strong> and <strong>Siege Tank count (<code>5 vs 8</code>)</strong>, causing Bio to get shelled at <code>m15–m16</code> (<code>Siege0DPS(Tank:8)</code>).</li></ul></li><li><strong><code>TvT0Tank (4 -&gt; 3)</code> (<code>#23</code> W + <code>#62 SmoothBrain</code> + <code>#53 zig-reapers</code>) &amp; <code>PolyMorph Terran</code> (<code>L41 3.74x W -&gt; L42 0.54x L</code>):</strong><ul><li><strong><code>#62 SmoothBrain</code> (<code>our_tanks=1</code> vs <code>6</code>):</strong> Improved from <code>0 -&gt; 1</code> Tank, yet spent <code>1,000+G</code> on <strong><code>Medivac:5</code> (<code>500G</code>)</strong>, <code>VikingFighter:3</code>, <code>Armory</code>, <code>EBay:2</code>, <code>Bunker:3</code>, <code>Turret:3</code> (<code>sav: cc(37), ebay(23), viking(18), armory(17)</code>). L42&#x27;s <code>terran-tvt-tank4-lock-due?</code> (<code>priority-macro-brain.rkt:5068</code>) blocked Vikings/Liberators, <strong>NOT <code>medivac</code>/<code>armory</code>/<code>2nd engineering-bay</code></strong>!</li><li><strong><code>PolyMorph Terran</code> (<code>UNSEEN12</code> flip <code>3.74x W -&gt; 0.54x L</code>):</strong> Built <strong><code>11</code> Vikings</strong> and spent <strong><code>141</code> saving ticks on <code>viking-fighter</code></strong> (<code>sav=[[&#x27;viking-fighter&#x27;, 141], [&#x27;command-center&#x27;, 70], [&#x27;siege-tank&#x27;, 34]]</code>) against <strong>PURE GROUND <code>Roach:153 / Hydra:36 / Ling:36 / Queen:17</code> (<code>0</code> combat air units!!)</strong>!</li><li><strong><code>#53 zig-reapers</code> (<code>27</code> Reapers):</strong> Built <code>Marine:9, WidowMine:1, Hellion:1, Reaper:1</code> (<code>sav: marauder(16)</code>!) — against <code>&gt;= 4</code> Reapers in TvT, Terran must commit to Reactor Marines + <code>&gt;= 4</code> Hellions + mineral-line Bunker before tech!</li></ul></li><li><strong><code>#72 PvZ vs 12PoolBot</code> (<code>L 3:33</code>, <code>0.05x</code>, <code>peak_min=370</code>):</strong><ul><li>Built <strong><code>Gateway:3</code> + <code>Pylon:3</code> + <code>Assimilator:1</code></strong> yet spawned only <strong><code>Zealot:2</code></strong> vs <code>42</code> Zerglings — building a <strong>3rd Gateway</strong> burned <code>150M</code> while Gateways #1–2 had <code>0</code> Chronoboosted Zealot uptime and no wall <code>ShieldBattery</code>!</li></ul></li><li><strong><code>UNSEEN12</code> Delta (<code>7W -&gt; 4W</code>, Trade <code>0.36x -&gt; 0.38x</code>):</strong><ul><li>Gained <strong>1st-EVER Terran <code>Mulebot</code> W (<code>#56 T 4.49x</code>)</strong> + <strong><code>sc2ai_protoss</code> P W (<code>1.29x</code>, was Tie)</strong> + <strong><code>AxeFighter</code> Z Tie (was L)</strong>, while <code>5</code> L41 wins flipped (<code>PolyMorph T</code> due to the <code>141</code>-tick <code>viking-fighter</code> bug above!; <code>Clicadinha P</code> <code>Roach:31</code> vs <code>Zealot:11/Stalker:5</code> — needs faster Immortals; <code>CryptBotRevival P</code> <code>GasRich</code>; <code>Mulebot P</code> <code>W4=15/21</code> <code>Siege0DPS</code>; <code>Mulebot Z</code> <code>Roach:5</code> vs <code>7</code> Tanks).</li></ul></li><li><strong>Sole Remaining <code>ProdStall</code> (<code>5 -&gt; 1</code>: <code>#68 T v ModBotNewBuilds</code>, <code>barracks:29, streak=7</code>) &amp; Sole <code>GasZero</code> (<code>#59 T v Creepy_strategies</code>, <code>ready_gas=2, gas_mined=0.0</code> for <code>121.4s</code>):</strong><ul><li><code>#68</code> hit Barracks add-on placement failure on <code>Persephone NW</code>; <code>#59</code> recovered from early worker loss to <code>83</code> Marines yet left <code>2</code> ready Refineries unmanned for <code>2</code> minutes!</li></ul></li><li><strong>Arena 2.0 (<code>#963</code>) Final Red -&gt; Green Diagnostics:</strong><ul><li><strong><code>r02</code> (Z), <code>r05</code> (T), <code>r06</code> (P) <code>rush_probe</code>:</strong> L42 crushed <code>3666</code> down to <code>7–13</code> (<code>r02</code>/<code>r06</code> Dummy, <code>r05</code>/<code>r06</code> SP), doubled <code>r05</code> Dummy trade (<code>0.31x -&gt; 0.69x</code>, only <code>4/15</code> Probes left!), and zeroed <code>3685</code> Repair! Two exact bugs remain:<ol><li>In <code>lib/bot-runtime.rkt:8056–8195</code>, under <code>heavy-pure-worker-allin-12plus?</code>: (a) <code>direct-contact-cands</code> (<code>&lt;= 1.65t</code>) lets a worker swing at a full-HP <code>40 HP</code> Probe while a <code>10 HP</code> Probe sits <code>1.8t</code> away, (b) <code>effective-melee-cap</code> caps <code>swings-needed</code> with zero overkill buffer so a <code>10 HP</code> Probe only gets <code>2</code> attackers and survives at <code>5 HP</code> if one is body-blocked, and (c) Pass 2 uses <code>(+ (* 3.0 ehp) (* 8.0 dist))</code> — <strong><code>8.0 * dist</code> overrides <code>3.0 * ehp</code></strong>, breaking focus-fire!</li><li>In <code>r05</code> Dummy (<code>3666: 41</code>), <code>drill-converge-wids</code> (<code>lib/bot-runtime.rkt:8271–8302</code>) still emitted <code>worker-drill-stack-attack</code> (<code>3666</code>) on initial approach when SCVs started <code>&gt; 6.0t</code> from incoming Probes!</li></ol></li><li><strong><code>p15</code> (DT Blink PF):</strong> Dummy vaporized <strong>PF + South Turret + 1 Sieged Tank + 6 SCVs (<code>p2_lost=2,250</code>)</strong>, and the <strong>last DT died 1 tile south of the sole surviving North Turret</strong>! Peeling <code>5</code> North-wing DTs (<code>pa &lt; 0</code>) onto the North Turret once PF HP <code>&lt; 500</code> kills BOTH Turrets -&gt; surviving DTs become <strong>100% permanently cloaked -&gt; KO WIN!</strong> In SP (<code>0.12x</code>), releasing blink immediately when <code>&gt;= 1</code> DT is hit OR enemy Bio enters <code>&lt; 7.5t</code> prevents Bio intercept before PF 1-shot!</li><li><strong><code>e03</code> Dummy (<code>wlost=16</code>, <code>ab={&#x27;3666&#x27;:230, &#x27;23&#x27;:3}</code>):</strong> Defending Marines issued ONLY <strong><code>3</code></strong> <code>23</code> Attack commands while SCVs bounced <code>230×</code> and died! <strong><code>e04</code> SP (<code>wlost=15</code>)</strong> needs earlier <code>6</code>-Probe surround; <strong><code>r01</code> Dummy (<code>0.62x</code>)</strong> needs Observer <code>+1.5t</code> behind Stalkers vs the last Banshee.</li></ul></li></ol>
+<hr />
+<h2 id="3-strictly-disjoint-loop-43-blueprint-zero-file-overlap">3. Strictly Disjoint Loop 43 Blueprint (ZERO File Overlap!)<a class="anchor" href="#3-strictly-disjoint-loop-43-blueprint-zero-file-overlap" aria-label="Link to section"></a></h2>
+<p>All changes are <strong>100% generalizable SC2 mechanics</strong> (zero opponent-name, map-name, replay-ID, or speed-mining hacks):</p>
+<h3 id="track-a-runtime-author">Track A — <code>@runtime-author</code><a class="anchor" href="#track-a-runtime-author" aria-label="Link to section"></a></h3>
+<ul><li><strong>Exclusive Files:</strong> <code>lib/bot-runtime.rkt</code>, <code>lib/tactics/pro-spellcaster-micro.rkt</code>, <code>tests/l43-tactics-runtime-test.rkt</code></li><li><strong><code>L43-P0-1a</code> (<code>r02</code> / <code>r05</code> / <code>r06</code> <code>rush_probe</code> -&gt; <code>6/6</code> KO WIN across ALL 3 Races!):</strong><ol><li>In <code>lib/bot-runtime.rkt:8067</code>, under <code>heavy-pure-worker-allin-12plus?</code>, add a <code>+2</code> kill-confirmation buffer to <code>effective-melee-cap</code>: <code>(min cap (max 3 (+ swings-needed 2)))</code> so wounded <code>5–15 HP</code> Probes NEVER escape at <code>5 HP</code>.</li><li>In <code>lib/bot-runtime.rkt:8121–8194</code>, under <code>heavy-pure-worker-allin-12plus?</code>, widen wounded-kill priority in Pass 1 (<code>&lt;= 2.4t</code> for <code>primary-focus-id</code> ahead of full-HP <code>direct-contact-cands</code>) and flip Pass 2 weights from <code>(+ (* 3.0 ehp) (* 8.0 dist))</code> -&gt; <strong><code>(+ (* 15.0 ehp) (* 2.5 dist))</code></strong> so outer workers stack kill-confirmation DPS onto <code>primary-focus-id</code>.</li><li>In <code>lib/bot-runtime.rkt:8271–8295</code>, suppress <strong><code>use-converge-drill?</code></strong> completely under <code>heavy-pure-worker-allin-12plus?</code> (eliminating <code>r05</code> Dummy&#x27;s remaining <code>3666: 41</code> leak!).</li></ol></li><li><strong><code>L43-P0-1b</code> (<code>p15</code> -&gt; Dummy KO WIN via North Turret Split + SP Early Bio Release!):</strong><ol><li>In <code>lib/tactics/pro-spellcaster-micro.rkt:4815–4940</code>, once PF HP <code>&lt; 500</code> (while a second <code>missile-turret</code> is still alive within <code>16t</code>), immediately split the <strong><code>5</code> closest North-wing DTs (<code>pa &lt; 0</code>)</strong> onto that intact <code>missile-turret</code> (<code>dt-detector-focus-fire</code> / blink if off CD) while the remaining DTs finish the PF -&gt; BOTH Turrets die -&gt; surviving DTs go permanently cloaked and sweep Terran!</li><li>For SP early Bio intercept (<code>:4931</code>), trigger synchronized blink release when <strong><code>&gt;= 1</code> DT is damaged</strong> OR enemy Bio closes <code>&lt; 7.5t</code> of the staging arc, aiming east/north rim slots away from incoming west Bio.</li></ol></li><li><strong><code>L43-P0-1c</code> (<code>e03</code> Dummy <code>23:3</code> Fix + <code>e04</code> SP Surround + <code>r01</code> Dummy Observer Leash + <code>z16</code> SP Spread):</strong><ol><li><code>e03</code> (<code>bot-runtime.rkt:9425–9460</code>): Force nearby Marines/defenders (<code>&lt;= 14t</code> of main) to issue continuous focus-fire <code>23</code> orders on the lowest-HP invading Adept (<code>23: 3 -&gt; 40+</code>!) and cap healthy SCV evac frequency (<code>evac-cd-frames</code>) so non-targeted SCVs mine instead of bouncing <code>230×</code>.</li><li><code>e04</code> SP: Pull <code>6</code> Probes to surround/focus-fire <code>&gt;= 4</code> invading Lings immediately inside <code>&lt;= 7.5t</code> of minerals (<code>wlost 15 -&gt; &lt;= 4</code>).</li><li><code>r01</code> Dummy: Hold Observer <code>+1.5t</code> behind Stalker centroid while keeping the last Banshee inside <code>11.0t</code> detector sight (<code>0.62x -&gt; 1.00x</code>).</li><li><code>z16</code> SP: Widen initial Muta spread to <code>1.6t</code> before locking <code>HOLD 18</code> over focus-firing Thors.</li></ol></li><li><strong><code>L43-P0-1d</code> (<code>H2H #02 TvT</code> Anti-Tank-Leapfrog Guard):</strong><ul><li>In TvT, prevent Bio from pushing into <code>&gt;= 4</code> sieged enemy Tanks without Tank+Viking air-spot parity (<code>Siege0DPS(Tank:8)</code> at <code>m15–m16</code>).</li></ul></li></ul>
+<h3 id="track-b-belief-author">Track B — <code>@belief-author</code><a class="anchor" href="#track-b-belief-author" aria-label="Link to section"></a></h3>
+<ul><li><strong>Exclusive Files:</strong> <code>lib/priority-macro-brain.rkt</code>, <code>tests/run-all-tests.rkt</code>, <code>verify_wave43_belief.rkt</code></li><li><strong><code>L43-P0-2a</code> (Fix <code>PolyMorph T</code> <code>141</code>-Tick Viking Bug + <code>#62 SmoothBrain</code> <code>TvT0Tank</code> + <code>H2H #02 TvT</code> Medivac Cap):</strong><ol><li><strong>Zero-Air Viking Guard (<code>PolyMorph T</code> <code>3.74x W -&gt; 0.54x L</code>):</strong> Strictly gate Terran <code>viking-fighter</code> demand behind <code>(or (&gt;= enemy-air-combat-cnt 1) (eq? enemy-race &#x27;Terran) enemy-stargate-or-spire-scouted?)</code> — NEVER let Zerg Overlords trigger <code>11</code> Vikings / <code>141</code> saving ticks against pure ground Roach/Hydra!</li><li><strong><code>#62 SmoothBrain</code> (<code>TvT0Tank 3 -&gt; 0</code>):</strong> Extend <code>terran-tvt-tank4-lock-due?</code> (<code>priority-macro-brain.rkt:5068</code>) so while <code>siege-tank &lt; 4</code> in TvT (and no confirmed Banshee/Cloak), <strong><code>medivac</code>, <code>armory</code>, <code>widow-mine</code>, and 2nd <code>engineering-bay</code></strong> cannot drain gas below the <code>125G</code> Tank floor!</li><li><strong><code>H2H #02 TvT</code> (<code>Medivac:15</code> vs <code>Viking:14</code> vs L40&#x27;s <code>32</code> Vikings &amp; <code>8</code> Tanks):</strong> Cap TvT <code>medivac &lt;= 6</code> when enemy has <code>&gt;= 4</code> Vikings or <code>&gt;= 3</code> Tanks, prioritizing Viking air-control (<code>&gt;= enemy-vikings + 2</code>) and 2nd Factory Tank production.</li></ol></li><li><strong><code>L43-P0-2b</code> (<code>#72 PvZ vs 12PoolBot</code> <code>2</code>-Gate Cap + <code>#53 TvT vs </code>27<code> Reapers + </code>Clicadinha P` Anti-Roach Immortal):</strong><ol><li><strong><code>#72</code> (<code>12PoolBot</code>):</strong> On <code>&gt;= 6</code> Zerglings before <code>150s</code>, <strong>cap Gateways at <code>2</code></strong> (never burn <code>150M</code> on Gateway #3 while <code>Zealot &lt;= 2</code>!) and spend immediately on Chronoboosted <code>zealot</code> + <code>1</code> wall <code>shield-battery</code> + <code>cybernetics-core</code>.</li><li><strong><code>#53</code> (<code>&gt;= 4</code> Reapers in TvT):</strong> Prioritize Reactor <code>marine</code> + <code>&gt;= 4</code> <code>hellion</code> + mineral-line <code>bunker</code> to stabilize worker count before tech.</li><li><strong>Mass Roach PvZ (<code>Clicadinha P</code> &amp; Live <code>#5140050</code> <code>sludgement2</code>):</strong> On <code>&gt;= 6</code> Roaches scouted in PvZ, lock <code>immortal</code> floor <code>&gt;= 4</code> strictly ahead of extra Zealots/3rd Nexus.</li><li><strong>Anti-Mass-Stalker PvP (Live <code>#5138710</code>/<code>#5138711</code> <code>PrismForge</code>):</strong> Never build <code>&gt; 2</code> Phoenixes when enemy has <code>&gt;= 15</code> Stalkers and <code>0</code> Stargate air — funnel gas into Immortals + Chargelots + Gateway scaling (<code>&gt;= 8</code> Gateways on 3 bases)!</li></ol></li></ul>
+<h3 id="track-c-wire-author">Track C — <code>@wire-author</code><a class="anchor" href="#track-c-wire-author" aria-label="Link to section"></a></h3>
+<ul><li><strong>Exclusive Files:</strong> <code>lib/sc2-protobuf-ws.rkt</code>, <code>tests/sc2-protobuf-ws-test.rkt</code>, <code>tools/arena-scenarios.json</code>, <code>tools/sc2-tactics-arena.py</code></li><li><strong><code>L43-P0-3a</code> (Eradicate Sole Remaining <code>ProdStall</code> <code>#68</code> -&gt; <code>0/84</code> + Fix <code>#59</code> <code>gas_zero_harvest_freeze</code> Auto-Resat):</strong><ol><li>In <code>lib/sc2-protobuf-ws.rkt</code>, widen Barracks add-on clearance fallback grid (and relax add-on east-tile requirement for Barracks <code>#3+</code> after <code>&gt;= 3</code> consecutive failures) so <code>#68</code> <code>barracks:29</code> drops to <strong><code>0/84</code> <code>ProdStall</code></strong>!</li><li>In <code>lib/sc2-protobuf-ws.rkt</code>, ensure gas-worker auto-resaturation re-assigns <code>3</code> workers per ready Refinery/Assimilator/Extractor whenever <code>worker_count &gt;= 12</code>, <code>ready_gas &gt;= 1</code>, and active gas harvesters <code>== 0</code> for <code>&gt;= 8s</code> (preventing <code>#59</code>&#x27;s <code>121.4s</code> <code>0</code>-gas freeze after early worker recovery!).</li></ol></li><li><strong><code>L43-P0-3b</code> (Arena Telemetry &amp; <code>r02</code>/<code>r05</code>/<code>r06</code> Wire Verification):</strong><ol><li>Verify <code>r02</code>/<code>r05</code>/<code>r06</code> stay strictly <code>&lt;= 16</code> <code>3666</code> orders (frame-0 gather only) across all 3 races (<code>tests/sc2-protobuf-ws-test.rkt</code>).</li><li>Add <code>pf_destroyed</code> &amp; <code>turrets_destroyed</code> diagnostic counters for <code>p15</code> in <code>tools/sc2-tactics-arena.py</code> (strictly read-only telemetry, preserving honest <code>combat</code> scoring).</li></ol></li></ul>
+<hr />
+<h2 id="4-loop-43-acceptance-gates">4. Loop 43 Acceptance Gates<a class="anchor" href="#4-loop-43-acceptance-gates" aria-label="Link to section"></a></h2>
+<ol><li><strong>Live Ship <code>#5</code> (<code>womqlpsp_6917245e</code>) Deployed First!</strong> (Zero blockers; <code>baseline_h2h 5W-1L</code>, <code>CORE14 20W 1.00x</code>, <code>ALL_84 30W 0.77x</code>, 6-way zero anomalies).</li><li><strong>Loop 43 <code>rush_probe</code> Sweep:</strong> <strong><code>r02</code> (Z), <code>r05</code> (T), <code>r06</code> (P)</strong> ALL <strong><code>2/2</code> KO WIN</strong> (Dummy &amp; SP) with <code>3666 &lt;= 16</code> and <code>3685 = 0</code>.</li><li><strong>Loop 43 Arena 2.0 (<code>58</code> scenarios / <code>116</code> <code>.mp4</code>):</strong> <strong><code>p15</code></strong> Dummy <strong>KO WIN</strong> (PF + BOTH Turrets destroyed!), <strong><code>z16</code></strong> keeps <code>1.4x+</code> Dummy KO WIN &amp; lifts SP, <strong><code>e03</code>/<code>e04</code></strong> push <code>econ-harass</code> to <code>&gt;= 3/4</code> PASS, <strong><code>r01</code></strong> back to <code>2/2</code> KO WIN.</li><li><strong>Loop 43 Full Roster:</strong> Preserve <strong><code>CORE14 &gt;= 20W (1.00x)</code></strong> &amp; <strong><code>ALL_84 &gt;= 30W (0.77x)</code></strong>, rebound <strong><code>UNSEEN12 &gt;= 7W</code></strong>, keep <strong>6-way zero anomalies</strong>, and drive <strong><code>ProdStall -&gt; 0/84</code></strong>, <strong><code>TvT0Tank -&gt; 0/84</code></strong>, <strong><code>GasZero -&gt; 0/84</code></strong>, and <strong><code>H2H #02 TvT</code> WIN</strong>!</li></ol></main></div>
+<footer class="site-footer">
+  <div>Mothman · StarCraft II bots on AI Arena</div>
+  <div>Updated 2026-11-28 04:04 UTC · <a href="https://github.com/sticklane/mothman-sc2-bot/releases" target="_blank" rel="noopener noreferrer">Replay Archives</a></div>
+</footer>
+
+<script>
+(function() {
+  // 1. Mobile menu toggle
+  const toggle = document.getElementById('nav-toggle');
+  const drawer = document.getElementById('mobile-drawer');
+  if (toggle && drawer) {
+    toggle.addEventListener('click', function() {
+      const open = drawer.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.textContent = open ? 'Close' : 'Menu';
+    });
+  }
+
+  // 2. Auto-pause other videos when one starts playing
+  document.addEventListener('play', function(e) {
+    if (e.target && e.target.tagName === 'VIDEO') {
+      document.querySelectorAll('video').forEach(function(v) {
+        if (v !== e.target && !v.paused) v.pause();
+      });
+    }
+  }, true);
+
+  // 3. Image Lightbox Modal
+  const imgs = Array.from(document.querySelectorAll('img.clip-img'));
+  if (imgs.length) {
+    const lb = document.createElement('div');
+    lb.className = 'modal-overlay';
+    lb.innerHTML =
+      '<div class="modal-controls">' +
+        '<button class="modal-btn" id="lb-prev">Prev</button>' +
+        '<button class="modal-btn" id="lb-next">Next</button>' +
+        '<a class="modal-btn" id="lb-raw" target="_blank" rel="noopener noreferrer">Open file</a>' +
+        '<button class="modal-btn" id="lb-close">Close</button>' +
+      '</div>' +
+      '<img id="lb-img" alt="" />' +
+      '<div class="modal-caption" id="lb-cap"></div>';
+    document.body.appendChild(lb);
+    const lbImg = document.getElementById('lb-img');
+    const lbCap = document.getElementById('lb-cap');
+    const lbRaw = document.getElementById('lb-raw');
+    let cur = 0;
+    function show(i) {
+      cur = (i + imgs.length) % imgs.length;
+      const src = imgs[cur].getAttribute('data-lightbox-src') || imgs[cur].src;
+      const alt = imgs[cur].getAttribute('data-lightbox-alt') || imgs[cur].alt || '';
+      lbImg.src = src;
+      lbImg.alt = alt;
+      lbRaw.href = src;
+      lbCap.textContent = (cur + 1) + ' of ' + imgs.length + (alt ? ' — ' + alt : '');
+      lb.classList.add('open');
+    }
+    function closeLb() { lb.classList.remove('open'); }
+    imgs.forEach(function(im, idx) { im.addEventListener('click', function() { show(idx); }); });
+    document.getElementById('lb-prev').addEventListener('click', function(e) { e.stopPropagation(); show(cur - 1); });
+    document.getElementById('lb-next').addEventListener('click', function(e) { e.stopPropagation(); show(cur + 1); });
+    document.getElementById('lb-close').addEventListener('click', function(e) { e.stopPropagation(); closeLb(); });
+    lb.addEventListener('click', function(e) { if (e.target === lb) closeLb(); });
+    document.addEventListener('keydown', function(e) {
+      if (!lb.classList.contains('open')) return;
+      if (e.key === 'Escape') closeLb();
+      else if (e.key === 'ArrowRight') show(cur + 1);
+      else if (e.key === 'ArrowLeft') show(cur - 1);
+    });
+  }
+
+  // 4. Video Theater Modal (delegated for both report videos and dynamic gallery cards)
+  const vm = document.createElement('div');
+  vm.className = 'modal-overlay';
+  vm.innerHTML =
+    '<div class="modal-controls">' +
+      '<a class="modal-btn" id="vm-raw" target="_blank" rel="noopener noreferrer">Download MP4</a>' +
+      '<button class="modal-btn" id="vm-close">Close</button>' +
+    '</div>' +
+    '<video id="vm-video" controls playsinline webkit-playsinline preload="metadata"></video>' +
+    '<div class="modal-caption" id="vm-cap"></div>';
+  document.body.appendChild(vm);
+  const vmVideo = document.getElementById('vm-video');
+  const vmCap = document.getElementById('vm-cap');
+  const vmRaw = document.getElementById('vm-raw');
+  function closeVm() {
+    vmVideo.pause();
+    vmVideo.innerHTML = '';
+    vmVideo.removeAttribute('src');
+    vmVideo.load();
+    vm.classList.remove('open');
+  }
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest('.video-theater-btn');
+    if (!btn) return;
+    const src = btn.getAttribute('data-video-src') || '';
+    const poster = btn.getAttribute('data-video-poster') || '';
+    const title = btn.getAttribute('data-video-title') || '';
+    if (!src) return;
+    document.querySelectorAll('video').forEach(function(v) { if (!v.paused) v.pause(); });
+    vmVideo.innerHTML = '';
+    const sourceEl = document.createElement('source');
+    sourceEl.src = src;
+    sourceEl.type = 'video/mp4';
+    vmVideo.appendChild(sourceEl);
+    if (poster) vmVideo.poster = poster; else vmVideo.removeAttribute('poster');
+    vmVideo.load();
+    vmRaw.href = src;
+    vmCap.textContent = title;
+    vm.classList.add('open');
+    vmVideo.play().catch(function() {});
+  });
+  document.getElementById('vm-close').addEventListener('click', function(e) { e.stopPropagation(); closeVm(); });
+  vm.addEventListener('click', function(e) { if (e.target === vm) closeVm(); });
+  document.addEventListener('keydown', function(e) {
+    if (vm.classList.contains('open') && e.key === 'Escape') closeVm();
+  });
+
+  // 5. Open ancestor <details> when jumping to an in-page hash anchor (e.g. archived Loops 29-40)
+  function openDetailsForHash(hash) {
+    if (!hash || hash.length < 2) return;
+    const el = document.getElementById(decodeURIComponent(hash.slice(1)));
+    if (!el) return;
+    let p = el.parentElement;
+    while (p) {
+      if (p.tagName === 'DETAILS') p.open = true;
+      p = p.parentElement;
+    }
+  }
+  window.addEventListener('hashchange', function() { openDetailsForHash(window.location.hash); });
+  if (window.location.hash) openDetailsForHash(window.location.hash);
+  document.addEventListener('click', function(e) {
+    const a = e.target.closest('a[href^="#"]');
+    if (a) openDetailsForHash(a.getAttribute('href'));
+  });
+})();
+</script>
+
+
+
+</body>
+</html>

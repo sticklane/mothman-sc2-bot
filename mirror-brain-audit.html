@@ -1,0 +1,2058 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Testing Our Opponent-Prediction Code — Mothman</title>
+  <style>
+:root {
+  --bg: #FAF9F5;
+  --surface: #F4F2EA;
+  --surface-alt: #EFECE3;
+  --surface-input: #FFFFFF;
+  --border: #E5E2D8;
+  --border-strong: #262522;
+  --ink: #141413;
+  --ink-2: #4A4945;
+  --muted: #7A7870;
+  --accent: #C4633E;
+  --accent-hover: #A34E2E;
+  --slate: #4A6B82;
+  --win: #2F6B48;
+  --loss: #A83E32;
+  --warn: #A35B1F;
+  --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16.5px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 3px;
+}
+a:hover {
+  color: var(--accent-hover);
+  text-decoration-color: var(--accent-hover);
+}
+.num, table { font-variant-numeric: tabular-nums; }
+
+/* Header — static document flow, minimal, never blocks mobile viewport */
+.site-header {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.header-inner {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.wordmark {
+  font-family: var(--serif);
+  font-size: 1.18rem;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.wordmark:hover { color: var(--ink); text-decoration: none; }
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+}
+.nav-link {
+  font-size: 0.9rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+  padding: 0.2rem 0;
+  border-bottom: 2px solid transparent;
+  text-decoration: none;
+}
+.nav-link:hover { color: var(--ink); text-decoration: none; }
+.nav-link.active {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.nav-toggle {
+  display: none;
+  background: transparent;
+  border: 0;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.35rem 0.25rem;
+  cursor: pointer;
+}
+.nav-toggle:hover { color: var(--ink); }
+
+.mobile-drawer {
+  display: none;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0.4rem 1.25rem 0.8rem;
+}
+.mobile-drawer.open { display: block; }
+.mobile-drawer a {
+  display: block;
+  padding: 0.6rem 0;
+  color: var(--ink);
+  font-size: 0.96rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.mobile-drawer a:last-child { border-bottom: 0; }
+.mobile-drawer a.active { color: var(--accent); font-weight: 600; }
+
+/* Page containers — centered editorial essay column with wider figure breakouts */
+.page-wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4.75rem;
+}
+.page-grid {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 2.25rem 1.25rem 4.75rem;
+  display: grid;
+  grid-template-columns: 215px minmax(0, 1fr);
+  gap: 2.75rem;
+}
+.content { min-width: 0; }
+.prose-col {
+  max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.wide-col {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.prose { max-width: 680px; }
+
+/* Sidebar TOC (Desktop) + Collapsible TOC (Mobile) */
+.toc-sidebar {
+  position: sticky;
+  top: 1.5rem;
+  align-self: start;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  padding-right: 0.85rem;
+  border-right: 1px solid var(--border);
+  font-size: 0.84rem;
+}
+.toc-heading {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin: 0 0 0.65rem;
+}
+.toc-list { list-style: none; padding: 0; margin: 0; }
+.toc-list li { margin: 0.44rem 0; line-height: 1.38; }
+.toc-list a { color: var(--ink-2); text-decoration: none; }
+.toc-list a:hover { color: var(--accent); }
+.toc-latest {
+  display: block;
+  font-weight: 600;
+  color: var(--accent);
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.latest-jump-bar {
+  font-size: 0.9rem;
+  margin: -0.2rem 0 1.25rem;
+}
+.toc-mobile { display: none; margin-bottom: 1.5rem; }
+
+/* Typography */
+h1, h2, h3 {
+  font-family: var(--serif);
+  color: var(--ink);
+  font-weight: 500;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+}
+h1 {
+  font-size: 2.3rem;
+  margin: 0 0 0.7rem;
+}
+h2 {
+  font-size: 1.5rem;
+  margin: 3.1rem 0 0.85rem;
+}
+.page-grid h2 {
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+h3 {
+  font-size: 1.16rem;
+  margin: 2rem 0 0.55rem;
+  font-weight: 600;
+}
+h4 {
+  font-family: var(--sans);
+  font-size: 0.98rem;
+  font-weight: 600;
+  margin: 0 0 0.45rem;
+  line-height: 1.38;
+  color: var(--ink);
+}
+p { margin: 0 0 1.1rem; color: var(--ink-2); }
+strong { color: var(--ink); font-weight: 600; }
+ul, ol { margin: 0.5rem 0 1.15rem; padding-left: 1.3rem; color: var(--ink-2); }
+li { margin: 0.4rem 0; }
+.content > p, .content > ul, .content > ol, .content > blockquote { max-width: 680px; }
+.anchor {
+  color: var(--muted);
+  opacity: 0;
+  font-family: var(--sans);
+  font-size: 0.76em;
+  margin-left: 0.35rem;
+  font-weight: 400;
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+.anchor::after { content: "#"; }
+h1:hover .anchor, h2:hover .anchor, h3:hover .anchor, h4:hover .anchor, .anchor:focus { opacity: 0.55; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+
+/* Editorial Opening (Front Page & Subpages) */
+.eyebrow {
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+.masthead {
+  margin-bottom: 2.2rem;
+}
+.masthead h1 {
+  font-size: 2.55rem;
+  margin: 0 0 0.65rem;
+}
+.lead {
+  color: var(--ink-2);
+  font-size: 1.08rem;
+  line-height: 1.62;
+  margin: 0;
+}
+.section-rule {
+  border-top: 1px solid var(--border);
+  padding-top: 2.4rem;
+  margin-top: 2.8rem;
+}
+.section-kicker {
+  font-family: var(--serif);
+  font-size: 1.48rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0 0 0.75rem;
+}
+
+/* Inline code & code blocks */
+code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--surface);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  color: var(--ink);
+}
+.callout code, .clip-card code, details code {
+  background: #EAE6DA;
+  padding: 0.08rem 0.3rem;
+  box-shadow: inset 0 0 0 1px rgba(38, 37, 34, 0.11);
+}
+.code-block {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 1.1rem 0;
+  overflow-x: auto;
+}
+.code-block pre { margin: 0; padding: 0.95rem 1.1rem; }
+.code-block code { background: none; padding: 0; box-shadow: none; font-size: 0.84rem; }
+.code-lang {
+  position: absolute; top: 6px; right: 10px;
+  font-size: 0.7rem; text-transform: uppercase; color: var(--muted);
+}
+.mermaid-wrap {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 1.1rem;
+  margin: 1.25rem 0;
+  overflow-x: auto;
+}
+
+/* Editorial Callouts */
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  border-radius: 0 6px 6px 0;
+  padding: 0.95rem 1.2rem;
+  margin: 1.35rem 0;
+  max-width: 680px;
+}
+.callout-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+.callout-warning, .callout-caution { border-left-color: var(--warn); }
+.callout-warning .callout-label, .callout-caution .callout-label { color: var(--warn); }
+.callout-body > p:first-child { margin-top: 0; }
+.callout-body > p:last-child { margin-bottom: 0; }
+
+blockquote {
+  margin: 1.25rem 0;
+  padding: 0.25rem 0 0.25rem 1.15rem;
+  border-left: 2px solid var(--accent);
+  color: var(--ink-2);
+}
+
+/* Collapsible Sections (<details>) */
+details {
+  margin: 1.4rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 0;
+}
+summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--ink);
+  font-size: 0.95rem;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: "+";
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-weight: 400;
+}
+details[open] > summary::before { content: "−"; }
+details[open] > summary { margin-bottom: 0.85rem; }
+
+/* Tufte Horizontal-Rule Tables */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0.9rem 0 1.1rem;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+}
+thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 0.65rem 0.7rem;
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+  background: transparent;
+}
+td {
+  padding: 0.68rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--ink-2);
+}
+tbody tr:last-child td { border-bottom: 0; }
+.table-note {
+  font-size: 0.87rem;
+  color: var(--muted);
+  margin: 0.6rem 0 0;
+  line-height: 1.55;
+}
+.t-win { color: var(--win); font-weight: 600; }
+.t-loss { color: var(--loss); font-weight: 600; }
+.t-muted { color: var(--muted); }
+.nw { white-space: nowrap; }
+.table-flywheel table { font-size: 0.75rem; }
+.table-flywheel thead th {
+  font-size: 0.72rem;
+  line-height: 1.2;
+  padding: 0.36rem 0.26rem;
+  white-space: normal;
+  vertical-align: bottom;
+}
+.table-flywheel td {
+  padding: 0.36rem 0.26rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.36;
+}
+.table-flywheel td:first-child { white-space: nowrap; }
+
+/* Responsive Stacked Mobile Standings (< 700px) */
+.standings-mobile {
+  display: none;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+  margin: 0.75rem 0 0.85rem;
+}
+.standing-row { padding: 0.78rem 0; border-bottom: 1px solid var(--border); }
+.standing-row:last-child { border-bottom: 0; }
+.standing-top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
+.standing-bot { font-weight: 600; color: var(--ink); font-size: 0.98rem; }
+.standing-race { color: var(--muted); font-weight: 400; font-size: 0.88rem; }
+.standing-elo { font-weight: 600; font-size: 1rem; font-variant-numeric: tabular-nums; color: var(--ink); }
+.standing-stats { font-size: 0.87rem; color: var(--ink-2); margin-top: 0.16rem; font-variant-numeric: tabular-nums; }
+.standing-note { font-size: 0.87rem; color: var(--muted); margin: 0.28rem 0 0; line-height: 1.46; }
+
+/* Anthropic-Style Warm Sand Figures */
+.figure-block {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.35rem 1.45rem 1.15rem;
+  margin: 1.5rem auto 1.75rem;
+  max-width: 780px;
+}
+.figure-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 0.25rem;
+}
+.figure-title {
+  font-family: var(--serif);
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin: 0 0 0.75rem;
+  color: var(--ink);
+}
+.chart-svg { width: 100%; height: auto; display: block; }
+.figure-caption {
+  font-size: 0.86rem;
+  color: var(--ink-2);
+  margin: 0.75rem 0 0;
+  line-height: 1.52;
+}
+
+/* Clean Typographic Reading Lists */
+.doc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.65rem 0 1.85rem;
+  border-top: 1px solid var(--border);
+}
+.doc-item {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 0.25rem 1.75rem;
+  align-items: baseline;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border);
+  margin: 0;
+}
+.doc-item-title {
+  font-family: var(--serif);
+  font-size: 1.02rem;
+  font-weight: 500;
+  display: inline-block;
+}
+.doc-item-desc {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.52;
+}
+
+/* Replays & Video Figures */
+.clip-gallery { margin: 1.25rem 0 2rem; }
+.clip-gallery-grid, .featured-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.35rem;
+}
+.clip-card {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1rem 1.05rem;
+  display: flex;
+  flex-direction: column;
+}
+.clip-index {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+.clip-figure { margin: 0.4rem 0 0; }
+.clip-img, .clip-video {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 6px;
+  background: #141413;
+}
+.clip-img { cursor: zoom-in; min-height: 150px; }
+.clip-figure figcaption {
+  font-size: 0.85rem;
+  color: var(--ink-2);
+  margin-top: 0.55rem;
+  line-height: 1.48;
+}
+.video-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.84rem;
+}
+.text-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 2px;
+}
+.text-btn:hover { color: var(--accent-hover); text-decoration-color: var(--accent-hover); }
+.media-link {
+  font-size: 0.86rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Video Gallery Filter Controls */
+.gallery-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+  padding: 1rem 0 1.25rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin: 1.25rem 0 1.5rem;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.filter-group label {
+  font-size: 0.74rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.filter-select, .filter-input {
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--surface-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.44rem 0.65rem;
+  min-width: 135px;
+}
+.filter-input { min-width: 210px; }
+.gallery-count {
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin: 0 0 1rem;
+}
+.gallery-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+.show-more-wrap { text-align: center; margin-top: 1.75rem; }
+.editorial-btn {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 1.2rem;
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.editorial-btn:hover { background: var(--surface-alt); }
+
+/* Lightbox & Video Theater Modals */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(20, 20, 19, 0.92);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 1.25rem;
+}
+.modal-overlay.open { display: flex; }
+.modal-overlay img, .modal-overlay video {
+  max-width: 94vw;
+  max-height: 80vh;
+  border-radius: 6px;
+  background: #000;
+}
+.modal-caption {
+  color: #F4F2EA;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  text-align: center;
+  max-width: 820px;
+}
+.modal-controls {
+  position: fixed;
+  top: 1rem;
+  right: 1.25rem;
+  display: flex;
+  gap: 0.5rem;
+}
+.modal-btn {
+  background: #262522;
+  color: #FAF9F5;
+  border: 1px solid #44423C;
+  border-radius: 6px;
+  padding: 0.4rem 0.78rem;
+  cursor: pointer;
+  font-size: 0.86rem;
+  text-decoration: none;
+}
+.modal-btn:hover { background: #3B3934; color: #FFFFFF; text-decoration: none; }
+
+/* Footer */
+.site-footer {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1.6rem 1.25rem 3.25rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.84rem;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+
+@media (max-width: 1020px) {
+  .page-grid { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .toc-sidebar { display: none; }
+  .toc-mobile { display: block; }
+}
+@media (max-width: 820px) {
+  .clip-gallery-grid, .featured-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 799px) {
+  body { font-size: 15.5px; }
+  .header-inner { height: 50px; }
+  .nav-links { display: none; }
+  .nav-toggle { display: inline-block; }
+  .page-wrap, .page-grid { padding: 1.35rem 1rem 3.5rem; }
+  .masthead { margin-bottom: 1.45rem; }
+  .masthead h1 { font-size: 1.85rem; margin-bottom: 0.45rem; }
+  .lead { font-size: 0.98rem; line-height: 1.56; }
+  h1 { font-size: 1.7rem; }
+  h2, .section-kicker { font-size: 1.3rem; }
+  .section-rule { padding-top: 1.85rem; margin-top: 2.1rem; }
+  .figure-block { padding: 1.05rem 0.95rem 0.95rem; border-radius: 8px; }
+  .doc-item { grid-template-columns: minmax(0, 1fr); gap: 0.2rem; }
+  .filter-input { min-width: 0; width: 100%; }
+  .filter-group { flex: 1 1 140px; }
+}
+@media (max-width: 699px) {
+  .standings-desktop { display: none; }
+  .standings-mobile { display: block; }
+}
+
+/* Structured Section Headers */
+.section-head { max-width: 720px; margin-bottom: 1.35rem; }
+.section-num {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin: 0 0 0.25rem;
+}
+.section-intro { font-size: 0.98rem; color: var(--ink-2); margin: 0; line-height: 1.58; }
+.prose-tight { max-width: 700px; font-size: 0.95rem; margin: 0 0 0.9rem; line-height: 1.58; }
+
+/* Quick Section Jump Bar */
+.jump-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.95rem;
+  margin-top: 0.95rem;
+  font-size: 0.88rem;
+}
+.jump-bar a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--border); padding-bottom: 1px; }
+.jump-bar a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Interactive Panels & Detail Drawers */
+.interactive-panel {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin-bottom: 1.4rem;
+}
+/* Interactive SVG Diagrams & Walkthroughs */
+.diagram-stage {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem 0.65rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.diagram-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  font-family: var(--sans);
+}
+.svg-node { cursor: pointer; outline: none; transition: opacity 0.18s ease; }
+.svg-node .node-bg {
+  fill: #FAF9F5;
+  stroke: #D6D2C6;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, fill 0.15s, stroke-width 0.15s;
+}
+.svg-node .node-bg-accent {
+  fill: #FDF4F0;
+  stroke: #DFB5A5;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, fill 0.15s, stroke-width 0.15s;
+}
+.svg-node .node-bg-fw {
+  fill: #FDF4F0;
+  stroke: #C4633E;
+  stroke-width: 1.8;
+  stroke-dasharray: 5,3;
+  transition: stroke 0.15s, fill 0.15s;
+}
+.svg-node .node-bg-dark {
+  fill: #262522;
+  stroke: #262522;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, stroke-width 0.15s;
+}
+.svg-node:hover .node-bg,
+.svg-node:hover .node-bg-accent,
+.svg-node:hover .node-bg-fw { stroke: #C4633E; }
+.svg-node.is-active .node-bg,
+.svg-node.is-active .node-bg-accent,
+.svg-node.is-active .node-bg-fw {
+  fill: #FFFFFF;
+  stroke: #C4633E;
+  stroke-width: 2.6;
+}
+.svg-node.is-active .node-bg-dark {
+  stroke: #C4633E;
+  stroke-width: 2.8;
+}
+.svg-node.is-dim { opacity: 0.34; }
+.node-title { fill: #141413; font-size: 13px; font-weight: 600; }
+.node-sub { fill: #5E5D59; font-size: 11px; }
+.node-kicker-fw { fill: #C4633E; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
+
+.walk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+  margin-bottom: 0.8rem;
+}
+.walk-steps {
+  margin: 0.45rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.56;
+}
+.walk-steps li { margin: 0.45rem 0; }
+.detail-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: #FDF4F0;
+  border: 1px solid #EBD1C6;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  white-space: nowrap;
+}
+.explain-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.detail-drawer {
+  margin-top: 0.95rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.15rem;
+}
+.detail-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.45rem;
+}
+.detail-title { font-family: var(--serif); font-size: 1.08rem; font-weight: 600; color: var(--ink); }
+.detail-file { font-family: var(--mono); font-size: 0.76rem; color: var(--muted); }
+.detail-body { font-size: 0.92rem; color: var(--ink-2); margin: 0 0 0.65rem; line-height: 1.56; }
+.detail-metric {
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--surface);
+  padding: 0.45rem 0.7rem;
+  border-radius: 6px;
+  border-left: 3px solid var(--accent);
+}
+.compact-list { margin: 0.35rem 0 0.75rem; padding-left: 1.2rem; font-size: 0.89rem; color: var(--ink-2); }
+.compact-list li { margin: 0.25rem 0; line-height: 1.48; }
+
+.subsys-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.15rem;
+}
+.subsys-card {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+}
+.subsys-card h3 { margin: 0 0 0.4rem; font-size: 1.02rem; }
+.subsys-card p { font-size: 0.89rem; margin: 0 0 0.65rem; line-height: 1.52; }
+.mini-stat {
+  font-size: 0.82rem;
+  color: var(--ink-2);
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+
+/* Interactive Category & Matchup Pills */
+.cat-pills, .race-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+.race-toggle { margin-bottom: 0.85rem; }
+.cat-pill {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.36rem 0.68rem;
+  font-family: var(--sans);
+  font-size: 0.83rem;
+  font-weight: 500;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.cat-pill:hover { border-color: var(--accent); color: var(--ink); }
+.cat-pill.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+}
+.cat-pill .pill-n { font-size: 0.76rem; opacity: 0.75; margin-left: 0.2rem; }
+
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0.55rem 0 0.85rem;
+}
+.metric-strip-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.m-chip {
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+.m-lbl { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.m-chip strong { font-size: 0.9rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.mu-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1.25rem;
+}
+.mini-kicker {
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.eval-subsection { margin-top: 2rem; }
+.eval-subsection h3 { margin: 0 0 0.45rem; font-size: 1.12rem; }
+.charts-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.15rem;
+}
+
+/* Opening Build Order & Histograms + Base Layout Photos */
+.bo-box {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  margin: 0.75rem 0;
+}
+.bo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.75rem;
+  margin-bottom: 0.55rem;
+}
+.style-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.style-chip {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.14rem 0.55rem;
+}
+.bo-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 0.45rem;
+}
+.bo-step {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.42rem 0.52rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+}
+.bo-time { font-family: var(--mono); font-size: 0.7rem; color: var(--accent); font-weight: 600; }
+.bo-step strong { font-size: 0.84rem; color: var(--ink); line-height: 1.25; }
+.bo-pct { font-size: 0.71rem; color: var(--muted); }
+.hist-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-top: 0.65rem;
+}
+.hist-card {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem 0.6rem;
+}
+.hist-foot {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
+  font-variant-numeric: tabular-nums;
+}
+.base-layout-photo {
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Case Study Cards */
+.case-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.15rem;
+}
+.case-card {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.1rem 1.2rem;
+}
+.case-wide { grid-column: 1 / -1; }
+.case-tag {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.25rem;
+}
+.case-card h3 { margin: 0 0 0.5rem; font-size: 1.06rem; }
+.case-card p { font-size: 0.9rem; margin: 0 0 0.55rem; line-height: 1.54; }
+.case-card p:last-child { margin-bottom: 0; }
+.case-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);
+  gap: 1.2rem;
+  align-items: start;
+}
+
+/* Current-State Cohort Strip, Arena Filters & Open Gaps */
+.cohort-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.65rem;
+  margin: 0.75rem 0 1.25rem;
+}
+.cohort-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.16rem;
+}
+.cohort-card strong {
+  font-size: 1.12rem;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.cohort-sub {
+  font-size: 0.76rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.arena-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.9rem;
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+.arena-filter-group {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
+  gap: 0.35rem;
+}
+.arena-search-input {
+  flex: 1 1 220px;
+  min-width: 190px;
+  padding: 0.36rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #FFFFFF;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+}
+.arena-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.meta-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.spell-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 0.08rem 0.48rem;
+  white-space: nowrap;
+}
+.spell-ok {
+  color: #1F6E43;
+  background: #E9F6EE;
+  border: 1px solid #BFE3CD;
+}
+.spell-miss {
+  color: #9A3426;
+  background: #FCECE9;
+  border: 1px solid #EBC4BE;
+}
+.sid-pill {
+  font-family: var(--mono);
+  font-size: 0.71rem;
+  color: var(--muted);
+  margin: -0.15rem 0 0.42rem;
+  word-break: break-all;
+}
+.gaps-list {
+  margin: 0.45rem 0 0;
+  padding-left: 1.2rem;
+  max-width: 780px;
+  font-size: 0.94rem;
+  color: var(--ink-2);
+  line-height: 1.58;
+}
+.gaps-list li { margin: 0.48rem 0; }
+.cohort-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
+  margin: 1.15rem 0 0.45rem;
+}
+.cohort-heading h3 { margin: 0; font-size: 1.06rem; }
+.cohort-tag {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.history-cta {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+}
+.history-cta p { margin: 0; font-size: 0.94rem; color: var(--ink-2); }
+.history-cta a {
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent);
+  padding-bottom: 1px;
+  white-space: nowrap;
+}
+
+/* Section 2.4 Performance Curves & Timings vs. Opponents & Pros */
+.table-wrap.table-compact table { font-size: 0.82rem; }
+.table-wrap.table-compact th, .table-wrap.table-compact td { padding: 0.42rem 0.48rem; white-space: nowrap; }
+.site-curves-panel { padding: 1.05rem 1.15rem; max-width: 100%; min-width: 0; overflow-x: clip; }
+.site-curves-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.9rem;
+}
+.site-curves-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 1.1rem;
+  margin: 0.65rem 0 0.85rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.83rem;
+  color: var(--ink-2);
+}
+.sc-leg-item { display: inline-flex; align-items: center; gap: 0.42rem; white-space: nowrap; }
+.sc-leg-line { display: inline-block; width: 20px; height: 0; border-top: 2.6px solid #C4633E; }
+.sc-leg-line.m { border-top-color: #C4633E; }
+.sc-leg-line.p { border-top: 2.2px dashed #3B6E9C; }
+.sc-leg-line.o { border-top: 2.2px solid #7A5A8E; }
+.sc-leg-band { margin-left: auto; font-size: 0.78rem; }
+.site-curves-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.site-curve-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.78rem 0.9rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+}
+.site-curve-card.site-curve-span-2 { grid-column: 1 / -1; }
+.site-curve-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.site-curve-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.site-curve-badge {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.site-curve-meds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  color: var(--ink-2);
+}
+.sc-mpill { display: inline-flex; align-items: center; gap: 0.32rem; }
+.sc-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.sc-dot.m { background: #C4633E; }
+.sc-dot.p { background: #3B6E9C; }
+.sc-dot.o { background: #7A5A8E; }
+.site-curve-svg { width: 100%; height: auto; display: block; overflow: visible; user-select: none; touch-action: pan-y; }
+.site-timings-box {
+  margin-top: 1.05rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 0.95rem 0.75rem;
+  max-width: 100%;
+  min-width: 0;
+}
+.site-timings-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.55rem 0.9rem;
+}
+.site-timings-sub { font-size: 0.82rem; color: var(--muted); margin-top: 0.12rem; }
+.site-timings-wrap { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.st-row-hit { fill: transparent; cursor: crosshair; }
+.st-row-hit:hover { fill: rgba(196, 99, 62, 0.06); }
+.site-curve-tooltip {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  background: #1C1B18;
+  color: #FAF9F5;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.78rem;
+  line-height: 1.42;
+  box-shadow: 0 10px 26px rgba(20, 20, 19, 0.32);
+  max-width: 285px;
+}
+.site-curve-tooltip strong { color: #FFFFFF; font-weight: 700; }
+.sct-head {
+  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  padding-bottom: 0.22rem;
+  margin-bottom: 0.28rem;
+}
+.sct-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+.sct-lbl { display: inline-flex; align-items: center; gap: 0.36rem; font-family: var(--sans); }
+.sct-sub { font-size: 0.7rem; opacity: 0.76; margin-top: 0.2rem; }
+
+/* 5-Tab 22-Graph Pro Comparison Observatory (Warm Editorial Light Theme) */
+.obs-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.obs-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.35rem;
+}
+.obs-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  font-weight: 500;
+  padding: 0.42rem 0.78rem;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.obs-tab:hover { background: var(--surface); color: var(--ink); }
+.obs-tab.is-active {
+  background: rgba(196, 99, 62, 0.12);
+  color: #A84A27;
+  border-color: rgba(196, 99, 62, 0.36);
+  font-weight: 600;
+}
+.obs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.45rem 0.85rem;
+}
+.obs-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.32rem;
+}
+.obs-pill {
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 0.22rem 0.68rem;
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.obs-pill:hover { border-color: var(--accent); color: var(--ink); }
+.obs-pill.is-active {
+  background: var(--ink);
+  color: #FAF9F5;
+  border-color: var(--ink);
+  font-weight: 600;
+}
+.obs-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 1.05rem;
+  padding: 0.5rem 0.75rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.81rem;
+  color: var(--ink-2);
+}
+.obs-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+.obs-line {
+  display: inline-block;
+  width: 18px;
+  height: 2.6px;
+  border-radius: 2px;
+}
+.obs-line.obs-dash {
+  height: 0;
+  background: transparent !important;
+  border-top: 2.2px dashed;
+}
+.obs-leg-note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.76rem;
+  white-space: normal !important;
+}
+.obs-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+.obs-kpi {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.62rem 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.obs-kpi-primary {
+  border-color: rgba(196, 99, 62, 0.42);
+  background: linear-gradient(180deg, rgba(196, 99, 62, 0.06), #FFFFFF);
+}
+.obs-kpi-lbl {
+  font-size: 0.63rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obs-kpi strong {
+  font-family: var(--mono);
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.obs-kpi-sub {
+  font-size: 0.73rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.obs-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.82rem 0.95rem 0.72rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow: hidden;
+}
+.obs-card.obs-span-2 { grid-column: 1 / -1; }
+.obs-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+}
+.obs-card-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.obs-card-sub {
+  font-size: 0.79rem;
+  color: var(--muted);
+  margin-top: 0.12rem;
+  line-height: 1.38;
+}
+.obs-badge {
+  font-family: var(--mono);
+  font-size: 0.73rem;
+  padding: 0.12rem 0.48rem;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.obs-meds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  color: var(--ink-2);
+}
+.obs-meds > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  white-space: nowrap;
+}
+.obs-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.obs-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+  user-select: none;
+  touch-action: pan-y;
+}
+.obs-split-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.obs-mini-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 0.25rem;
+}
+.obs-empty {
+  padding: 1.2rem 0.75rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+.obs-missing-box {
+  margin-top: 0.55rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 7px;
+  background: rgba(180, 60, 46, 0.06);
+  border: 1px solid rgba(180, 60, 46, 0.22);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.79rem;
+}
+.obs-missing-lbl {
+  font-weight: 600;
+  color: #B43C2E;
+  margin-right: 0.2rem;
+}
+.obs-missing-pill {
+  display: inline-block;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.73rem;
+}
+.obs-creep-strip {
+  margin-top: 0.45rem;
+  padding: 0.62rem 0.8rem;
+  border-radius: 7px;
+  background: var(--surface);
+  border-left: 3px solid #B43C2E;
+  font-size: 0.83rem;
+  color: var(--ink);
+}
+.obs-tip-head {
+  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  padding-bottom: 0.22rem;
+  margin-bottom: 0.28rem;
+}
+.obs-tip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+.obs-tip-row > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+  font-family: var(--sans);
+}
+.obs-tip-sub {
+  font-size: 0.7rem;
+  opacity: 0.76;
+  margin-top: 0.2rem;
+}
+
+/* Editorial Visual Explainers, Annotated Stills, Release Highlights & Base Control Strip */
+.release-highlights {
+  background: #FAF6F1;
+  border: 1px solid #E8D9CF;
+  border-left: 3.5px solid var(--accent);
+  border-radius: 9px;
+  padding: 0.9rem 1.15rem;
+  margin: 0.55rem 0 0.85rem;
+}
+.rh-kicker {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.45rem;
+}
+.rh-list {
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 0.91rem;
+  line-height: 1.56;
+  color: var(--ink);
+}
+.rh-list li { margin: 0.34rem 0; }
+
+.visual-explainer-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 1.1rem 1.2rem;
+  margin-bottom: 1.2rem;
+}
+.ve-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.9rem;
+  margin-bottom: 0.8rem;
+}
+.ve-header h4 {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.ve-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.ve-col { min-width: 0; }
+.ve-svg-wrap {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.45rem;
+}
+.ve-cap {
+  margin: 0.5rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.48;
+  color: var(--ink-2);
+}
+
+.still-tabs {
+  display: inline-flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.still-tab {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.28rem 0.68rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.still-tab:hover { border-color: var(--accent); color: var(--accent); }
+.still-tab.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+  font-weight: 600;
+}
+.still-annotated {
+  position: relative;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #141413;
+}
+.still-annotated .clip-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: none;
+  border-radius: 0;
+}
+.still-compact { margin-top: 0.55rem; }
+.still-callout {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(20, 20, 19, 0.84);
+  color: #FAF9F5;
+  border: 1px solid rgba(250, 249, 245, 0.28);
+  border-left: 3px solid #E58158;
+  border-radius: 6px;
+  padding: 0.2rem 0.52rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+  max-width: 58%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.still-callout-muted {
+  border-left-color: #8BA4B8;
+  color: #E7E5DE;
+}
+.still-callout-good {
+  border-left-color: #54B882;
+}
+
+.tech-drawer {
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.65rem;
+}
+.tech-drawer summary {
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  list-style-position: outside;
+}
+.tech-drawer summary:hover { color: var(--accent); }
+
+.base-control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 0.9rem;
+  margin-top: 0.85rem;
+  align-items: stretch;
+}
+.base-control-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.base-control-stack .base-control-card {
+  flex: 1;
+  justify-content: center;
+}
+.base-control-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+}
+.base-control-card p {
+  margin: 0.35rem 0 0;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.bc-kicker {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.wall-bp-sub {
+  font-size: 0.82rem;
+  color: var(--ink-2);
+}
+.wall-blueprint-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.95rem;
+  align-items: start;
+}
+.wall-bp-card { min-width: 0; }
+.wall-clips-group { margin: 1.25rem 0 1.35rem; }
+.wall-row-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.02rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.wall-row-desc {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  line-height: 1.48;
+  color: var(--ink-2);
+}
+.wall-clips-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.95rem;
+  align-items: stretch;
+}
+.wall-clips-grid .clip-card {
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+.wall-clips-grid .clip-card h5 {
+  margin: 0.25rem 0 0.35rem;
+  font-size: 0.96rem;
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.arena-more-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+.arena-more-wrap .cat-pill {
+  font-weight: 600;
+  padding: 0.45rem 1.15rem;
+}
+
+@media (max-width: 1060px) {
+  .wall-blueprint-grid, .wall-clips-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .subsys-grid, .charts-pair, .case-grid, .case-split, .mu-two-col, .explain-grid, .hist-pair, .site-curves-grid, .obs-grid, .obs-split-2, .ve-grid, .base-control-grid, .wall-blueprint-grid, .wall-clips-grid { grid-template-columns: minmax(0, 1fr); }
+  .site-curve-card.site-curve-span-2, .obs-card.obs-span-2 { grid-column: auto; }
+  .obs-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 699px) {
+  .still-callout { font-size: 0.66rem; padding: 0.16rem 0.42rem; max-width: 66%; }
+  .visual-explainer-card { padding: 0.85rem; }
+  .interactive-panel { padding: 0.9rem 0.75rem; }
+  .detail-drawer { padding: 0.85rem; }
+  .diagram-stage { padding: 0.5rem 0.35rem; }
+  .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cohort-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .obs-tab { font-size: 0.78rem; padding: 0.36rem 0.58rem; }
+  .obs-leg-note { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+<header class="site-header"><div class="header-inner"><a class="wordmark" href="./index.html">Mothman</a><nav class="nav-links" aria-label="Primary"><a class="nav-link" href="./index.html">Current State</a><a class="nav-link active" href="./history.html">History &amp; Fixes</a><a class="nav-link" href="./video-gallery.html">Replays</a><a class="nav-link" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav><button type="button" class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="mobile-drawer">Menu</button></div><nav class="mobile-drawer" id="mobile-drawer" aria-label="Mobile menu"><a class="" href="./index.html">Current State</a><a class="active" href="./history.html">History &amp; Fixes</a><a class="" href="./video-gallery.html">Replays</a><a class="" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav></header>
+<div class="page-grid"><aside class="toc-sidebar" aria-label="Table of contents"><div class="toc-heading">Contents</div><ul class="toc-list"><li><a href="#methodology-amp-ground-truth-calibration">Methodology &amp; Ground-Truth Calibration</a></li><li><a href="#part-a-strategic-mirror-mind-libmirror-mind-predictorrkt-6959-lines">Part A — Strategic Mirror-Mind (lib/m…</a></li><li><a href="#part-b-tactical-mirror-brain-step-tactical-mirror-brain-in-libtacticsarena-minimaxrkt-4167-lines">Part B — Tactical Mirror Brain (step…</a></li><li><a href="#part-c-actionable-verdict-ranked-for-loop-36">Part C — Actionable Verdict (Ranked f…</a></li></ul></aside><main class="content"><details class="toc-mobile"><summary>Contents</summary><ul class="toc-list"><li><a href="#methodology-amp-ground-truth-calibration">Methodology &amp; Ground-Truth Calibration</a></li><li><a href="#part-a-strategic-mirror-mind-libmirror-mind-predictorrkt-6959-lines">Part A — Strategic Mirror-Mind (lib/m…</a></li><li><a href="#part-b-tactical-mirror-brain-step-tactical-mirror-brain-in-libtacticsarena-minimaxrkt-4167-lines">Part B — Tactical Mirror Brain (step…</a></li><li><a href="#part-c-actionable-verdict-ranked-for-loop-36">Part C — Actionable Verdict (Ranked f…</a></li></ul></details><h1>Testing Our Opponent-Prediction Code</h1>
+<div class="callout callout-note"><div class="callout-label">Note</div><div class="callout-body"><p>Historical engineering note recorded during Loop 34 evaluating replay prediction accuracy.</p></div></div>
+
+<div class="callout callout-important"><div class="callout-label">Key Takeaway</div><div class="callout-body"><p><strong>Executive Bottom Line</strong>: Both Mirror Brains contain genuine high-value primitives buried inside large volumes of unconsumed telemetry, mismatched symbol contracts, and severe architectural bugs.</p>
+<ul><li><strong>Strategic Mirror-Mind (<code>lib/mirror-mind-predictor.rkt</code>, 6,959 lines)</strong> suffers a <strong>strictly monotonic anti-depth curve</strong>: pure observational <code>d=0</code> beats <code>d=1</code>, <code>d=2</code>, and <code>d=3..5</code> in <strong>both</strong> realistic Fog-of-War (<code>35.8%</code> vs <code>31.8%</code> vs <code>22.8%</code> vs <code>10.5%</code> dominant next-60s unit accuracy) and Perfect-Vision Oracle (<code>45.6%</code> vs <code>33.6%</code> vs <code>18.0%</code> vs <code>11.4%</code>). In counterfactual A/B tests across <code>2,377</code> real replay checkpoints, stripping pure Mirror-Mind predictions changes <code>step-priority-macro-brain</code> <code>scheduled-ids</code> on only <strong><code>3.9%</code></strong> of checkpoints (<code>saving-for</code> <strong><code>6.6%</code></strong>, <code>desired-bases</code> <strong><code>16.7%</code></strong>) — and <strong><code>62.5%</code> (25/40)</strong> of audited diffs were <strong>actively harmful</strong> (chiefly a bug where <code>defend-All-In-Then-Counter-Expand</code> recommends <code>our_bases + 1</code> <code>100%</code> of the time, forcing 1:40 3rd-Hatchery escrows against Terran rushes!). Meanwhile, <strong><code>mirror-strategy</code> is 100% dead</strong> across the entire bot due to disjoint symbol sets, <code>mirror-enemy-upgrade-advantage</code> never subtracts our own upgrades (<code>25.4%</code> wrong sign), and <code>predict-multi-horizon-snapshots</code> burns <code>29%</code> of Mirror-Mind CPU purely for unread telemetry.</li><li><strong>Tactical Mirror Brain (<code>step-tactical-mirror-brain!</code> in <code>lib/tactics/arena-minimax.rkt</code>, 4,167 lines)</strong> is fast (<code>0.21 ms/step</code> mean, <code>0.35 ms</code> p95) and powers Zerg&#x27;s <code>84W-0L</code> Honest Arena dominance (<code>76.1%</code> of Zerg clash units survive to wire), <strong>yet <code>lib/bot-runtime.rkt:28132–28862</code> silently bypasses <code>95.0%</code> of Terran and <code>64.5%</code> of Protoss <code>tbrain</code> outputs</strong> (<code>88.6%</code> T / <code>66.7%</code> P in Arena!) — throwing away <code>tbrain</code> actions for Marines, Marauders, Stalkers, Adepts, Tanks, Vikings, Liberators, Thors, Ghosts, Reapers, Void Rays, Oracles, Carriers, Banelings, Ravagers, and Lurkers! Worse, <code>compress-two-arena-sim-lists</code> (<code>arena-minimax.rkt:1690–1730</code>) truncates armies to the <strong>first 3 units in list order</strong> (<code>take 3</code>), deleting <code>51.6%</code> of distinct unit types in Arena (<code>17.0%</code> in replays) and causing <strong><code>39.8%</code> of real clashes and <code>58.3%</code> of Arena scenarios to FLIP their chosen tactic solely by reversing the unit list order</strong>!</li></ul></div></div>
+<hr />
+<h2 id="methodology-amp-ground-truth-calibration">Methodology &amp; Ground-Truth Calibration<a class="anchor" href="#methodology-amp-ground-truth-calibration" aria-label="Link to section"></a></h2>
+<ul><li><strong>Replay Panel (<code>30</code> Loop 34 <code>.SC2Replay</code>s, zero repo edits, zero SC2 runs)</strong>: <code>16</code> <code>core_14</code> + <code>10</code> <code>unseen_12</code> + <code>4</code> <code>baseline_h2h</code> (<code>11</code> Wins, <code>17</code> Losses, <code>2</code> Ties; <code>11</code> Zerg, <code>10</code> Terran, <code>9</code> Protoss), covering rush (<code>12PoolBot</code>, <code>Chance</code>, <code>Thessaloniki</code>, <code>zig-reapers</code>), cloak (<code>who</code> DTs/Banshees, <code>onlyfans</code> Banshees, <code>CryptBotRevival</code> DTs), air (<code>mini-puck</code> Phoenixes, <code>sc2ai_protoss</code> Tempests, <code>Creepy_strategies</code>), siege/mech (<code>RustyNikolaj</code>, <code>AxeFighter</code>, <code>Mulebot</code>), and macro mirrors (<code>puck</code>, <code>oberon</code>, <code>PolyMorph</code>, <code>Mothman-H2H</code>).</li><li><strong>Observation Fidelity (<code>2,467</code> checkpoints at <code>10s</code> resolution, <code>2,377</code> post-30s eval steps, <code>370</code> beacon-free combat clashes)</strong>: Reconstructed from raw <code>s2protocol</code> tracker events (<code>SUnitBorn</code>, <code>SUnitInit</code>, <code>SUnitDone</code>, <code>SUnitDied</code>, <code>SUnitTypeChange</code>, <code>SUnitPositions</code>, <code>SUpgrade</code>, <code>SPlayerStats</code>) under <strong>two</strong> visibility modes:<ol><li><strong>Realistic Fog-of-War (<code>FOW</code>)</strong>: Enemy units visible only within SC2 sight radii (<code>9.0–11.0t</code>) of alive Mothman units/buildings, plus scouted-and-alive enemy structure snapshots.</li><li><strong>Perfect-Vision (<code>ORACLE</code>)</strong>: All alive enemy entities visible (isolating Mirror-Mind model errors from scouting/FOW gaps).</li></ol></li><li><strong>Live Calibration Check</strong>: Across <code>48,182</code> real <code>[SCBOT_STATE]</code> lines from <code>252</code> live Loop 34 bot logs (<code>iter34_wave34_full</code>), live <code>overall-accuracy</code> (<code>conf</code>) was <strong><code>mean = 0.681</code>, <code>median = 0.670</code>, <code>min = 0.150</code>, <code>max = 0.980</code></strong>. Our <code>FOW</code> replay harness produced <strong><code>mean = 0.680</code>, <code>median = 0.670</code>, <code>min = 0.150</code>, <code>max = 0.980</code></strong> — matching live SC2 behavior to <strong>0.001</strong>.</li></ul>
+<hr />
+<h2 id="part-a-strategic-mirror-mind-libmirror-mind-predictorrkt-6959-lines">Part A — Strategic Mirror-Mind (<code>lib/mirror-mind-predictor.rkt</code>, 6,959 lines)<a class="anchor" href="#part-a-strategic-mirror-mind-libmirror-mind-predictorrkt-6959-lines" aria-label="Link to section"></a></h2>
+<h3 id="a1-complete-exported-signal-flow-audit-consumed-vs-shadowed-vs-dead">A1. Complete Exported Signal-Flow Audit (Consumed vs Shadowed vs Dead)<a class="anchor" href="#a1-complete-exported-signal-flow-audit-consumed-vs-shadowed-vs-dead" aria-label="Link to section"></a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Exported Signal / Subsystem</th><th style="text-align:left">Producer (<code>mirror-mind-predictor.rkt</code>)</th><th style="text-align:left">Consumer(s) in Live Codebase</th><th style="text-align:left">Live Status</th><th style="text-align:left">Key Finding / Bug</th></tr></thead><tbody><tr><td style="text-align:left"><code>mirror-requires-anti-air?</code> (<code>tech-obs</code>)</td><td style="text-align:left"><code>infer-enemy-implied-tech-and-upgrades</code> (<code>L1375–1488</code>)</td><td style="text-align:left"><code>bot-runtime.rkt</code> (<code>~20</code> L2 sites), <code>priority-macro-brain.rkt</code> (<code>L1896, L4331</code>), <code>econ-ledger.rkt</code> (<code>L6937</code>)</td><td style="text-align:left"><strong>Actively Consumed (High Impact)</strong></td><td style="text-align:left"><code>91.4%</code> prec / <code>41.5%</code> rec (<code>83.5%</code> in ORACLE); recall limited by FOW scouting; <code>OR</code>&#x27;d with <code>OWM</code> at <code>bot-runtime.rkt:11687</code>.</td></tr><tr><td style="text-align:left"><code>mirror-requires-detection?</code> (<code>tech-obs</code>)</td><td style="text-align:left"><code>infer-enemy-implied-tech-and-upgrades</code> (<code>L1358–1485</code>)</td><td style="text-align:left"><code>bot-runtime.rkt</code> (<code>~15</code> L2 sites), <code>priority-macro-brain.rkt</code> (<code>L1901, L4336</code>), <code>econ-ledger.rkt</code> (<code>L6938</code>)</td><td style="text-align:left"><strong>Actively Consumed (Noisy)</strong></td><td style="text-align:left"><code>68.9%</code> prec / <code>28.7%</code> rec (<code>58.3%</code> prec in ORACLE!). False positives triggered by harmless <code>observer</code> (<code>L1368</code>), <code>starport-techlab</code> (<code>L1484</code>), and <code>oracle-revelation</code> (<code>L1239</code>). <strong>0/10 positive preemptive leads</strong> on cloak matches.</td></tr><tr><td style="text-align:left"><code>mirror-recommended-min-bases</code></td><td style="text-align:left"><code>evaluate-mirror-macro-verdict</code> (<code>L3410–3415</code>)</td><td style="text-align:left"><code>bot-runtime.rkt:9004</code> (<code>evaluate-coupled-macro-governor</code>), <code>priority-macro-brain.rkt:1835, 3661, 9453</code>, <code>econ-ledger.rkt:6858</code></td><td style="text-align:left"><strong>Actively Consumed (BUGGY)</strong></td><td style="text-align:left"><strong>Severe Bug</strong>: Under <code>defend-All-In-Then-Counter-Expand</code>, returns <code>(max 2 (+ our-bases 1))</code> — exceeds <code>our_bases</code> <strong><code>631/631</code> (<code>100%</code>)</strong> of the time! Forces Zerg to escrow a 3rd Hatchery at <code>1:40</code> (20 Drones) while getting rushed.</td></tr><tr><td style="text-align:left"><code>mirror-predicted-enemy-unit</code></td><td style="text-align:left"><code>predict-at-depth</code> (<code>L6649</code>)</td><td style="text-align:left"><code>bot-runtime.rkt:9014</code> (<code>adaptive-tech-plan</code>), <code>econ-ledger.rkt:7056</code>, <code>arena-minimax.rkt:3306</code> (<code>1.15x</code> target weight)</td><td style="text-align:left"><strong>Consumed (Weak / Miscalibrated)</strong></td><td style="text-align:left"><code>30.7%</code> dom60 / <code>51.3%</code> any60 accuracy (<code>d=2</code> is <code>22.8%</code>, <code>d=3..5</code> is <code>10.5%</code>). Causes hallucinated counter pivots (<code>void-ray</code> / <code>ghost</code> vs ground Protoss).</td></tr><tr><td style="text-align:left"><code>mirror-preemptive-unit</code></td><td style="text-align:left"><code>step-mirror-mind-predictor-core!</code> (<code>L6656–6670</code>)</td><td style="text-align:left"><code>econ-ledger.rkt:7059</code> (<code>+44 * trust-scale</code> rec weight), <code>priority-macro-brain.rkt:3654, 3782</code></td><td style="text-align:left"><strong>Consumed (Weak / Noisy)</strong></td><td style="text-align:left">Valid counter to actual next-60s dominant unit only <strong><code>33.7%</code></strong> of the time (<code>37.7%</code> in ORACLE).</td></tr><tr><td style="text-align:left"><code>mirror-macro-verdict</code></td><td style="text-align:left"><code>evaluate-mirror-macro-verdict</code> (<code>L3387–3408</code>)</td><td style="text-align:left"><code>econ-ledger.rkt:6673</code> (<code>cheese?</code>), <code>L6863</code> (<code>expansion-urgency</code>), <code>L7120–7141</code> (<code>tactical-phase</code>), <code>bot-runtime.rkt:9079, 9110, 29039</code></td><td style="text-align:left"><strong>Mostly Shadowed / Dead in L2</strong></td><td style="text-align:left"><code>bot-runtime.rkt:9110</code> feeds <code>guns-vs-butter-ppf</code> which is <strong>100% dead in live SC2</strong> (<code>bot-runtime.rkt:9339</code> gates <code>gas-alloc</code> on <code>(not live-obs-harvesters?)</code>). <code>bot-runtime.rkt:29152</code> (<code>punish-And-Deny-Greedy-Expand</code>) is also gated on <code>(not live-obs?)</code> and fires only <code>0.3%</code> in FOW!</td></tr><tr><td style="text-align:left"><code>mirror-enemy-upgrade-advantage</code></td><td style="text-align:left"><code>infer-enemy-implied-tech-and-upgrades</code> (<code>L1497</code>)</td><td style="text-align:left"><code>econ-ledger.rkt:6878</code> (<code>upgrade-priority-mult</code>), <code>L7116</code>, <code>bot-runtime.rkt:9082, 9111</code></td><td style="text-align:left"><strong>Consumed (BROKEN SIGN)</strong></td><td style="text-align:left"><strong>Bug</strong>: <code>compute-opponent-shadow-ledger</code> (<code>L2956</code>) omits <code>#:our-upgrade-tier</code>, defaulting to <code>0</code> ALWAYS! Reports <code>mean +0.58</code> when true delta is <code>-0.31</code> (<strong>wrong sign <code>25.4%</code> FOW / <code>27.1%</code> ORACLE</strong>).</td></tr><tr><td style="text-align:left"><code>mirror-trust-mode</code></td><td style="text-align:left"><code>select-mirror-trust-mode</code> (<code>L6355</code>)</td><td style="text-align:left"><code>econ-ledger.rkt:6849</code> (<code>trust-scale</code> <code>0.35 / 0.75 / 1.0</code>), <code>mirror-mind-predictor.rkt:6666, 6824</code></td><td style="text-align:left"><strong>Consumed (Inflated)</strong></td><td style="text-align:left">Claims <code>level2-preemptive-mirror</code> (<code>&gt;= 0.65</code>) <strong><code>70.9%</code></strong> of FOW checkpoints (<code>63.6%</code> live) despite <code>30.7%</code> true <code>dom60</code> accuracy.</td></tr><tr><td style="text-align:left"><code>mirror-tactical-target</code></td><td style="text-align:left"><code>predict-at-depth</code> (<code>L6671</code>)</td><td style="text-align:left"><code>arena-minimax.rkt:3287–3305</code> (<code>1.25x–1.45x</code> target priority boost in main/nat)</td><td style="text-align:left"><strong>Lightly Consumed</strong></td><td style="text-align:left">Only nudges <code>tbrain</code> target priority (<code>1.25–1.45x</code>) in <code>arena-minimax.rkt</code> (and bypassed for <code>95%</code> T / <code>64.5%</code> P!).</td></tr><tr><td style="text-align:left"><code>shadow-ledger</code></td><td style="text-align:left"><code>compute-opponent-shadow-ledger</code> (<code>L2890</code>)</td><td style="text-align:left"><code>bot-runtime.rkt:2284</code> (<code>est-enemy-workers</code> for posture), <code>L29589</code> (<code>reachability</code>), telemetry <code>L31504</code></td><td style="text-align:left"><strong>Consumed (Miscalibrated)</strong></td><td style="text-align:left"><code>predicted-enemy-workers</code> has <strong><code>16.3</code> MAE (<code>24.1</code> RMSE)</strong> in FOW and <strong><code>12.9</code> MAE (<code>+9.6</code> bias)</strong> in ORACLE because <code>enemy-workers-killed</code> is NEVER passed (<code>L6550</code>)!</td></tr><tr><td style="text-align:left"><code>reachability-model</code></td><td style="text-align:left"><code>evaluate-enemy-army-spatio-temporal-reachability</code> (<code>L6574</code>)</td><td style="text-align:left"><strong>Recomputed TWICE!</strong> Computed at <code>L6574</code>, then recomputed again at <code>bot-runtime.rkt:29584</code> -&gt; <code>execute-spatial-maneuver</code> (<code>L29660</code>)</td><td style="text-align:left"><strong>Redundant / Double-Computed</strong></td><td style="text-align:left"><code>mirror-spatial-maneuver</code> emitted at <code>L6812</code> has <strong>5 elements</strong> (<code>sym eta1 eta2 unacc</code>), failing to match <code>sc2-protobuf-ws.rkt:15653</code>&#x27;s 4-element pattern (<code>sym x y</code>) -&gt; <strong>100% dropped on wire!</strong></td></tr><tr><td style="text-align:left"><strong><code>mirror-strategy</code></strong></td><td style="text-align:left"><code>interpret-opponent-actions</code> (<code>L3297–3310</code>)</td><td style="text-align:left"><code>bot-runtime.rkt:8782</code>, <code>econ-ledger.rkt:6672</code></td><td style="text-align:left"><strong>100% DEAD (Symbol Mismatch!)</strong></td><td style="text-align:left">Emits <code>&#x27;immediate-proxy-or-early-all-in</code>, <code>&#x27;standard-rational-macro</code>, etc. — <strong>ZERO overlap</strong> with <code>bot-runtime.rkt:8782</code> (<code>proxy-production-or-all-in rush early-aggression</code>) or <code>econ-ledger.rkt:6672</code> (<code>cannon-rush 12-pool worker-rush ...</code>)!</td></tr><tr><td style="text-align:left"><strong><code>priority-macro-brain</code> <code>rush-prob</code> / <code>enemy-bases</code> / <code>opp-commitment-ht</code> keys</strong></td><td style="text-align:left">Never populated in <code>bot-runtime.rkt:11793–11808</code></td><td style="text-align:left"><code>priority-macro-brain.rkt:1905, 1916, 1923, 1935, 1950, 5095</code></td><td style="text-align:left"><strong>100% DEAD (Missing Keys!)</strong></td><td style="text-align:left"><code>priority-macro-brain.rkt</code> looks up <code>&#x27;rush-prob</code>, <code>&#x27;bayesian-rush</code>, <code>&#x27;enemy-bases</code>, <code>&#x27;enemy-gas-count</code>, <code>&#x27;peak-workers</code> in <code>raw-mirror-signals</code>, none of which <code>bot-runtime.rkt:11793</code> ever inserts!</td></tr><tr><td style="text-align:left"><code>toolbox-allocation</code></td><td style="text-align:left"><code>compute-mirror-toolbox-allocation</code> (<code>L6226</code>)</td><td style="text-align:left">Only <code>L6667</code> (<code>survival-fundamentals-only</code> -&gt; <code>d0</code>) + telemetry <code>bot-runtime.rkt:31490–31494</code></td><td style="text-align:left"><strong>Mostly Telemetry-Only</strong></td><td style="text-align:left"><code>toolbox-weight</code> (<code>0.0–0.25</code>) and <code>allow-unit-hedge?</code> are NEVER read by any macro/tactic layer.</td></tr><tr><td style="text-align:left"><code>zero-sum-exclusion</code></td><td style="text-align:left"><code>evaluate-zero-sum-negative-exclusions</code> (<code>L2683</code>)</td><td style="text-align:left">Internal to <code>predict-at-depth</code> (<code>L4651–4768</code>, <code>L6650</code>), <code>choose-optimal-mirror-depth</code> (<code>L5888</code>), telemetry <code>L31518</code></td><td style="text-align:left"><strong>Internal (Hurts <code>d=1</code>!)</strong></td><td style="text-align:left">Overrides <code>dom-obs-unit</code> with hardcoded branch defaults (e.g. <code>&#x27;marauder</code>, <code>&#x27;immortal</code>), driving <code>d=1</code> ORACLE <code>any60</code> <strong>down <code>-24.2pp</code></strong> vs <code>d=0</code>!</td></tr><tr><td style="text-align:left"><code>bo-tree</code> (<code>self/opp</code>)</td><td style="text-align:left"><code>prepare-*-bo-tree-context</code> (<code>L6630–6631, L6684–6685</code>)</td><td style="text-align:left"><code>self-bo-proj</code> is <strong>100% telemetry-only</strong> (<code>L6724</code>); <code>opp-bo-proj</code> filters <code>bo-tree-tech</code> in <code>predict-at-depth</code> (<code>L4601</code>)</td><td style="text-align:left"><strong>Half Telemetry-Only</strong></td><td style="text-align:left"><code>self-bo-proj</code> is never consumed by any decision logic.</td></tr><tr><td style="text-align:left"><code>diagnostic-probes</code></td><td style="text-align:left"><code>issue-diagnostic-depth-probe!</code> (<code>L6587–6595</code>)</td><td style="text-align:left">Internal to <code>choose-optimal-mirror-depth</code> (<code>L5926–5947</code>)</td><td style="text-align:left"><strong>Broken In Live (<code>mod 16</code> Clash) + No Physical Probe</strong></td><td style="text-align:left">Emits <strong>zero</strong> SC2 unit commands (purely passive position delta over <code>224f</code>). Worse, <code>L6591</code> checks <code>(= (modulo frame 1344) 0)</code> (<code>1344 = 16*84</code>), while <code>bot-runtime.rkt:31014</code> throttles L1c to <code>(= (modulo frame 16) 8)</code> — so periodic runs <strong>never</strong> land on <code>0 mod 1344</code>!</td></tr><tr><td style="text-align:left"><strong><code>multi-horizon-curve</code></strong></td><td style="text-align:left"><code>predict-multi-horizon-snapshots</code> (<code>L6686–6694</code>)</td><td style="text-align:left">Telemetry <code>mirror-horizon-curve</code> (<code>L6774</code>) ONLY (<code>sc2-typed-commands.rkt:1837</code>)</td><td style="text-align:left"><strong>100% DEAD TELEMETRY</strong></td><td style="text-align:left">Costs <strong><code>0.22 ms/step</code> (<code>29%</code> of total Mirror-Mind CPU!)</strong> and is <strong>never read anywhere</strong> in <code>lib/</code>.</td></tr><tr><td style="text-align:left"><code>mirror-actions</code></td><td style="text-align:left"><code>step-mirror-mind-predictor-core!</code> (<code>L6783–6844</code>)</td><td style="text-align:left"><code>sim/racket-sc2-ladder-main.rkt:1032</code> -&gt; <code>sc2-protobuf-ws.rkt</code></td><td style="text-align:left"><strong>6/7 Dead Telemetry; 1 Active (<code>scout-sector</code>)</strong></td><td style="text-align:left">Only <code>(scout-sector 1 enemy-x enemy-y)</code> (<code>962</code> emissions across 30 replays) translates on wire; all 6 <code>mirror-*</code> directives (incl. 5-arg <code>mirror-spatial-maneuver</code>) are no-ops.</td></tr></tbody></table></div>
+<hr />
+<h3 id="a2-empirical-accuracy-across-30-loop-34-replays-2377-post-30s-checkpoints">A2. Empirical Accuracy Across 30 Loop 34 Replays (<code>2,377</code> Post-30s Checkpoints)<a class="anchor" href="#a2-empirical-accuracy-across-30-loop-34-replays-2377-post-30s-checkpoints" aria-label="Link to section"></a></h3>
+<h4 id="1-recursive-depth-vs-true-future-opponent-production-n-1918-60s-2109-120s-checkpoints">1. Recursive Depth vs True Future Opponent Production (<code>n = 1,918</code> 60s / <code>2,109</code> 120s checkpoints)<a class="anchor" href="#1-recursive-depth-vs-true-future-opponent-production-n-1918-60s-2109-120s-checkpoints" aria-label="Link to section"></a></h4>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Cognitive Depth</th><th style="text-align:right">FOW <code>dom60</code> (Exact Top Spend)</th><th style="text-align:right">FOW <code>any60</code> (Any Produced)</th><th style="text-align:right">FOW <code>dom120</code></th><th style="text-align:right">FOW <code>any120</code></th><th style="text-align:right"><strong>ORACLE <code>dom60</code></strong></th><th style="text-align:right"><strong>ORACLE <code>any60</code></strong></th><th style="text-align:right"><strong>ORACLE <code>any120</code></strong></th><th style="text-align:right">Self-Reported End Acc (FOW)</th><th style="text-align:right">Selected Share (FOW)</th></tr></thead><tbody><tr><td style="text-align:left"><strong><code>d = 0</code> (Obs Baseline)</strong></td><td style="text-align:right"><strong>35.8%</strong></td><td style="text-align:right"><strong>57.7%</strong></td><td style="text-align:right"><strong>34.3%</strong></td><td style="text-align:right"><strong>62.4%</strong></td><td style="text-align:right"><strong>45.6%</strong></td><td style="text-align:right"><strong>66.7%</strong></td><td style="text-align:right"><strong>71.6%</strong></td><td style="text-align:right">0.69</td><td style="text-align:right"><strong>1.7%</strong> (<code>41</code>)</td></tr><tr><td style="text-align:left"><code>d = 1</code> (1st-Order)</td><td style="text-align:right">31.8%</td><td style="text-align:right">52.8%</td><td style="text-align:right">30.3%</td><td style="text-align:right">57.9%</td><td style="text-align:right">33.6%</td><td style="text-align:right">42.5%</td><td style="text-align:right">45.9%</td><td style="text-align:right"><strong>0.74</strong></td><td style="text-align:right"><strong>57.9%</strong> (<code>1,376</code>)</td></tr><tr><td style="text-align:left"><code>d = 2</code> (2nd-Order Mirror)</td><td style="text-align:right"><strong>22.8%</strong></td><td style="text-align:right">50.1%</td><td style="text-align:right">24.6%</td><td style="text-align:right">55.3%</td><td style="text-align:right"><strong>18.0%</strong></td><td style="text-align:right">37.2%</td><td style="text-align:right">42.9%</td><td style="text-align:right">0.62</td><td style="text-align:right"><strong>32.3%</strong> (<code>767</code>)</td></tr><tr><td style="text-align:left"><code>d = 3</code> (3rd-Order)</td><td style="text-align:right"><strong>10.7%</strong></td><td style="text-align:right">29.1%</td><td style="text-align:right">10.4%</td><td style="text-align:right">34.5%</td><td style="text-align:right"><strong>10.1%</strong></td><td style="text-align:right">24.7%</td><td style="text-align:right">30.0%</td><td style="text-align:right">0.54</td><td style="text-align:right">2.2% (<code>52</code>)</td></tr><tr><td style="text-align:left"><code>d = 4</code> (4th-Order)</td><td style="text-align:right"><strong>10.7%</strong></td><td style="text-align:right">33.2%</td><td style="text-align:right">11.0%</td><td style="text-align:right">38.4%</td><td style="text-align:right"><strong>14.0%</strong></td><td style="text-align:right">30.4%</td><td style="text-align:right">35.1%</td><td style="text-align:right">0.54</td><td style="text-align:right">1.4% (<code>34</code>)</td></tr><tr><td style="text-align:left"><code>d = 5</code> (5th-Order)</td><td style="text-align:right"><strong>10.3%</strong></td><td style="text-align:right">28.7%</td><td style="text-align:right">10.2%</td><td style="text-align:right">34.2%</td><td style="text-align:right"><strong>10.1%</strong></td><td style="text-align:right">24.8%</td><td style="text-align:right">30.0%</td><td style="text-align:right">0.54</td><td style="text-align:right">4.5% (<code>107</code>)</td></tr><tr><td style="text-align:left"><strong>Active Selected Output</strong></td><td style="text-align:right"><strong>30.7%</strong></td><td style="text-align:right"><strong>51.3%</strong></td><td style="text-align:right"><strong>30.0%</strong></td><td style="text-align:right"><strong>56.2%</strong></td><td style="text-align:right"><strong>33.5%</strong></td><td style="text-align:right"><strong>42.0%</strong></td><td style="text-align:right"><strong>45.3%</strong></td><td style="text-align:right"><strong>0.680</strong> (live <code>0.681</code>)</td><td style="text-align:right">100% (<code>2,377</code>)</td></tr></tbody></table></div>
+<ul><li><strong>Head-to-Head <code>d=1</code> vs <code>d=2</code> Disagreements</strong>: In <code>1,328</code> FOW checkpoints where <code>d=1</code> and <code>d=2</code> disagreed, <code>d=1</code> hit <code>dom60</code> <strong><code>31.7%</code></strong> vs <code>d=2</code> <strong><code>18.8%</code></strong> (<code>1.69x</code> better). Under ORACLE (<code>1,502</code> disagreements), <code>d=1</code> beat <code>d=2</code> <strong><code>34.8%</code> vs <code>14.9%</code></strong> (<code>2.34x</code> better!).</li><li><strong>Why <code>d=0</code> Crushes <code>d=1..5</code> Even in Perfect Vision</strong>:<ol><li>Ladder bots (and most SC2 opponents mid-production cycle) exhibit strong production autocorrelation — what they are currently building (<code>d=0</code> <code>dominant-observed-enemy-unit</code>) is the strongest predictor of the next 60–120s (<code>45.6%</code> exact top unit / <code>71.6%</code> any unit in 120s).</li><li><code>d=1</code> degrades <code>any60</code> from <code>66.7% -&gt; 42.5%</code> under ORACLE because <code>zero-sum-exclusion</code>&#x27;s <code>committed-branch</code> (<code>L4712–4768</code>) replaces the observed army with hardcoded branch guesses (e.g., <code>bio-stim-medivac -&gt; marauder</code>, <code>robotics-heavy-siege -&gt; immortal</code>, <code>stargate -&gt; void-ray</code>).</li><li><code>d=2..5</code> assume every opponent computes optimal counter-switches against <em>our</em> exact army composition (<code>counter-unit-for-race(opp, counter(us))</code>) — turning <code>d=3..5</code> into deterministic rock-paper-scissors oscillation (<code>10%</code> accuracy!).</li></ol></li><li><strong>Why Self-Reported Accuracy (<code>0.680</code>) Is Severely Inflated</strong>: <code>resolve-pending-forecasts!</code> (<code>L6418–6456</code>) resolves forecasts <em>immediately</em> on the very next step if <strong>either</strong> <code>strat-hit?</code> OR <code>tact-hit?</code> (any enemy within <code>24</code> tiles of <code>(tx, ty)</code>!) is true, AND skips failure penalties whenever <code>enemy-units</code> is empty under FOW (<code>L6446</code>). Result: <code>trust-mode</code> claims <code>level2-preemptive-mirror</code> (<code>&gt;= 0.65</code>) <strong><code>70.9%</code></strong> of FOW checkpoints (<code>balanced</code> <code>22.1%</code>, <code>skeptical</code> <code>7.0%</code>) while actual <code>dom60</code> accuracy is <code>30.7%</code> and <code>preemptive-counter-unit</code> validity against <code>dom60</code> is only <strong><code>33.7%</code></strong> (<code>32.1%</code> at <code>120s</code>).</li></ul>
+<h4 id="2-mirror-macro-verdict-confusion-matrix-amp-defend-all-in-base-bug-fow-n-2377">2. <code>mirror-macro-verdict</code> Confusion Matrix &amp; <code>defend-All-In</code> Base Bug (FOW, <code>n = 2,377</code>)<a class="anchor" href="#2-mirror-macro-verdict-confusion-matrix-amp-defend-all-in-base-bug-fow-n-2377" aria-label="Link to section"></a></h4>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Mirror Macro Verdict</th><th style="text-align:right">True <code>rush-or-allin</code></th><th style="text-align:right">True <code>standard-macro</code></th><th style="text-align:right">True <code>turtle</code></th><th style="text-align:right">True <code>greedy</code></th><th style="text-align:right">Total (Share)</th><th style="text-align:right">Precision on Intended Class</th></tr></thead><tbody><tr><td style="text-align:left"><code>pace-Macro-And-Disrupt</code></td><td style="text-align:right">180</td><td style="text-align:right"><strong>1,034</strong></td><td style="text-align:right">134</td><td style="text-align:right">105</td><td style="text-align:right">1,453 (<code>61.1%</code>)</td><td style="text-align:right"><code>71.2%</code></td></tr><tr><td style="text-align:left"><code>defend-All-In-Then-Counter-Expand</code></td><td style="text-align:right"><strong>391</strong></td><td style="text-align:right">222</td><td style="text-align:right">3</td><td style="text-align:right">15</td><td style="text-align:right">631 (<code>26.5%</code>)</td><td style="text-align:right"><code>62.0%</code> (<code>85.3%</code> in ORACLE)</td></tr><tr><td style="text-align:left"><code>out-Expand-Passive-Turtle</code></td><td style="text-align:right"><strong>75</strong></td><td style="text-align:right">118</td><td style="text-align:right"><strong>70</strong></td><td style="text-align:right">23</td><td style="text-align:right">286 (<code>12.0%</code>)</td><td style="text-align:right"><strong><code>24.5%</code></strong> (<code>46.3%</code> in ORACLE)</td></tr><tr><td style="text-align:left"><code>punish-And-Deny-Greedy-Expand</code></td><td style="text-align:right">0</td><td style="text-align:right">4</td><td style="text-align:right">0</td><td style="text-align:right"><strong>3</strong></td><td style="text-align:right">7 (<code>0.3%</code>)</td><td style="text-align:right"><code>42.9%</code> (<code>2.1%</code> recall!)</td></tr></tbody></table></div>
+<ul><li><strong><code>defend-All-In</code> Premature Expansion Bug</strong>: On <strong><code>631 / 631</code> (<code>100.0%</code>)</strong> of <code>defend-All-In-Then-Counter-Expand</code> checkpoints, <code>evaluate-mirror-macro-verdict</code> (<code>L3414</code>) outputs <code>recommended-min-bases = (max 2 (+ our-bases 1)) &gt; our_bases</code>!</li><li><strong><code>out-Expand-Passive-Turtle</code> False Positives</strong>: <code>75</code> times it classified an active <code>rush-or-allin</code> opponent as a &quot;Passive Turtle&quot; (and <code>118</code> times on standard macro) because seeing a single <code>bunker</code>, <code>photon-cannon</code>, <code>spine-crawler</code>, or <code>siege-tank</code> sets <code>opponent-turtling? = #t</code> (<code>L3240, L3262</code>).</li></ul>
+<h4 id="3-shadow-ledger-amp-upgrade-advantage-accuracy-vs-replay-ground-truth">3. <code>shadow-ledger</code> &amp; Upgrade Advantage Accuracy vs Replay Ground Truth<a class="anchor" href="#3-shadow-ledger-amp-upgrade-advantage-accuracy-vs-replay-ground-truth" aria-label="Link to section"></a></h4>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Metric</th><th style="text-align:right">FOW (<code>n = 2,377</code>)</th><th style="text-align:right">ORACLE (<code>n = 2,377</code>)</th><th style="text-align:left">Root Cause</th></tr></thead><tbody><tr><td style="text-align:left"><strong>Worker MAE / RMSE / Signed Bias</strong></td><td style="text-align:right"><strong><code>16.29</code> / <code>24.06</code> / <code>+3.34</code></strong></td><td style="text-align:right"><strong><code>12.92</code> / <code>20.35</code> / <code>+9.57</code></strong></td><td style="text-align:left">Hardcoded clock <code>12 + frame/268</code> (<code>L3140</code>); <code>enemy-workers-killed</code> is <strong>never passed</strong> (<code>L6550</code>), causing <code>+9.4..+9.9</code> worker over-prediction at 5–6m (<code>+16.1</code> at 8m in ORACLE) and <code>27.2</code> MAE at 10m+!</td></tr><tr><td style="text-align:left"><strong>Base MAE / Bias / Exact Match %</strong></td><td style="text-align:right"><strong><code>1.30</code> / <code>-0.69</code> / <code>35.5%</code></strong></td><td style="text-align:right"><code>0.20</code> / <code>+0.15</code> / <code>85.4%</code></td><td style="text-align:left"><code>dark-matter-imminent-bases</code> caps unscouted bases at <code>+2</code> (<code>L3131</code>), producing <code>-1.97</code> base undercount at 10m+ in FOW.</td></tr><tr><td style="text-align:left"><strong>Upgrade Advantage Pred vs True Mean</strong></td><td style="text-align:right"><strong><code>+0.58</code> vs <code>-0.31</code> (<code>25.4%</code> wrong sign)</strong></td><td style="text-align:right"><strong><code>+0.93</code> vs <code>-0.31</code> (<code>27.1%</code> wrong sign)</strong></td><td style="text-align:left"><code>infer-enemy-implied-tech-and-upgrades</code> (<code>L2956</code>) omits <code>#:our-upgrade-tier</code> -&gt; always subtracts <code>0</code>!</td></tr></tbody></table></div>
+<h4 id="4-requires-detection-amp-requires-anti-air-precision-recall-amp-lead-time">4. <code>requires-detection?</code> &amp; <code>requires-anti-air?</code> Precision, Recall &amp; Lead Time<a class="anchor" href="#4-requires-detection-amp-requires-anti-air-precision-recall-amp-lead-time" aria-label="Link to section"></a></h4>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Signal</th><th style="text-align:right">FOW Prec / Rec (<code>90s</code> window)</th><th style="text-align:right">FOW Prec / Rec (<code>now</code>)</th><th style="text-align:right">ORACLE Prec / Rec (<code>90s</code>)</th><th style="text-align:left">Key Case Studies (FOW Lead = <code>first_unit_sec - first_flag_sec</code>; negative = LATE)</th></tr></thead><tbody><tr><td style="text-align:left"><strong><code>requires-anti-air?</code></strong></td><td style="text-align:right"><strong><code>91.4%</code> / <code>41.5%</code></strong> (<code>TP=628 FP=59 FN=884</code>)</td><td style="text-align:right"><code>89.2%</code> / <code>46.3%</code></td><td style="text-align:right"><strong><code>90.6%</code> / <code>83.5%</code></strong></td><td style="text-align:left"><strong>3 positive leads</strong> (<code>TvT RustyNikolaj +185s</code>, <code>PvP sc2ai +125.8s</code>, <code>TvT Mulebot +56.7s</code>); late on <code>mini-puck</code> (<code>-19.3s / -28.8s</code>), <code>onlyfans</code> (<code>-32.9s / -36.9s</code>), <code>PvT who</code> (<code>-40.3s</code>), <code>Creepy</code> (<code>-31.2s / -36.2s</code>), <code>ZvP sc2ai</code> (<code>-125.8s</code>).</td></tr><tr><td style="text-align:left"><strong><code>requires-detection?</code></strong></td><td style="text-align:right"><strong><code>68.9%</code> / <code>28.7%</code></strong> (<code>TP=197 FP=89 FN=490</code>)</td><td style="text-align:right"><code>68.9%</code> / <code>33.5%</code></td><td style="text-align:right"><strong><code>58.3%</code> / <code>85.2%</code></strong> (<code>FP=419</code>!)</td><td style="text-align:left"><strong><code>0 / 10</code> positive leads!</strong> Reactive lag on every cloak match: <code>PvT who</code> (<code>-40.3s</code>), <code>ZvP who</code> (<code>-34.2s</code>), <code>PvP CryptBotRevival</code> (<code>-40.1s</code>), <code>onlyfans</code> (<code>-32.9s / -36.9s</code>). <strong>False positives</strong> on <code>puck</code> (<code>2/2</code>), <code>oberon</code>, <code>TvP mini-puck</code>, <code>ZvZ/PvP Mothman</code> (zero cloak units!) from <code>observer</code> (<code>L1368</code>) &amp; <code>starport-techlab</code> (<code>L1484</code>).</td></tr></tbody></table></div>
+<hr />
+<h3 id="a3-counterfactual-ab-impact-on-step-priority-macro-brain-n-2377-fow-checkpoints">A3. Counterfactual A/B Impact on <code>step-priority-macro-brain</code> (<code>n = 2,377</code> FOW Checkpoints)<a class="anchor" href="#a3-counterfactual-ab-impact-on-step-priority-macro-brain-n-2377-fow-checkpoints" aria-label="Link to section"></a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Comparison</th><th style="text-align:right"><code>scheduled-ids</code> Changed</th><th style="text-align:right"><code>top-1</code> Action Changed</th><th style="text-align:right"><code>saving-for</code> Changed</th><th style="text-align:right"><code>desired-bases</code> Changed (<code>coupled-governor</code>)</th></tr></thead><tbody><tr><td style="text-align:left"><strong>A (Full Mirror) vs B (Pure Mirror-Logic Stripped, keeping <code>req-aa?</code>/<code>req-det?</code>)</strong></td><td style="text-align:right"><strong><code>3.9%</code></strong> (<code>93 / 2,377</code>)</td><td style="text-align:right"><strong><code>3.4%</code></strong> (<code>82 / 2,377</code>)</td><td style="text-align:right"><strong><code>6.6%</code></strong> (<code>156 / 2,377</code>)</td><td style="text-align:right"><strong><code>16.7%</code></strong> (<code>396 / 2,377</code>)</td></tr><tr><td style="text-align:left"><strong>A (Full Mirror) vs C (ALL Mirror + <code>tech-obs</code> <code>req-aa?</code>/<code>req-det?</code> Stripped)</strong></td><td style="text-align:right"><code>5.7%</code> (<code>135 / 2,377</code>)</td><td style="text-align:right"><code>5.0%</code> (<code>120 / 2,377</code>)</td><td style="text-align:right"><code>10.9%</code> (<code>258 / 2,377</code>)</td><td style="text-align:right"><code>16.7%</code> (<code>396 / 2,377</code>)</td></tr></tbody></table></div>
+<ul><li><strong>Breakdown of A vs B Changes (<code>216</code> total diff events)</strong>: <code>mirror-expand-or-min-bases</code> (<code>84</code>, <code>38.9%</code>), <code>mirror-counter-or-upgrade-or-verdict</code> (<code>71</code>, <code>32.9%</code>), <code>mirror-preemptive-unit</code> (<code>61</code>, <code>28.2%</code>).</li><li><strong>Qualitative Audit of 40 Captured A vs B Diffs</strong>:<ul><li><strong>Harmful: <code>25 / 40 (62.5%)</code></strong> — <code>14</code> premature <code>1:40</code> 3rd-Hatchery escrows on <code>20</code> Drones under <code>defend-All-In</code> (<code>Z v Chance</code>, <code>Z v oberon</code>, <code>Z v RustyNikolaj</code>, delaying <code>roach-warren</code> / <code>evolution-chamber</code> and defense!) + <code>11</code> hallucinated counter pivots (<code>P v puck</code> diverted off <code>colossus</code>/<code>nexus</code> into <code>void-ray</code>/<code>stalker</code> while <code>puck</code> produced <code>zealot</code>/<code>immortal</code>; <code>T v puck @ 430s</code> diverted off 3rd CC into <code>ghost</code> on hallucinated <code>void-ray</code>).</li><li><strong>Neutral / Noise: <code>9 / 40 (22.5%)</code></strong> — candidate ordering swaps (<code>[overseer, baneling]</code> vs <code>[baneling, overseer]</code>).</li><li><strong>Genuinely Helpful: <code>6 / 40 (15.0%)</code></strong> — <code>Z v Chance @ 140–160s</code> (<code>pred=marine</code> exact -&gt; <code>baneling-nest</code> over <code>evolution-chamber</code>), <code>T v puck @ 160–170s</code> (<code>marine</code> over <code>barracks-techlab</code> at <code>2</code> army supply), <code>P v puck @ 950–970s</code>.</li></ul></li><li><strong>CPU Cost (<code>step-mirror-mind-predictor!</code>, FOW)</strong>: <strong><code>0.75 ms</code> mean</strong> (<code>0.55 ms</code> early / <code>0.75 ms</code> mid / <code>0.89 ms</code> late, <code>p95 = 1.16 ms</code>, <code>max = 3.63 ms</code>). Sub-breakdown: <strong><code>0.22 ms</code> (<code>29%</code>)</strong> wasted on <strong>100% dead</strong> <code>predict-multi-horizon-snapshots</code>, <code>0.17 ms</code> (<code>23%</code>) on <code>build-mirror-hierarchy d=0..5</code>, <code>0.05 ms</code> on <code>shadow-ledger</code>, <code>0.01 ms</code> on redundant <code>reachability</code>.</li></ul>
+<hr />
+<h2 id="part-b-tactical-mirror-brain-step-tactical-mirror-brain-in-libtacticsarena-minimaxrkt-4167-lines">Part B — Tactical Mirror Brain (<code>step-tactical-mirror-brain!</code> in <code>lib/tactics/arena-minimax.rkt</code>, 4,167 lines)<a class="anchor" href="#part-b-tactical-mirror-brain-step-tactical-mirror-brain-in-libtacticsarena-minimaxrkt-4167-lines" aria-label="Link to section"></a></h2>
+<h3 id="b1-complete-unit-type-routing-amp-override-matrix-libbot-runtimerkt2813228967">B1. Complete Unit-Type Routing &amp; Override Matrix (<code>lib/bot-runtime.rkt:28132–28967</code>)<a class="anchor" href="#b1-complete-unit-type-routing-amp-override-matrix-libbot-runtimerkt2813228967" aria-label="Link to section"></a></h3>
+<p><code>step-tactical-mirror-brain!</code> runs at <code>bot-runtime.rkt:23636</code> over <strong>all</strong> <code>combat-units</code>, generating per-unit <code>tbrain-unit-actions</code>. Then <code>l34-phase5</code> (<code>bot-runtime.rkt:28132–28967</code>) dispatches on <code>(case ut ...)</code>: <strong>only <code>banshee</code> (<code>L28863</code>) and the <code>[else]</code> fallthrough (<code>L28880</code>) ever read <code>tbrain-unit-actions</code>!</strong></p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Race</th><th style="text-align:left">Units <strong>100% BYPASSING <code>tbrain</code></strong> (<code>case ut</code> -&gt; <code>l34-emit-engage-or-rally!</code> / custom handler)</th><th style="text-align:left">Units <strong>ACTUALLY CONSUMING <code>tbrain</code></strong> (<code>banshee</code> + <code>[else]</code>)</th><th style="text-align:right">Real Replay Clash Bypass %</th><th style="text-align:right">Real Replay Wire Survival %</th><th style="text-align:right">Arena 36 Bypass %</th><th style="text-align:right">Arena 36 Wire Survival %</th></tr></thead><tbody><tr><td style="text-align:left"><strong>Terran</strong></td><td style="text-align:left"><code>marine</code>, <code>marauder</code>, <code>siege-tank</code>, <code>siege-tank-sieged</code>, <code>viking-fighter</code>, <code>viking-assault</code>, <code>liberator</code>, <code>liberator-ag</code>, <code>widow-mine</code>, <code>thor</code>, <code>ghost</code>, <code>reaper</code>, <code>battlecruiser</code></td><td style="text-align:left"><code>banshee</code>, <code>hellion</code>, <code>hellbat</code>, <code>cyclone</code></td><td style="text-align:right"><strong><code>95.0%</code></strong></td><td style="text-align:right"><strong><code>4.3%</code></strong></td><td style="text-align:right"><strong><code>88.6%</code></strong></td><td style="text-align:right"><strong><code>7.6%</code></strong></td></tr><tr><td style="text-align:left"><strong>Protoss</strong></td><td style="text-align:left"><code>stalker</code>, <code>adept</code>, <code>sentry</code>, <code>void-ray</code>, <code>oracle</code>, <code>carrier</code>, <code>disruptor</code>, <code>high-templar</code></td><td style="text-align:left"><code>zealot</code>, <code>immortal</code>, <code>colossus</code>, <code>archon</code>, <code>phoenix</code>, <code>tempest</code>, <code>dark-templar</code>, <code>mothership</code></td><td style="text-align:right"><strong><code>64.5%</code></strong></td><td style="text-align:right"><strong><code>33.6%</code></strong></td><td style="text-align:right"><strong><code>66.7%</code></strong></td><td style="text-align:right"><strong><code>29.2%</code></strong></td></tr><tr><td style="text-align:left"><strong>Zerg</strong></td><td style="text-align:left"><code>ravager</code>, <code>baneling</code>, <code>lurker</code>, <code>mutalisk</code>, <code>viper</code>, <code>infestor</code></td><td style="text-align:left"><strong><code>zergling</code>, <code>roach</code>, <code>hydralisk</code>, <code>corruptor</code>, <code>ultralisk</code>, <code>brood-lord</code>, <code>queen</code></strong></td><td style="text-align:right"><strong><code>10.2%</code></strong></td><td style="text-align:right"><strong><code>76.1%</code></strong></td><td style="text-align:right"><strong><code>8.5%</code></strong></td><td style="text-align:right"><strong><code>70.1%</code></strong></td></tr><tr><td style="text-align:left"><strong>ALL</strong></td><td style="text-align:left"><code>24</code> explicit unit branches</td><td style="text-align:left"><code>19</code> fallthrough units</td><td style="text-align:right"><strong><code>52.3%</code></strong></td><td style="text-align:right"><strong><code>41.3%</code></strong></td><td style="text-align:right"><strong><code>50.8%</code></strong></td><td style="text-align:right"><strong><code>38.1%</code></strong></td></tr></tbody></table></div>
+<ul><li><strong>Unreachable Dead Code Proof (<code>bot-runtime.rkt:28932–28942</code>)</strong>: Inside <code>[else]</code>, <code>bio-tank-screen-forbid-kite?</code> explicitly checks <code>(memq ut &#x27;(marine marauder hellbat))</code> — proving an author believed Marines and Marauders reached <code>[else]</code>, even though <code>L28824</code> captured <code>(marine marauder)</code> 110 lines earlier!</li><li><strong>Post-Filter Override Rate on Kite Orders (<code>mid-cooldown w-cd = 0.65s</code>)</strong>: Of <code>292</code> <code>&#x27;kite</code> actions emitted by <code>tbrain</code> in replays, <strong><code>53.4%</code></strong> are bypassed by <code>case ut</code> AND another <strong><code>25.3%</code></strong> are stripped by <code>bot-runtime.rkt</code>&#x27;s <code>forbid-kite?</code> guards (<code>forbid-kite-owned-territory</code>: <code>40</code>, <code>forbid-kite-outranged</code>: <code>26</code>, <code>forbid-kite-weapon-ready</code>: <code>26</code>, <code>forbid-kite-home-def</code>: <code>3</code>, plus <code>32</code> <code>nearest-enemy-tank</code> blocks) — leaving only <strong><code>21.2%</code></strong> of <code>tbrain</code> kite orders surviving to wire (<code>29.4%</code> in Arena)!</li></ul>
+<hr />
+<h3 id="b2-empirical-evaluation-370-real-loop-34-clashes-681-arenas-vs-36-honest-arena-20-scenarios-37-arenas">B2. Empirical Evaluation: <code>370</code> Real Loop 34 Clashes (<code>681</code> Arenas) vs <code>36</code> Honest Arena 2.0 Scenarios (<code>37</code> Arenas)<a class="anchor" href="#b2-empirical-evaluation-370-real-loop-34-clashes-681-arenas-vs-36-honest-arena-20-scenarios-37-arenas" aria-label="Link to section"></a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Metric</th><th style="text-align:right">Loop 34 Real Clashes (<code>370</code> snaps / <code>681</code> arenas)</th><th style="text-align:right">Honest Arena 2.0 (<code>36</code> scens / <code>37</code> arenas)</th><th style="text-align:left">Diagnosis</th></tr></thead><tbody><tr><td style="text-align:left"><strong>CPU Cost (<code>mean / p50 / p95 / max</code>)</strong></td><td style="text-align:right"><strong><code>0.21 / 0.15 / 0.35 / 4.25 ms</code></strong> (<code>le15: 0.16ms</code>, <code>16-40: 0.25ms</code>, <code>41-80: 0.23ms</code>)</td><td style="text-align:right"><code>0.84 / 0.17 / 0.37 / 23.89 ms</code> (1st-call JIT)</td><td style="text-align:left">Flvector minimax kernel is <strong>very fast</strong> — CPU is NOT the bottleneck.</td></tr><tr><td style="text-align:left"><strong><code>CommitFocusFire</code></strong></td><td style="text-align:right"><strong>53.5%</strong> (<code>364</code>)</td><td style="text-align:right">5.4% (<code>2</code>)</td><td style="text-align:left">Dominates replays (asymmetric army sizes); rare in balanced Arena (<code>16</code> StutterKiteBack + <code>15</code> DisengageRetreat).</td></tr><tr><td style="text-align:left"><strong><code>DisengageRetreat</code></strong></td><td style="text-align:right"><strong>20.3%</strong> (<code>138</code> — T: <code>37.3%</code>, Z: <code>14.6%</code>, P: <code>7.4%</code>)</td><td style="text-align:right"><strong>40.5%</strong> (<code>15</code>)</td><td style="text-align:left">Heavily selected even at initial clash frame in Arena (<code>15/37</code>); heavily patched with <code>4006–4089</code> overrides to prevent L32 0-DPS flee regressions.</td></tr><tr><td style="text-align:left"><strong><code>StutterKiteBack</code></strong></td><td style="text-align:right"><strong>14.1%</strong> (<code>96</code>)</td><td style="text-align:right"><strong>43.2%</strong> (<code>16</code>)</td><td style="text-align:left">Core Arena workhorse, yet <code>78.8%</code> of its replay <code>&#x27;kite</code> emissions are bypassed/stripped before wire!</td></tr><tr><td style="text-align:left"><strong><code>HoldChoke</code> / <code>FlankSurround</code></strong></td><td style="text-align:right"><code>6.2%</code> (<code>42</code>) / <code>6.0%</code> (<code>41</code>)</td><td style="text-align:right"><code>8.1%</code> (<code>3</code>) / <code>2.7%</code> (<code>1</code>)</td><td style="text-align:left"><strong><code>FlankSurround</code> and <code>KiteForwardChase</code> emit identical <code>(attack-unit uid eid)</code> as <code>CommitFocusFire</code></strong> (<code>arena-minimax.rkt:4159–4164</code>) — zero flank geometry!</td></tr><tr><td style="text-align:left"><strong><code>KiteForwardChase</code></strong></td><td style="text-align:right"><strong><code>0.0%</code></strong> (<code>0</code>)</td><td style="text-align:right"><strong><code>0.0%</code></strong> (<code>0</code>)</td><td style="text-align:left"><strong>100% dead tactic</strong> in the minimax action space (still evaluated in every rollout!).</td></tr><tr><td style="text-align:left"><strong>Horizon Sign Agreement (<code>d1↔d3</code> / <code>d2↔d3</code>)</strong></td><td style="text-align:right"><strong><code>96.9%</code></strong> / <strong><code>97.9%</code></strong> (`</td><td style="text-align:right">Δ</td><td style="text-align:left"><code> </code>57.3<code> / </code>44.6`)</td></tr><tr><td style="text-align:left"><strong>Compression Triggered (<code>n &gt; 3..4</code>)</strong></td><td style="text-align:right"><strong><code>40.8%</code></strong> (<code>278 / 681</code>)</td><td style="text-align:right"><strong><code>100.0%</code></strong> (<code>37 / 37</code>)</td><td style="text-align:left"><code>compress-two-arena-sim-lists</code> (<code>L1690–1730</code>) takes ONLY the <strong>first 3 (or 4) units in list order</strong>!</td></tr><tr><td style="text-align:left"><strong>Distinct Unit Types Completely Dropped</strong></td><td style="text-align:right"><strong><code>17.0%</code></strong> (<code>202 / 1,190</code>)</td><td style="text-align:right"><strong><code>51.6%</code></strong> (<code>94 / 182</code>)</td><td style="text-align:left">Mixed armies are simulated as scaled clones of whichever 3 unit tags happen to come first!</td></tr><tr><td style="text-align:left"><strong>Unit-Order Reversal Tactic Flip Rate</strong></td><td style="text-align:right"><strong><code>39.8%</code></strong> (<code>137 / 344</code> clashes!)</td><td style="text-align:right"><strong><code>58.3%</code></strong> (<code>21 / 36</code> scenarios!)</td><td style="text-align:left"><strong>Severe Bug</strong>: Reversing <code>ally-units</code> / <code>enemy-units</code> flips <code>DisengageRetreat &lt;-&gt; CommitFocusFire</code> (<code>p08</code>, <code>011 TvP puck</code>), <code>DisengageRetreat &lt;-&gt; StutterKiteBack</code> (<code>p04</code>, <code>p06</code>, <code>p11</code>, <code>t08</code>), <code>StutterKiteBack &lt;-&gt; HoldChoke</code> (<code>t01</code>)!</td></tr></tbody></table></div>
+<h3 id="b3-explaining-the-arena-34w-2l-zerg-84w-0l-vs-full-game-paradox-dripfeed-siege0dps-l32-regression">B3. Explaining the Arena (<code>34W-2L</code>, Zerg <code>84W-0L</code>) vs Full-Game Paradox (<code>DripFeed</code>, <code>Siege0DPS</code>, L32 Regression)<a class="anchor" href="#b3-explaining-the-arena-34w-2l-zerg-84w-0l-vs-full-game-paradox-dripfeed-siege0dps-l32-regression" aria-label="Link to section"></a></h3>
+<ol><li><strong>Why Zerg dominates Honest Arena (<code>84W-0L</code> Dummy + <code>12W-0L</code> Self-Play)</strong>: <code>70.1%–76.1%</code> of Zerg combat units (<code>zergling</code>, <code>roach</code>, <code>hydralisk</code>, <code>corruptor</code>, <code>ultralisk</code>, <code>brood-lord</code>, <code>queen</code>) actually consume <code>tbrain</code>&#x27;s <strong>strongest real feature</strong>: its <strong>target-priority &amp; damage-model spatial planner</strong> (<code>L3281–3809</code>: focus-firing high-DPS/low-HP threats, air-to-ground priority, splash-avoidance splits, and friendly-detector convergence!).</li><li><strong>Why Terran&#x27;s <code>12W-0L</code> Arena sweep is NOT <code>tbrain</code></strong>: <code>88.6%</code> of Terran Arena units (<code>95.0%</code> in replays!) bypass <code>tbrain</code> completely and are microed by <code>bot-runtime.rkt</code>&#x27;s <code>l34-emit-engage-or-rally!</code> + <code>wave3-marauder</code> / <code>stimpack</code> / <code>siege-tank</code> / <code>pro-spellcaster-micro</code>.</li><li><strong>Why <code>tbrain</code> breaks down in full-game replays (<code>DripFeed</code>, <code>Siege0DPS</code>, L32 regression)</strong>:<ul><li><strong>Arbitrary <code>take 3</code> Compression (<code>39.8%</code> flip rate)</strong>: A 15-unit mixed army with Siege Tanks + Marines + Medivacs can be compressed into <code>3</code> scaled Marines or <code>3</code> scaled Medivacs depending solely on SC2 tag ordering, causing wild <code>DisengageRetreat</code> vs <code>CommitFocusFire</code> flips!</li><li><strong>No Macro/Wave-Parity Context</strong>: <code>tbrain</code> evaluates isolated <code>14t</code> local arenas in a vacuum — in <code>DripFeed</code> losses, <code>tbrain</code> chose <code>CommitFocusFire</code> (<code>64.8%</code>, <code>162/250</code>) and <code>Siege0DPS</code> losses chose <code>CommitFocusFire</code> (<code>54.7%</code>, <code>110/201</code>) because locally a <code>6</code>-unit trickle vs <code>2</code> scouting units looks winning while <code>12</code> Sieged Tanks sit <code>16t</code> away!</li><li><strong>Tactic Over-Coupling (<code>DisengageRetreat</code> fragility)</strong>: Because <code>tbrain</code>&#x27;s rollout picks <code>DisengageRetreat</code> <code>40.5%</code> of the time in Arena (and <code>37.3%</code> for Terran in replays), any minor tweak to <code>DisengageRetreat</code> triggers mass 0-DPS fleeing (Loop 32 regression), requiring <code>300+</code> lines of runtime override patches (<code>L3980–4089</code> + <code>bot-runtime.rkt:28890–28958</code>).</li></ul></li></ol>
+<hr />
+<h2 id="part-c-actionable-verdict-ranked-for-loop-36">Part C — Actionable Verdict (Ranked for Loop 36+)<a class="anchor" href="#part-c-actionable-verdict-ranked-for-loop-36" aria-label="Link to section"></a></h2>
+<h3 id="1-what-genuinely-works-amp-wins-games-keep-amp-protect">1. What Genuinely Works &amp; Wins Games (Keep &amp; Protect!)<a class="anchor" href="#1-what-genuinely-works-amp-wins-games-keep-amp-protect" aria-label="Link to section"></a></h3>
+<ol><li><strong><code>tbrain</code> Target Priority &amp; Focus-Fire Planner (<code>arena-minimax.rkt:3281–3809</code>)</strong>: Drives Zerg&#x27;s <code>84W-0L</code> Honest Arena streak via smart focus-fire, air-to-ground prioritization, friendly-detector convergence, and splash splits at <strong><code>0.21 ms/step</code></strong>.</li><li><strong><code>infer-enemy-implied-tech-and-upgrades</code> Anti-Air Inference (<code>mirror-mind-predictor.rkt:1375–1488</code>)</strong>: <strong><code>91.4%</code> precision</strong> (<code>83.5%</code> recall when scouted) — directly drives <code>+4.4pp</code> of useful <code>saving-for</code> macro shifts (<code>A vs C</code>).</li><li><strong><code>d=0</code> Observational Dominant-Unit Baseline (<code>mirror-mind-predictor.rkt:4621–4640</code>)</strong>: Outperforms every higher cognitive depth (<code>35.8%</code> FOW / <code>45.6%</code> ORACLE <code>dom60</code>, <code>62.4%</code> / <code>71.6%</code> <code>any120</code>) at near-zero CPU cost.</li><li><strong>Mirror Scout Fallback (<code>mirror-mind-predictor.rkt:6823–6842</code>)</strong>: The only actuated command from L1c (<code>scout-sector</code>), genuinely useful for refreshing stale fog intel.</li></ol>
+<h3 id="2-what-is-broken-miscalibrated-bypassed-or-dead-weight">2. What Is Broken, Miscalibrated, Bypassed, or Dead Weight<a class="anchor" href="#2-what-is-broken-miscalibrated-bypassed-or-dead-weight" aria-label="Link to section"></a></h3>
+<ol><li><strong>P0 BUG — <code>compress-two-arena-sim-lists</code> <code>take 3</code> truncation (<code>arena-minimax.rkt:1690–1730</code>)</strong>: Drops <code>51.6%</code> of Arena unit types and flips tactics <strong><code>39.8%</code> (replays) / <code>58.3%</code> (Arena)</strong> on list reversal!</li><li><strong>P0 BUG — <code>defend-All-In-Then-Counter-Expand</code> recommends <code>our_bases + 1</code> (<code>mirror-mind-predictor.rkt:3414</code>)</strong>: Fires <code>100%</code> (<code>631/631</code>), causing <code>35%</code> of all counterfactual macro diffs (<code>1:40</code> 3rd-Hatchery escrows against rushes!).</li><li><strong>P0 BUG — <code>95.0%</code> Terran / <code>64.5%</code> Protoss <code>tbrain</code> bypass (<code>bot-runtime.rkt:28132–28862</code>)</strong>: Runs minimax over every Marine/Marauder/Stalker/Viking/Tank, then discards the actions (leaving <code>bio-tank-screen-forbid-kite?</code> at <code>L28934</code> unreachable!).</li><li><strong>P1 BUG — <code>mirror-mind</code> recursive depths <code>d=2..5</code> &amp; <code>zero-sum</code> override (<code>mirror-mind-predictor.rkt:4651–4925</code>)</strong>: Strictly anti-predictive (<code>d=0</code> <code>45.6%</code> &gt; <code>d=1</code> <code>33.6%</code> &gt; <code>d=2</code> <code>18.0%</code> &gt; <code>d=3..5</code> <code>11%</code> in ORACLE), while <code>resolve-pending-forecasts!</code> (<code>L6418–6456</code>) inflates self-reported accuracy to <code>0.680</code>!</li><li><strong>P1 BUG — <code>requires-detection?</code> false positives (<code>mirror-mind-predictor.rkt:1239, 1368, 1484</code>)</strong>: <code>observer</code>, <code>starport-techlab</code>, and <code>oracle-revelation</code> drop ORACLE precision to <code>58.3%</code> (<code>419</code> FPs) while FOW recall is only <code>28.7%</code> (<code>0/10</code> positive lead!).</li><li><strong>P1 BUG — <code>enemy-upgrade-advantage</code> omits <code>#:our-upgrade-tier</code> (<code>mirror-mind-predictor.rkt:2956</code>)</strong>: Wrong sign <code>25.4%</code> FOW / <code>27.1%</code> ORACLE (<code>+0.58</code> pred vs <code>-0.31</code> true).</li><li><strong>P1 BUG — <code>shadow-ledger</code> worker curve (<code>mirror-mind-predictor.rkt:2931, 3140, 6550</code>)</strong>: <code>16.3</code> FOW / <code>12.9</code> ORACLE MAE (<code>enemy-workers-killed</code> never passed).</li><li><strong>DEAD CODE — Zero live effect</strong>:<ul><li><code>predict-multi-horizon-snapshots</code> (<code>0.22 ms/step</code> = <strong><code>29%</code> of L1c CPU</strong> -&gt; 100% unread telemetry).</li><li><code>mirror-strategy</code> (<code>bot-runtime.rkt:8782</code> &amp; <code>econ-ledger.rkt:6672</code> match 0% of emitted symbols).</li><li><code>evaluate-guns-vs-butter-ppf</code> (<code>bot-runtime.rkt:9092</code> -&gt; <code>L9339</code> gated on <code>(not live-obs-harvesters?)</code>).</li><li>5-arg <code>mirror-spatial-maneuver</code> (<code>L6812</code> -&gt; unmatched by <code>sc2-protobuf-ws.rkt:15653</code>) &amp; double-computed <code>reachability</code> (<code>L6574</code> + <code>bot-runtime.rkt:29584</code>).</li><li><code>diagnostic-probes</code> (<code>mod 1344 = 0</code> clashes with <code>bot-runtime.rkt:31014</code> <code>mod 16 = 8</code>, no physical probe).</li><li><code>KiteForwardChase</code> (<code>0.0%</code> selected) &amp; duplicate <code>FlankSurround</code> action emission (<code>arena-minimax.rkt:4159</code>).</li></ul></li></ol>
+<h3 id="3-highest-roi-loop-36-action-plan-ranked">3. Highest-ROI Loop 36+ Action Plan (Ranked)<a class="anchor" href="#3-highest-roi-loop-36-action-plan-ranked" aria-label="Link to section"></a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Priority</th><th style="text-align:left">Change</th><th style="text-align:left">Files</th><th style="text-align:left">Expected Impact</th></tr></thead><tbody><tr><td style="text-align:left"><strong>#1 (Highest Win-Rate ROI)</strong></td><td style="text-align:left"><strong>Fix <code>compress-two-arena-sim-lists</code> to group &amp; scale BY UNIT TYPE (1 representative per distinct type, weighted by count)</strong> instead of <code>(take raw 3)</code>.</td><td style="text-align:left"><code>lib/tactics/arena-minimax.rkt:1690–1730</code></td><td style="text-align:left">Eliminates <strong><code>39.8%</code> replay / <code>58.3%</code> Arena</strong> order-dependent tactic flips and restores 100% unit-type fidelity in minimax rollouts at ~identical <code>0.25 ms</code> CPU!</td></tr><tr><td style="text-align:left"><strong>#2 (Highest Macro-Safety ROI)</strong></td><td style="text-align:left"><strong>Fix <code>defend-All-In-Then-Counter-Expand</code> <code>rec-min-bases</code> (<code>L3414</code>) from <code>(max 2 (+ our-bases 1))</code> -&gt; <code>our-bases</code> (never force expansion while defending an all-in!)</strong> AND cap <code>mirror-recommended-min-bases</code> during early game (<code>&lt; 3:30</code>).</td><td style="text-align:left"><code>lib/mirror-mind-predictor.rkt:3410–3415</code></td><td style="text-align:left">Immediately stops premature <code>1:40</code> 3rd-Hatchery escrows against rushes (<code>Chance</code>, <code>oberon</code>, <code>RustyNikolaj</code>) — eliminating <code>35%</code> of all harmful Mirror diffs!</td></tr><tr><td style="text-align:left"><strong>#3 (Highest Micro-Ceiling ROI)</strong></td><td style="text-align:left"><strong>Wire <code>tbrain</code> target selection (focus-fire <code>attack-unit</code> ONLY, preserving existing stim/blink/siege/kite handlers) into <code>marine</code>, <code>marauder</code>, <code>stalker</code>, <code>adept</code>, <code>viking-fighter</code>, <code>void-ray</code></strong> (or fix <code>bio-tank-screen-forbid-kite?</code> placement).</td><td style="text-align:left"><code>lib/bot-runtime.rkt:28221–28857</code></td><td style="text-align:left">Gives Terran &amp; Protoss armies Zerg&#x27;s focus-fire &amp; priority-targeting discipline (<code>+95%</code> T / <code>+64.5%</code> P utilization) without breaking Terran&#x27;s <code>12W-0L</code> Arena micro! <em>(Test carefully in 72-duel Honest Arena!)</em></td></tr><tr><td style="text-align:left"><strong>#4 (Accuracy &amp; Calibration ROI)</strong></td><td style="text-align:left"><strong>Default Mirror-Mind prediction to <code>d=0</code> observed + scouted tech buildings (<code>d=1</code> without <code>zero-sum</code> hardcoded overrides), disable <code>d=2..5</code> in live games</strong> (keep <code>d=0..1</code> only), fix <code>#:our-upgrade-tier</code> pass-through (<code>L2956</code>), pass <code>OWM</code> <code>destroyed-workers</code> / <code>confirmed-bases</code> into <code>shadow-ledger</code>, and remove <code>observer</code> / bare <code>starport-techlab</code> from <code>req-det?</code> (<code>L1368, L1484</code>).</td><td style="text-align:left"><code>lib/mirror-mind-predictor.rkt</code></td><td style="text-align:left">Lifts <code>dom60</code> accuracy <strong><code>30.7% -&gt; 35.8%+</code></strong> (<code>any120</code> <code>56.2% -&gt; 62.4%+</code>), fixes <code>25.4%</code> wrong-sign upgrade bias, cuts detection FPs by ~50%+, and stops hallucinated <code>void-ray</code>/<code>ghost</code> pivots.</td></tr><tr><td style="text-align:left"><strong>#5 (CPU &amp; Maintenance Pruning ROI)</strong></td><td style="text-align:left"><strong>Skip dead <code>predict-multi-horizon-snapshots</code>, <code>self-bo-proj</code>, <code>d=2..5</code> hierarchy, duplicate <code>reachability</code>, and live-dead <code>evaluate-guns-vs-butter-ppf</code> in live-obs mode</strong>; delete <code>KiteForwardChase</code> from <code>OUR-CAND-*</code> (<code>-16%</code> minimax matrix ops).</td><td style="text-align:left"><code>lib/mirror-mind-predictor.rkt</code>, <code>lib/bot-runtime.rkt</code>, <code>lib/tactics/arena-minimax.rkt</code></td><td style="text-align:left">Cuts Layer 1c CPU <strong><code>0.75 ms -&gt; ~0.22 ms</code> (<code>-70%</code>)</strong> with <strong>zero</strong> behavioral loss (preserves test exports for unit tests via a <code>#:live-fast?</code> flag!).</td></tr></tbody></table></div></main></div>
+<footer class="site-footer">
+  <div>Mothman · StarCraft II bots on AI Arena</div>
+  <div>Updated 2026-11-28 04:04 UTC · <a href="https://github.com/sticklane/mothman-sc2-bot/releases" target="_blank" rel="noopener noreferrer">Replay Archives</a></div>
+</footer>
+
+<script>
+(function() {
+  // 1. Mobile menu toggle
+  const toggle = document.getElementById('nav-toggle');
+  const drawer = document.getElementById('mobile-drawer');
+  if (toggle && drawer) {
+    toggle.addEventListener('click', function() {
+      const open = drawer.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.textContent = open ? 'Close' : 'Menu';
+    });
+  }
+
+  // 2. Auto-pause other videos when one starts playing
+  document.addEventListener('play', function(e) {
+    if (e.target && e.target.tagName === 'VIDEO') {
+      document.querySelectorAll('video').forEach(function(v) {
+        if (v !== e.target && !v.paused) v.pause();
+      });
+    }
+  }, true);
+
+  // 3. Image Lightbox Modal
+  const imgs = Array.from(document.querySelectorAll('img.clip-img'));
+  if (imgs.length) {
+    const lb = document.createElement('div');
+    lb.className = 'modal-overlay';
+    lb.innerHTML =
+      '<div class="modal-controls">' +
+        '<button class="modal-btn" id="lb-prev">Prev</button>' +
+        '<button class="modal-btn" id="lb-next">Next</button>' +
+        '<a class="modal-btn" id="lb-raw" target="_blank" rel="noopener noreferrer">Open file</a>' +
+        '<button class="modal-btn" id="lb-close">Close</button>' +
+      '</div>' +
+      '<img id="lb-img" alt="" />' +
+      '<div class="modal-caption" id="lb-cap"></div>';
+    document.body.appendChild(lb);
+    const lbImg = document.getElementById('lb-img');
+    const lbCap = document.getElementById('lb-cap');
+    const lbRaw = document.getElementById('lb-raw');
+    let cur = 0;
+    function show(i) {
+      cur = (i + imgs.length) % imgs.length;
+      const src = imgs[cur].getAttribute('data-lightbox-src') || imgs[cur].src;
+      const alt = imgs[cur].getAttribute('data-lightbox-alt') || imgs[cur].alt || '';
+      lbImg.src = src;
+      lbImg.alt = alt;
+      lbRaw.href = src;
+      lbCap.textContent = (cur + 1) + ' of ' + imgs.length + (alt ? ' — ' + alt : '');
+      lb.classList.add('open');
+    }
+    function closeLb() { lb.classList.remove('open'); }
+    imgs.forEach(function(im, idx) { im.addEventListener('click', function() { show(idx); }); });
+    document.getElementById('lb-prev').addEventListener('click', function(e) { e.stopPropagation(); show(cur - 1); });
+    document.getElementById('lb-next').addEventListener('click', function(e) { e.stopPropagation(); show(cur + 1); });
+    document.getElementById('lb-close').addEventListener('click', function(e) { e.stopPropagation(); closeLb(); });
+    lb.addEventListener('click', function(e) { if (e.target === lb) closeLb(); });
+    document.addEventListener('keydown', function(e) {
+      if (!lb.classList.contains('open')) return;
+      if (e.key === 'Escape') closeLb();
+      else if (e.key === 'ArrowRight') show(cur + 1);
+      else if (e.key === 'ArrowLeft') show(cur - 1);
+    });
+  }
+
+  // 4. Video Theater Modal (delegated for both report videos and dynamic gallery cards)
+  const vm = document.createElement('div');
+  vm.className = 'modal-overlay';
+  vm.innerHTML =
+    '<div class="modal-controls">' +
+      '<a class="modal-btn" id="vm-raw" target="_blank" rel="noopener noreferrer">Download MP4</a>' +
+      '<button class="modal-btn" id="vm-close">Close</button>' +
+    '</div>' +
+    '<video id="vm-video" controls playsinline webkit-playsinline preload="metadata"></video>' +
+    '<div class="modal-caption" id="vm-cap"></div>';
+  document.body.appendChild(vm);
+  const vmVideo = document.getElementById('vm-video');
+  const vmCap = document.getElementById('vm-cap');
+  const vmRaw = document.getElementById('vm-raw');
+  function closeVm() {
+    vmVideo.pause();
+    vmVideo.innerHTML = '';
+    vmVideo.removeAttribute('src');
+    vmVideo.load();
+    vm.classList.remove('open');
+  }
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest('.video-theater-btn');
+    if (!btn) return;
+    const src = btn.getAttribute('data-video-src') || '';
+    const poster = btn.getAttribute('data-video-poster') || '';
+    const title = btn.getAttribute('data-video-title') || '';
+    if (!src) return;
+    document.querySelectorAll('video').forEach(function(v) { if (!v.paused) v.pause(); });
+    vmVideo.innerHTML = '';
+    const sourceEl = document.createElement('source');
+    sourceEl.src = src;
+    sourceEl.type = 'video/mp4';
+    vmVideo.appendChild(sourceEl);
+    if (poster) vmVideo.poster = poster; else vmVideo.removeAttribute('poster');
+    vmVideo.load();
+    vmRaw.href = src;
+    vmCap.textContent = title;
+    vm.classList.add('open');
+    vmVideo.play().catch(function() {});
+  });
+  document.getElementById('vm-close').addEventListener('click', function(e) { e.stopPropagation(); closeVm(); });
+  vm.addEventListener('click', function(e) { if (e.target === vm) closeVm(); });
+  document.addEventListener('keydown', function(e) {
+    if (vm.classList.contains('open') && e.key === 'Escape') closeVm();
+  });
+
+  // 5. Open ancestor <details> when jumping to an in-page hash anchor (e.g. archived Loops 29-40)
+  function openDetailsForHash(hash) {
+    if (!hash || hash.length < 2) return;
+    const el = document.getElementById(decodeURIComponent(hash.slice(1)));
+    if (!el) return;
+    let p = el.parentElement;
+    while (p) {
+      if (p.tagName === 'DETAILS') p.open = true;
+      p = p.parentElement;
+    }
+  }
+  window.addEventListener('hashchange', function() { openDetailsForHash(window.location.hash); });
+  if (window.location.hash) openDetailsForHash(window.location.hash);
+  document.addEventListener('click', function(e) {
+    const a = e.target.closest('a[href^="#"]');
+    if (a) openDetailsForHash(a.getAttribute('href'));
+  });
+})();
+</script>
+
+
+
+</body>
+</html>

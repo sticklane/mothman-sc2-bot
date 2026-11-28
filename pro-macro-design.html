@@ -1,0 +1,2077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Economy &amp; Build Priorities — Mothman</title>
+  <style>
+:root {
+  --bg: #FAF9F5;
+  --surface: #F4F2EA;
+  --surface-alt: #EFECE3;
+  --surface-input: #FFFFFF;
+  --border: #E5E2D8;
+  --border-strong: #262522;
+  --ink: #141413;
+  --ink-2: #4A4945;
+  --muted: #7A7870;
+  --accent: #C4633E;
+  --accent-hover: #A34E2E;
+  --slate: #4A6B82;
+  --win: #2F6B48;
+  --loss: #A83E32;
+  --warn: #A35B1F;
+  --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16.5px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 3px;
+}
+a:hover {
+  color: var(--accent-hover);
+  text-decoration-color: var(--accent-hover);
+}
+.num, table { font-variant-numeric: tabular-nums; }
+
+/* Header — static document flow, minimal, never blocks mobile viewport */
+.site-header {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.header-inner {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.wordmark {
+  font-family: var(--serif);
+  font-size: 1.18rem;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.wordmark:hover { color: var(--ink); text-decoration: none; }
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+}
+.nav-link {
+  font-size: 0.9rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+  padding: 0.2rem 0;
+  border-bottom: 2px solid transparent;
+  text-decoration: none;
+}
+.nav-link:hover { color: var(--ink); text-decoration: none; }
+.nav-link.active {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.nav-toggle {
+  display: none;
+  background: transparent;
+  border: 0;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.35rem 0.25rem;
+  cursor: pointer;
+}
+.nav-toggle:hover { color: var(--ink); }
+
+.mobile-drawer {
+  display: none;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0.4rem 1.25rem 0.8rem;
+}
+.mobile-drawer.open { display: block; }
+.mobile-drawer a {
+  display: block;
+  padding: 0.6rem 0;
+  color: var(--ink);
+  font-size: 0.96rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.mobile-drawer a:last-child { border-bottom: 0; }
+.mobile-drawer a.active { color: var(--accent); font-weight: 600; }
+
+/* Page containers — centered editorial essay column with wider figure breakouts */
+.page-wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4.75rem;
+}
+.page-grid {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 2.25rem 1.25rem 4.75rem;
+  display: grid;
+  grid-template-columns: 215px minmax(0, 1fr);
+  gap: 2.75rem;
+}
+.content { min-width: 0; }
+.prose-col {
+  max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.wide-col {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.prose { max-width: 680px; }
+
+/* Sidebar TOC (Desktop) + Collapsible TOC (Mobile) */
+.toc-sidebar {
+  position: sticky;
+  top: 1.5rem;
+  align-self: start;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  padding-right: 0.85rem;
+  border-right: 1px solid var(--border);
+  font-size: 0.84rem;
+}
+.toc-heading {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin: 0 0 0.65rem;
+}
+.toc-list { list-style: none; padding: 0; margin: 0; }
+.toc-list li { margin: 0.44rem 0; line-height: 1.38; }
+.toc-list a { color: var(--ink-2); text-decoration: none; }
+.toc-list a:hover { color: var(--accent); }
+.toc-latest {
+  display: block;
+  font-weight: 600;
+  color: var(--accent);
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.latest-jump-bar {
+  font-size: 0.9rem;
+  margin: -0.2rem 0 1.25rem;
+}
+.toc-mobile { display: none; margin-bottom: 1.5rem; }
+
+/* Typography */
+h1, h2, h3 {
+  font-family: var(--serif);
+  color: var(--ink);
+  font-weight: 500;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+}
+h1 {
+  font-size: 2.3rem;
+  margin: 0 0 0.7rem;
+}
+h2 {
+  font-size: 1.5rem;
+  margin: 3.1rem 0 0.85rem;
+}
+.page-grid h2 {
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+h3 {
+  font-size: 1.16rem;
+  margin: 2rem 0 0.55rem;
+  font-weight: 600;
+}
+h4 {
+  font-family: var(--sans);
+  font-size: 0.98rem;
+  font-weight: 600;
+  margin: 0 0 0.45rem;
+  line-height: 1.38;
+  color: var(--ink);
+}
+p { margin: 0 0 1.1rem; color: var(--ink-2); }
+strong { color: var(--ink); font-weight: 600; }
+ul, ol { margin: 0.5rem 0 1.15rem; padding-left: 1.3rem; color: var(--ink-2); }
+li { margin: 0.4rem 0; }
+.content > p, .content > ul, .content > ol, .content > blockquote { max-width: 680px; }
+.anchor {
+  color: var(--muted);
+  opacity: 0;
+  font-family: var(--sans);
+  font-size: 0.76em;
+  margin-left: 0.35rem;
+  font-weight: 400;
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+.anchor::after { content: "#"; }
+h1:hover .anchor, h2:hover .anchor, h3:hover .anchor, h4:hover .anchor, .anchor:focus { opacity: 0.55; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+
+/* Editorial Opening (Front Page & Subpages) */
+.eyebrow {
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+.masthead {
+  margin-bottom: 2.2rem;
+}
+.masthead h1 {
+  font-size: 2.55rem;
+  margin: 0 0 0.65rem;
+}
+.lead {
+  color: var(--ink-2);
+  font-size: 1.08rem;
+  line-height: 1.62;
+  margin: 0;
+}
+.section-rule {
+  border-top: 1px solid var(--border);
+  padding-top: 2.4rem;
+  margin-top: 2.8rem;
+}
+.section-kicker {
+  font-family: var(--serif);
+  font-size: 1.48rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0 0 0.75rem;
+}
+
+/* Inline code & code blocks */
+code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--surface);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  color: var(--ink);
+}
+.callout code, .clip-card code, details code {
+  background: #EAE6DA;
+  padding: 0.08rem 0.3rem;
+  box-shadow: inset 0 0 0 1px rgba(38, 37, 34, 0.11);
+}
+.code-block {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 1.1rem 0;
+  overflow-x: auto;
+}
+.code-block pre { margin: 0; padding: 0.95rem 1.1rem; }
+.code-block code { background: none; padding: 0; box-shadow: none; font-size: 0.84rem; }
+.code-lang {
+  position: absolute; top: 6px; right: 10px;
+  font-size: 0.7rem; text-transform: uppercase; color: var(--muted);
+}
+.mermaid-wrap {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 1.1rem;
+  margin: 1.25rem 0;
+  overflow-x: auto;
+}
+
+/* Editorial Callouts */
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  border-radius: 0 6px 6px 0;
+  padding: 0.95rem 1.2rem;
+  margin: 1.35rem 0;
+  max-width: 680px;
+}
+.callout-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+.callout-warning, .callout-caution { border-left-color: var(--warn); }
+.callout-warning .callout-label, .callout-caution .callout-label { color: var(--warn); }
+.callout-body > p:first-child { margin-top: 0; }
+.callout-body > p:last-child { margin-bottom: 0; }
+
+blockquote {
+  margin: 1.25rem 0;
+  padding: 0.25rem 0 0.25rem 1.15rem;
+  border-left: 2px solid var(--accent);
+  color: var(--ink-2);
+}
+
+/* Collapsible Sections (<details>) */
+details {
+  margin: 1.4rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 0;
+}
+summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--ink);
+  font-size: 0.95rem;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: "+";
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-weight: 400;
+}
+details[open] > summary::before { content: "−"; }
+details[open] > summary { margin-bottom: 0.85rem; }
+
+/* Tufte Horizontal-Rule Tables */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0.9rem 0 1.1rem;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+}
+thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 0.65rem 0.7rem;
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+  background: transparent;
+}
+td {
+  padding: 0.68rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--ink-2);
+}
+tbody tr:last-child td { border-bottom: 0; }
+.table-note {
+  font-size: 0.87rem;
+  color: var(--muted);
+  margin: 0.6rem 0 0;
+  line-height: 1.55;
+}
+.t-win { color: var(--win); font-weight: 600; }
+.t-loss { color: var(--loss); font-weight: 600; }
+.t-muted { color: var(--muted); }
+.nw { white-space: nowrap; }
+.table-flywheel table { font-size: 0.75rem; }
+.table-flywheel thead th {
+  font-size: 0.72rem;
+  line-height: 1.2;
+  padding: 0.36rem 0.26rem;
+  white-space: normal;
+  vertical-align: bottom;
+}
+.table-flywheel td {
+  padding: 0.36rem 0.26rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.36;
+}
+.table-flywheel td:first-child { white-space: nowrap; }
+
+/* Responsive Stacked Mobile Standings (< 700px) */
+.standings-mobile {
+  display: none;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+  margin: 0.75rem 0 0.85rem;
+}
+.standing-row { padding: 0.78rem 0; border-bottom: 1px solid var(--border); }
+.standing-row:last-child { border-bottom: 0; }
+.standing-top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
+.standing-bot { font-weight: 600; color: var(--ink); font-size: 0.98rem; }
+.standing-race { color: var(--muted); font-weight: 400; font-size: 0.88rem; }
+.standing-elo { font-weight: 600; font-size: 1rem; font-variant-numeric: tabular-nums; color: var(--ink); }
+.standing-stats { font-size: 0.87rem; color: var(--ink-2); margin-top: 0.16rem; font-variant-numeric: tabular-nums; }
+.standing-note { font-size: 0.87rem; color: var(--muted); margin: 0.28rem 0 0; line-height: 1.46; }
+
+/* Anthropic-Style Warm Sand Figures */
+.figure-block {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.35rem 1.45rem 1.15rem;
+  margin: 1.5rem auto 1.75rem;
+  max-width: 780px;
+}
+.figure-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 0.25rem;
+}
+.figure-title {
+  font-family: var(--serif);
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin: 0 0 0.75rem;
+  color: var(--ink);
+}
+.chart-svg { width: 100%; height: auto; display: block; }
+.figure-caption {
+  font-size: 0.86rem;
+  color: var(--ink-2);
+  margin: 0.75rem 0 0;
+  line-height: 1.52;
+}
+
+/* Clean Typographic Reading Lists */
+.doc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.65rem 0 1.85rem;
+  border-top: 1px solid var(--border);
+}
+.doc-item {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 0.25rem 1.75rem;
+  align-items: baseline;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border);
+  margin: 0;
+}
+.doc-item-title {
+  font-family: var(--serif);
+  font-size: 1.02rem;
+  font-weight: 500;
+  display: inline-block;
+}
+.doc-item-desc {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.52;
+}
+
+/* Replays & Video Figures */
+.clip-gallery { margin: 1.25rem 0 2rem; }
+.clip-gallery-grid, .featured-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.35rem;
+}
+.clip-card {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1rem 1.05rem;
+  display: flex;
+  flex-direction: column;
+}
+.clip-index {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+.clip-figure { margin: 0.4rem 0 0; }
+.clip-img, .clip-video {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 6px;
+  background: #141413;
+}
+.clip-img { cursor: zoom-in; min-height: 150px; }
+.clip-figure figcaption {
+  font-size: 0.85rem;
+  color: var(--ink-2);
+  margin-top: 0.55rem;
+  line-height: 1.48;
+}
+.video-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.84rem;
+}
+.text-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 2px;
+}
+.text-btn:hover { color: var(--accent-hover); text-decoration-color: var(--accent-hover); }
+.media-link {
+  font-size: 0.86rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Video Gallery Filter Controls */
+.gallery-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+  padding: 1rem 0 1.25rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin: 1.25rem 0 1.5rem;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.filter-group label {
+  font-size: 0.74rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.filter-select, .filter-input {
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--surface-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.44rem 0.65rem;
+  min-width: 135px;
+}
+.filter-input { min-width: 210px; }
+.gallery-count {
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin: 0 0 1rem;
+}
+.gallery-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+.show-more-wrap { text-align: center; margin-top: 1.75rem; }
+.editorial-btn {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 1.2rem;
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.editorial-btn:hover { background: var(--surface-alt); }
+
+/* Lightbox & Video Theater Modals */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(20, 20, 19, 0.92);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 1.25rem;
+}
+.modal-overlay.open { display: flex; }
+.modal-overlay img, .modal-overlay video {
+  max-width: 94vw;
+  max-height: 80vh;
+  border-radius: 6px;
+  background: #000;
+}
+.modal-caption {
+  color: #F4F2EA;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  text-align: center;
+  max-width: 820px;
+}
+.modal-controls {
+  position: fixed;
+  top: 1rem;
+  right: 1.25rem;
+  display: flex;
+  gap: 0.5rem;
+}
+.modal-btn {
+  background: #262522;
+  color: #FAF9F5;
+  border: 1px solid #44423C;
+  border-radius: 6px;
+  padding: 0.4rem 0.78rem;
+  cursor: pointer;
+  font-size: 0.86rem;
+  text-decoration: none;
+}
+.modal-btn:hover { background: #3B3934; color: #FFFFFF; text-decoration: none; }
+
+/* Footer */
+.site-footer {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1.6rem 1.25rem 3.25rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.84rem;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+
+@media (max-width: 1020px) {
+  .page-grid { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .toc-sidebar { display: none; }
+  .toc-mobile { display: block; }
+}
+@media (max-width: 820px) {
+  .clip-gallery-grid, .featured-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 799px) {
+  body { font-size: 15.5px; }
+  .header-inner { height: 50px; }
+  .nav-links { display: none; }
+  .nav-toggle { display: inline-block; }
+  .page-wrap, .page-grid { padding: 1.35rem 1rem 3.5rem; }
+  .masthead { margin-bottom: 1.45rem; }
+  .masthead h1 { font-size: 1.85rem; margin-bottom: 0.45rem; }
+  .lead { font-size: 0.98rem; line-height: 1.56; }
+  h1 { font-size: 1.7rem; }
+  h2, .section-kicker { font-size: 1.3rem; }
+  .section-rule { padding-top: 1.85rem; margin-top: 2.1rem; }
+  .figure-block { padding: 1.05rem 0.95rem 0.95rem; border-radius: 8px; }
+  .doc-item { grid-template-columns: minmax(0, 1fr); gap: 0.2rem; }
+  .filter-input { min-width: 0; width: 100%; }
+  .filter-group { flex: 1 1 140px; }
+}
+@media (max-width: 699px) {
+  .standings-desktop { display: none; }
+  .standings-mobile { display: block; }
+}
+
+/* Structured Section Headers */
+.section-head { max-width: 720px; margin-bottom: 1.35rem; }
+.section-num {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin: 0 0 0.25rem;
+}
+.section-intro { font-size: 0.98rem; color: var(--ink-2); margin: 0; line-height: 1.58; }
+.prose-tight { max-width: 700px; font-size: 0.95rem; margin: 0 0 0.9rem; line-height: 1.58; }
+
+/* Quick Section Jump Bar */
+.jump-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.95rem;
+  margin-top: 0.95rem;
+  font-size: 0.88rem;
+}
+.jump-bar a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--border); padding-bottom: 1px; }
+.jump-bar a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Interactive Panels & Detail Drawers */
+.interactive-panel {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin-bottom: 1.4rem;
+}
+/* Interactive SVG Diagrams & Walkthroughs */
+.diagram-stage {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem 0.65rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.diagram-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  font-family: var(--sans);
+}
+.svg-node { cursor: pointer; outline: none; transition: opacity 0.18s ease; }
+.svg-node .node-bg {
+  fill: #FAF9F5;
+  stroke: #D6D2C6;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, fill 0.15s, stroke-width 0.15s;
+}
+.svg-node .node-bg-accent {
+  fill: #FDF4F0;
+  stroke: #DFB5A5;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, fill 0.15s, stroke-width 0.15s;
+}
+.svg-node .node-bg-fw {
+  fill: #FDF4F0;
+  stroke: #C4633E;
+  stroke-width: 1.8;
+  stroke-dasharray: 5,3;
+  transition: stroke 0.15s, fill 0.15s;
+}
+.svg-node .node-bg-dark {
+  fill: #262522;
+  stroke: #262522;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, stroke-width 0.15s;
+}
+.svg-node:hover .node-bg,
+.svg-node:hover .node-bg-accent,
+.svg-node:hover .node-bg-fw { stroke: #C4633E; }
+.svg-node.is-active .node-bg,
+.svg-node.is-active .node-bg-accent,
+.svg-node.is-active .node-bg-fw {
+  fill: #FFFFFF;
+  stroke: #C4633E;
+  stroke-width: 2.6;
+}
+.svg-node.is-active .node-bg-dark {
+  stroke: #C4633E;
+  stroke-width: 2.8;
+}
+.svg-node.is-dim { opacity: 0.34; }
+.node-title { fill: #141413; font-size: 13px; font-weight: 600; }
+.node-sub { fill: #5E5D59; font-size: 11px; }
+.node-kicker-fw { fill: #C4633E; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
+
+.walk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+  margin-bottom: 0.8rem;
+}
+.walk-steps {
+  margin: 0.45rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.56;
+}
+.walk-steps li { margin: 0.45rem 0; }
+.detail-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: #FDF4F0;
+  border: 1px solid #EBD1C6;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  white-space: nowrap;
+}
+.explain-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.detail-drawer {
+  margin-top: 0.95rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.15rem;
+}
+.detail-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.45rem;
+}
+.detail-title { font-family: var(--serif); font-size: 1.08rem; font-weight: 600; color: var(--ink); }
+.detail-file { font-family: var(--mono); font-size: 0.76rem; color: var(--muted); }
+.detail-body { font-size: 0.92rem; color: var(--ink-2); margin: 0 0 0.65rem; line-height: 1.56; }
+.detail-metric {
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--surface);
+  padding: 0.45rem 0.7rem;
+  border-radius: 6px;
+  border-left: 3px solid var(--accent);
+}
+.compact-list { margin: 0.35rem 0 0.75rem; padding-left: 1.2rem; font-size: 0.89rem; color: var(--ink-2); }
+.compact-list li { margin: 0.25rem 0; line-height: 1.48; }
+
+.subsys-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.15rem;
+}
+.subsys-card {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+}
+.subsys-card h3 { margin: 0 0 0.4rem; font-size: 1.02rem; }
+.subsys-card p { font-size: 0.89rem; margin: 0 0 0.65rem; line-height: 1.52; }
+.mini-stat {
+  font-size: 0.82rem;
+  color: var(--ink-2);
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+
+/* Interactive Category & Matchup Pills */
+.cat-pills, .race-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+.race-toggle { margin-bottom: 0.85rem; }
+.cat-pill {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.36rem 0.68rem;
+  font-family: var(--sans);
+  font-size: 0.83rem;
+  font-weight: 500;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.cat-pill:hover { border-color: var(--accent); color: var(--ink); }
+.cat-pill.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+}
+.cat-pill .pill-n { font-size: 0.76rem; opacity: 0.75; margin-left: 0.2rem; }
+
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0.55rem 0 0.85rem;
+}
+.metric-strip-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.m-chip {
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+.m-lbl { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.m-chip strong { font-size: 0.9rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.mu-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1.25rem;
+}
+.mini-kicker {
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.eval-subsection { margin-top: 2rem; }
+.eval-subsection h3 { margin: 0 0 0.45rem; font-size: 1.12rem; }
+.charts-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.15rem;
+}
+
+/* Opening Build Order & Histograms + Base Layout Photos */
+.bo-box {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  margin: 0.75rem 0;
+}
+.bo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.75rem;
+  margin-bottom: 0.55rem;
+}
+.style-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.style-chip {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.14rem 0.55rem;
+}
+.bo-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 0.45rem;
+}
+.bo-step {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.42rem 0.52rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+}
+.bo-time { font-family: var(--mono); font-size: 0.7rem; color: var(--accent); font-weight: 600; }
+.bo-step strong { font-size: 0.84rem; color: var(--ink); line-height: 1.25; }
+.bo-pct { font-size: 0.71rem; color: var(--muted); }
+.hist-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-top: 0.65rem;
+}
+.hist-card {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem 0.6rem;
+}
+.hist-foot {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
+  font-variant-numeric: tabular-nums;
+}
+.base-layout-photo {
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Case Study Cards */
+.case-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.15rem;
+}
+.case-card {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.1rem 1.2rem;
+}
+.case-wide { grid-column: 1 / -1; }
+.case-tag {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.25rem;
+}
+.case-card h3 { margin: 0 0 0.5rem; font-size: 1.06rem; }
+.case-card p { font-size: 0.9rem; margin: 0 0 0.55rem; line-height: 1.54; }
+.case-card p:last-child { margin-bottom: 0; }
+.case-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);
+  gap: 1.2rem;
+  align-items: start;
+}
+
+/* Current-State Cohort Strip, Arena Filters & Open Gaps */
+.cohort-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.65rem;
+  margin: 0.75rem 0 1.25rem;
+}
+.cohort-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.16rem;
+}
+.cohort-card strong {
+  font-size: 1.12rem;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.cohort-sub {
+  font-size: 0.76rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.arena-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.9rem;
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+.arena-filter-group {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
+  gap: 0.35rem;
+}
+.arena-search-input {
+  flex: 1 1 220px;
+  min-width: 190px;
+  padding: 0.36rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #FFFFFF;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+}
+.arena-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.meta-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.spell-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 0.08rem 0.48rem;
+  white-space: nowrap;
+}
+.spell-ok {
+  color: #1F6E43;
+  background: #E9F6EE;
+  border: 1px solid #BFE3CD;
+}
+.spell-miss {
+  color: #9A3426;
+  background: #FCECE9;
+  border: 1px solid #EBC4BE;
+}
+.sid-pill {
+  font-family: var(--mono);
+  font-size: 0.71rem;
+  color: var(--muted);
+  margin: -0.15rem 0 0.42rem;
+  word-break: break-all;
+}
+.gaps-list {
+  margin: 0.45rem 0 0;
+  padding-left: 1.2rem;
+  max-width: 780px;
+  font-size: 0.94rem;
+  color: var(--ink-2);
+  line-height: 1.58;
+}
+.gaps-list li { margin: 0.48rem 0; }
+.cohort-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
+  margin: 1.15rem 0 0.45rem;
+}
+.cohort-heading h3 { margin: 0; font-size: 1.06rem; }
+.cohort-tag {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.history-cta {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+}
+.history-cta p { margin: 0; font-size: 0.94rem; color: var(--ink-2); }
+.history-cta a {
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent);
+  padding-bottom: 1px;
+  white-space: nowrap;
+}
+
+/* Section 2.4 Performance Curves & Timings vs. Opponents & Pros */
+.table-wrap.table-compact table { font-size: 0.82rem; }
+.table-wrap.table-compact th, .table-wrap.table-compact td { padding: 0.42rem 0.48rem; white-space: nowrap; }
+.site-curves-panel { padding: 1.05rem 1.15rem; max-width: 100%; min-width: 0; overflow-x: clip; }
+.site-curves-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.9rem;
+}
+.site-curves-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 1.1rem;
+  margin: 0.65rem 0 0.85rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.83rem;
+  color: var(--ink-2);
+}
+.sc-leg-item { display: inline-flex; align-items: center; gap: 0.42rem; white-space: nowrap; }
+.sc-leg-line { display: inline-block; width: 20px; height: 0; border-top: 2.6px solid #C4633E; }
+.sc-leg-line.m { border-top-color: #C4633E; }
+.sc-leg-line.p { border-top: 2.2px dashed #3B6E9C; }
+.sc-leg-line.o { border-top: 2.2px solid #7A5A8E; }
+.sc-leg-band { margin-left: auto; font-size: 0.78rem; }
+.site-curves-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.site-curve-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.78rem 0.9rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+}
+.site-curve-card.site-curve-span-2 { grid-column: 1 / -1; }
+.site-curve-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.site-curve-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.site-curve-badge {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.site-curve-meds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  color: var(--ink-2);
+}
+.sc-mpill { display: inline-flex; align-items: center; gap: 0.32rem; }
+.sc-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.sc-dot.m { background: #C4633E; }
+.sc-dot.p { background: #3B6E9C; }
+.sc-dot.o { background: #7A5A8E; }
+.site-curve-svg { width: 100%; height: auto; display: block; overflow: visible; user-select: none; touch-action: pan-y; }
+.site-timings-box {
+  margin-top: 1.05rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 0.95rem 0.75rem;
+  max-width: 100%;
+  min-width: 0;
+}
+.site-timings-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.55rem 0.9rem;
+}
+.site-timings-sub { font-size: 0.82rem; color: var(--muted); margin-top: 0.12rem; }
+.site-timings-wrap { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.st-row-hit { fill: transparent; cursor: crosshair; }
+.st-row-hit:hover { fill: rgba(196, 99, 62, 0.06); }
+.site-curve-tooltip {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  background: #1C1B18;
+  color: #FAF9F5;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.78rem;
+  line-height: 1.42;
+  box-shadow: 0 10px 26px rgba(20, 20, 19, 0.32);
+  max-width: 285px;
+}
+.site-curve-tooltip strong { color: #FFFFFF; font-weight: 700; }
+.sct-head {
+  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  padding-bottom: 0.22rem;
+  margin-bottom: 0.28rem;
+}
+.sct-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+.sct-lbl { display: inline-flex; align-items: center; gap: 0.36rem; font-family: var(--sans); }
+.sct-sub { font-size: 0.7rem; opacity: 0.76; margin-top: 0.2rem; }
+
+/* 5-Tab 22-Graph Pro Comparison Observatory (Warm Editorial Light Theme) */
+.obs-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.obs-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.35rem;
+}
+.obs-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  font-weight: 500;
+  padding: 0.42rem 0.78rem;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.obs-tab:hover { background: var(--surface); color: var(--ink); }
+.obs-tab.is-active {
+  background: rgba(196, 99, 62, 0.12);
+  color: #A84A27;
+  border-color: rgba(196, 99, 62, 0.36);
+  font-weight: 600;
+}
+.obs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.45rem 0.85rem;
+}
+.obs-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.32rem;
+}
+.obs-pill {
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 0.22rem 0.68rem;
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.obs-pill:hover { border-color: var(--accent); color: var(--ink); }
+.obs-pill.is-active {
+  background: var(--ink);
+  color: #FAF9F5;
+  border-color: var(--ink);
+  font-weight: 600;
+}
+.obs-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 1.05rem;
+  padding: 0.5rem 0.75rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.81rem;
+  color: var(--ink-2);
+}
+.obs-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+.obs-line {
+  display: inline-block;
+  width: 18px;
+  height: 2.6px;
+  border-radius: 2px;
+}
+.obs-line.obs-dash {
+  height: 0;
+  background: transparent !important;
+  border-top: 2.2px dashed;
+}
+.obs-leg-note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.76rem;
+  white-space: normal !important;
+}
+.obs-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+.obs-kpi {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.62rem 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.obs-kpi-primary {
+  border-color: rgba(196, 99, 62, 0.42);
+  background: linear-gradient(180deg, rgba(196, 99, 62, 0.06), #FFFFFF);
+}
+.obs-kpi-lbl {
+  font-size: 0.63rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obs-kpi strong {
+  font-family: var(--mono);
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.obs-kpi-sub {
+  font-size: 0.73rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.obs-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.82rem 0.95rem 0.72rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow: hidden;
+}
+.obs-card.obs-span-2 { grid-column: 1 / -1; }
+.obs-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+}
+.obs-card-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.obs-card-sub {
+  font-size: 0.79rem;
+  color: var(--muted);
+  margin-top: 0.12rem;
+  line-height: 1.38;
+}
+.obs-badge {
+  font-family: var(--mono);
+  font-size: 0.73rem;
+  padding: 0.12rem 0.48rem;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.obs-meds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  color: var(--ink-2);
+}
+.obs-meds > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  white-space: nowrap;
+}
+.obs-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.obs-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+  user-select: none;
+  touch-action: pan-y;
+}
+.obs-split-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.obs-mini-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 0.25rem;
+}
+.obs-empty {
+  padding: 1.2rem 0.75rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+.obs-missing-box {
+  margin-top: 0.55rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 7px;
+  background: rgba(180, 60, 46, 0.06);
+  border: 1px solid rgba(180, 60, 46, 0.22);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.79rem;
+}
+.obs-missing-lbl {
+  font-weight: 600;
+  color: #B43C2E;
+  margin-right: 0.2rem;
+}
+.obs-missing-pill {
+  display: inline-block;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.73rem;
+}
+.obs-creep-strip {
+  margin-top: 0.45rem;
+  padding: 0.62rem 0.8rem;
+  border-radius: 7px;
+  background: var(--surface);
+  border-left: 3px solid #B43C2E;
+  font-size: 0.83rem;
+  color: var(--ink);
+}
+.obs-tip-head {
+  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  padding-bottom: 0.22rem;
+  margin-bottom: 0.28rem;
+}
+.obs-tip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+.obs-tip-row > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+  font-family: var(--sans);
+}
+.obs-tip-sub {
+  font-size: 0.7rem;
+  opacity: 0.76;
+  margin-top: 0.2rem;
+}
+
+/* Editorial Visual Explainers, Annotated Stills, Release Highlights & Base Control Strip */
+.release-highlights {
+  background: #FAF6F1;
+  border: 1px solid #E8D9CF;
+  border-left: 3.5px solid var(--accent);
+  border-radius: 9px;
+  padding: 0.9rem 1.15rem;
+  margin: 0.55rem 0 0.85rem;
+}
+.rh-kicker {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.45rem;
+}
+.rh-list {
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 0.91rem;
+  line-height: 1.56;
+  color: var(--ink);
+}
+.rh-list li { margin: 0.34rem 0; }
+
+.visual-explainer-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 1.1rem 1.2rem;
+  margin-bottom: 1.2rem;
+}
+.ve-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.9rem;
+  margin-bottom: 0.8rem;
+}
+.ve-header h4 {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.ve-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.ve-col { min-width: 0; }
+.ve-svg-wrap {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.45rem;
+}
+.ve-cap {
+  margin: 0.5rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.48;
+  color: var(--ink-2);
+}
+
+.still-tabs {
+  display: inline-flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.still-tab {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.28rem 0.68rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.still-tab:hover { border-color: var(--accent); color: var(--accent); }
+.still-tab.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+  font-weight: 600;
+}
+.still-annotated {
+  position: relative;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #141413;
+}
+.still-annotated .clip-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: none;
+  border-radius: 0;
+}
+.still-compact { margin-top: 0.55rem; }
+.still-callout {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(20, 20, 19, 0.84);
+  color: #FAF9F5;
+  border: 1px solid rgba(250, 249, 245, 0.28);
+  border-left: 3px solid #E58158;
+  border-radius: 6px;
+  padding: 0.2rem 0.52rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+  max-width: 58%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.still-callout-muted {
+  border-left-color: #8BA4B8;
+  color: #E7E5DE;
+}
+.still-callout-good {
+  border-left-color: #54B882;
+}
+
+.tech-drawer {
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.65rem;
+}
+.tech-drawer summary {
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  list-style-position: outside;
+}
+.tech-drawer summary:hover { color: var(--accent); }
+
+.base-control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 0.9rem;
+  margin-top: 0.85rem;
+  align-items: stretch;
+}
+.base-control-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.base-control-stack .base-control-card {
+  flex: 1;
+  justify-content: center;
+}
+.base-control-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+}
+.base-control-card p {
+  margin: 0.35rem 0 0;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.bc-kicker {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.wall-bp-sub {
+  font-size: 0.82rem;
+  color: var(--ink-2);
+}
+.wall-blueprint-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.95rem;
+  align-items: start;
+}
+.wall-bp-card { min-width: 0; }
+.wall-clips-group { margin: 1.25rem 0 1.35rem; }
+.wall-row-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.02rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.wall-row-desc {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  line-height: 1.48;
+  color: var(--ink-2);
+}
+.wall-clips-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.95rem;
+  align-items: stretch;
+}
+.wall-clips-grid .clip-card {
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+.wall-clips-grid .clip-card h5 {
+  margin: 0.25rem 0 0.35rem;
+  font-size: 0.96rem;
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.arena-more-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+.arena-more-wrap .cat-pill {
+  font-weight: 600;
+  padding: 0.45rem 1.15rem;
+}
+
+@media (max-width: 1060px) {
+  .wall-blueprint-grid, .wall-clips-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .subsys-grid, .charts-pair, .case-grid, .case-split, .mu-two-col, .explain-grid, .hist-pair, .site-curves-grid, .obs-grid, .obs-split-2, .ve-grid, .base-control-grid, .wall-blueprint-grid, .wall-clips-grid { grid-template-columns: minmax(0, 1fr); }
+  .site-curve-card.site-curve-span-2, .obs-card.obs-span-2 { grid-column: auto; }
+  .obs-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 699px) {
+  .still-callout { font-size: 0.66rem; padding: 0.16rem 0.42rem; max-width: 66%; }
+  .visual-explainer-card { padding: 0.85rem; }
+  .interactive-panel { padding: 0.9rem 0.75rem; }
+  .detail-drawer { padding: 0.85rem; }
+  .diagram-stage { padding: 0.5rem 0.35rem; }
+  .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cohort-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .obs-tab { font-size: 0.78rem; padding: 0.36rem 0.58rem; }
+  .obs-leg-note { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+<header class="site-header"><div class="header-inner"><a class="wordmark" href="./index.html">Mothman</a><nav class="nav-links" aria-label="Primary"><a class="nav-link" href="./index.html">Current State</a><a class="nav-link active" href="./history.html">History &amp; Fixes</a><a class="nav-link" href="./video-gallery.html">Replays</a><a class="nav-link" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav><button type="button" class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="mobile-drawer">Menu</button></div><nav class="mobile-drawer" id="mobile-drawer" aria-label="Mobile menu"><a class="" href="./index.html">Current State</a><a class="active" href="./history.html">History &amp; Fixes</a><a class="" href="./video-gallery.html">Replays</a><a class="" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav></header>
+<div class="page-grid"><aside class="toc-sidebar" aria-label="Table of contents"><div class="toc-heading">Contents</div><ul class="toc-list"><li><a href="#1-dual-perspective-engine-divergence-vs-pros-current-baseline">1. Dual-Perspective Engine Divergence…</a></li><li><a href="#2-empirical-findings-across-282-lotv-pro-replays-564-perspectives">2. Empirical Findings Across 282 LotV…</a></li><li><a href="#3-proposed-architecture-trajectory-first-macro-prioritization-engine">3. Proposed Architecture Trajectory-F…</a></li><li><a href="#4-recommended-implementation-sequence-amp-decisions-needed">4. Recommended Implementation Sequenc…</a></li><li><a href="#5-end-to-end-implementation-amp-quantitative-post-fix-benchmark-results">5. End-to-End Implementation &amp; Quanti…</a></li></ul></aside><main class="content"><details class="toc-mobile"><summary>Contents</summary><ul class="toc-list"><li><a href="#1-dual-perspective-engine-divergence-vs-pros-current-baseline">1. Dual-Perspective Engine Divergence…</a></li><li><a href="#2-empirical-findings-across-282-lotv-pro-replays-564-perspectives">2. Empirical Findings Across 282 LotV…</a></li><li><a href="#3-proposed-architecture-trajectory-first-macro-prioritization-engine">3. Proposed Architecture Trajectory-F…</a></li><li><a href="#4-recommended-implementation-sequence-amp-decisions-needed">4. Recommended Implementation Sequenc…</a></li><li><a href="#5-end-to-end-implementation-amp-quantitative-post-fix-benchmark-results">5. End-to-End Implementation &amp; Quanti…</a></li></ul></details><h1>Economy &amp; Build Priorities</h1>
+<div class="callout callout-note"><div class="callout-label">Note</div><div class="callout-body"><p>Historical design note recorded during early economy tuning against Grandmaster replay curves.</p></div></div>
+
+<div class="callout callout-important"><div class="callout-label">Key Takeaway</div><div class="callout-body"><p><strong>Executive Takeaway</strong>: Across <strong>282 LotV 1v1 pro replays (564 player perspectives)</strong>, <strong>6,478 dual-perspective checkpoints</strong>, and <strong>1,208 full-runtime spatial snapshots</strong>, our current engine diverges sharply from pro play because <strong>worker production and expansion are treated as conditional privileges that must pass ~14 veto gates</strong>, rather than as the <strong>default trajectory</strong> from which we deviate <em>only</em> for existential survival, bounded eco-disruption, or a planned timing/all-in window.</p></div></div>
+<hr />
+<h2 id="1-dual-perspective-engine-divergence-vs-pros-current-baseline">1. Dual-Perspective Engine Divergence vs. Pros (Current Baseline)<a class="anchor" href="#1-dual-perspective-engine-divergence-vs-pros-current-baseline" aria-label="Link to section"></a></h2>
+<p>We evaluated <strong>both</strong> Phase 8 (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/priority-macro-brain.rkt" target="_blank" rel="noopener noreferrer">priority-macro-brain.rkt</a>) across <code>6,478</code> LotV checkpoints in <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/data/pro_starvation_checkpoints.sexp" target="_blank" rel="noopener noreferrer">pro_starvation_checkpoints.sexp</a> <strong>and</strong> the full end-to-end runtime (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a> <code>step-live-bot-runtime!</code>) across <code>1,208</code> spatial snapshots reconstructed from <a href="https://github.com/sticklane/mothman-sc2-bot/tree/main/replays/pro_corpus" target="_blank" rel="noopener noreferrer">pro_corpus</a> (<code>0</code> runtime exceptions):</p>
+<h3 id="11-end-to-end-runtime-step-live-bot-runtime-vs-next-15s-pro-actions">1.1 End-to-End Runtime (<code>step-live-bot-runtime!</code>) vs. Next-15s Pro Actions<a class="anchor" href="#11-end-to-end-runtime-step-live-bot-runtime-vs-next-15s-pro-actions" aria-label="Link to section"></a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Race &amp; Context</th><th style="text-align:center">Pro Built Worker &amp; Had <code>&gt;= 50M</code> + Supply</th><th style="text-align:center">Full Runtime Emitted Worker</th><th style="text-align:center"><strong>False Worker-Cut Divergence</strong></th><th style="text-align:center">Premature Geyser (<code>&lt; 40w</code>, Pro Didn&#x27;t Build Gas)</th><th style="text-align:center">Emitted Affordable Pro Expansion (<code>&gt;= 300/400M</code>)</th></tr></thead><tbody><tr><td style="text-align:left"><strong>Terran (Peaceful)</strong></td><td style="text-align:center"><code>n = 160</code></td><td style="text-align:center"><code>20.0%</code></td><td style="text-align:center"><strong><code>80.0%</code></strong></td><td style="text-align:center"><code>1.0%</code> (<code>n=201</code>)</td><td style="text-align:center"><strong><code>14.3%</code></strong> (<code>n=7</code>)</td></tr><tr><td style="text-align:left"><strong>Terran (Enemy Visible)</strong></td><td style="text-align:center"><code>n = 8</code></td><td style="text-align:center"><code>12.5%</code></td><td style="text-align:center"><strong><code>87.5%</code></strong></td><td style="text-align:center">—</td><td style="text-align:center">—</td></tr><tr><td style="text-align:left"><strong>Protoss (Peaceful)</strong></td><td style="text-align:center"><code>n = 176</code></td><td style="text-align:center"><code>14.8%</code></td><td style="text-align:center"><strong><code>85.2%</code></strong></td><td style="text-align:center"><code>9.2%</code> (<code>n=218</code>)</td><td style="text-align:center"><code>100.0%</code> (<code>n=1</code>)</td></tr><tr><td style="text-align:left"><strong>Protoss (Enemy Visible)</strong></td><td style="text-align:center"><code>n = 6</code></td><td style="text-align:center"><strong><code>0.0%</code></strong></td><td style="text-align:center"><strong><code>100.0%</code></strong></td><td style="text-align:center">—</td><td style="text-align:center">—</td></tr><tr><td style="text-align:left"><strong>Zerg (Peaceful)</strong></td><td style="text-align:center"><code>n = 239</code></td><td style="text-align:center"><strong><code>1.7%</code></strong></td><td style="text-align:center"><strong><code>98.3%</code></strong></td><td style="text-align:center"><code>9.4%</code> (<code>n=329</code>)</td><td style="text-align:center"><strong><code>36.4%</code></strong> (<code>n=11</code>)</td></tr></tbody></table></div>
+<h3 id="12-phase-8-brain-step-priority-macro-brain-internal-breakdown-6478-checkpoints">1.2 Phase 8 Brain (<code>step-priority-macro-brain</code>) Internal Breakdown (<code>6,478</code> Checkpoints)<a class="anchor" href="#12-phase-8-brain-step-priority-macro-brain-internal-breakdown-6478-checkpoints" aria-label="Link to section"></a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Race</th><th style="text-align:left">Context</th><th style="text-align:center">Brain Omitted Worker</th><th style="text-align:center">Ranked Worker <code>&gt; 3rd</code></th><th style="text-align:center">Worker Utility Collapsed <code>&lt; 50</code> (<code>-&gt; 2.8</code>)</th><th style="text-align:center">Brain Scheduled Worker When Pro <strong>Cut</strong> Workers</th><th style="text-align:center">Brain Missed Pro Expand (<code>&gt;= 200M</code>)</th></tr></thead><tbody><tr><td style="text-align:left"><strong>Terran</strong></td><td style="text-align:left">Peaceful (<code>n=779</code>)</td><td style="text-align:center"><code>59.9%</code></td><td style="text-align:center"><code>53.5%</code></td><td style="text-align:center"><code>1.3%</code></td><td style="text-align:center"><code>24.4%</code> (<code>n=234</code>)</td><td style="text-align:center"><code>38.8%</code> (<code>n=85</code>)</td></tr><tr><td style="text-align:left"><strong>Terran</strong></td><td style="text-align:left"><strong><code>threat &gt; 0</code> (<code>n=59</code>)</strong></td><td style="text-align:center"><strong><code>72.9%</code></strong></td><td style="text-align:center"><strong><code>86.4%</code></strong></td><td style="text-align:center"><strong><code>54.2%</code></strong></td><td style="text-align:center">—</td><td style="text-align:center">—</td></tr><tr><td style="text-align:left"><strong>Protoss</strong></td><td style="text-align:left">Peaceful (<code>n=1438</code>)</td><td style="text-align:center"><code>74.3%</code></td><td style="text-align:center"><code>56.7%</code></td><td style="text-align:center"><code>2.4%</code></td><td style="text-align:center"><code>29.2%</code> (<code>n=305</code>)</td><td style="text-align:center"><strong><code>69.2%</code></strong> (<code>n=107</code>)</td></tr><tr><td style="text-align:left"><strong>Protoss</strong></td><td style="text-align:left"><strong><code>threat &gt; 0</code> (<code>n=65</code>)</strong></td><td style="text-align:center"><strong><code>75.4%</code></strong></td><td style="text-align:center"><strong><code>89.2%</code></strong></td><td style="text-align:center"><strong><code>83.1%</code></strong></td><td style="text-align:center">—</td><td style="text-align:center">—</td></tr><tr><td style="text-align:left"><strong>Zerg</strong></td><td style="text-align:left">Peaceful (<code>n=1336</code>)</td><td style="text-align:center"><code>66.4%</code></td><td style="text-align:center"><code>47.1%</code></td><td style="text-align:center"><code>0.1%</code></td><td style="text-align:center"><code>42.7%</code> (<code>n=379</code>)</td><td style="text-align:center"><code>35.8%</code> (<code>n=179</code>)</td></tr><tr><td style="text-align:left"><strong>Zerg</strong></td><td style="text-align:left"><strong><code>threat &gt; 0</code> (<code>n=68</code>)</strong></td><td style="text-align:center"><strong><code>77.9%</code></strong></td><td style="text-align:center"><strong><code>83.8%</code></strong></td><td style="text-align:center"><strong><code>60.3%</code></strong></td><td style="text-align:center">—</td><td style="text-align:center">—</td></tr></tbody></table></div>
+<ul><li><strong>Zerg T2/T3 Tech Divergence</strong>: On <code>158</code> pro Zerg checkpoints where the pro player started T2/T3 tech or units (<code>lair</code>, <code>hive</code>, <code>hydralisk-den</code>, <code>lurker-den</code>, <code>spire</code>, <code>hydralisk</code>, <code>lurker</code>, <code>mutalisk</code>, <code>corruptor</code>, <code>viper</code>, <code>brood-lord</code>), Phase 8 <strong>missed or deferred it <code>66.5%</code> of the time</strong>.</li></ul>
+<h3 id="13-code-level-root-causes-of-those-divergences">1.3 Code-Level Root Causes of Those Divergences<a class="anchor" href="#13-code-level-root-causes-of-those-divergences" aria-label="Link to section"></a></h3>
+<ol><li><strong>Hair-Trigger <code>under-base-attack?</code> Collapses Worker Utility to <code>2.8</code></strong>:<ul><li>In <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt#L8717-L8736" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a>, <code>under-base-attack?</code> flips <code>#t</code> whenever <strong>any</strong> enemy combat unit is within <code>28.0</code> tiles of an owned base <em>or</em> <code>live-enemy-threat-supply &gt; max(4, live-army-supply)</code> anywhere on the map.</li><li>In <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/priority-macro-brain.rkt#L4243-L4247" target="_blank" rel="noopener noreferrer">priority-macro-brain.rkt</a>, <code>need-worker-saturation?</code> begins with <code>(and (not under-attack?) ...)</code>. The instant 2 Stalkers or 6 Zerglings are visible, worker utility drops from <code>430.0</code> to <strong><code>2.8</code></strong> (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/priority-macro-brain.rkt#L4708-L4757" target="_blank" rel="noopener noreferrer">priority-macro-brain.rkt</a>) — letting the opponent &quot;kill&quot; 25–30 virtual workers without firing a shot.</li></ul></li><li><strong>Zero Worker Mineral Reservation + Layer-2 <code>&gt;= 18</code> Worker Cutoff</strong>:<ul><li>In <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/priority-macro-brain.rkt#L4754-L4757" target="_blank" rel="noopener noreferrer">priority-macro-brain.rkt</a>, workers set <code>blocking-allowed? = #f</code> once <code>workers &gt;= 8</code>, so every <code>100–150M</code> structure/addon/unit drains the mineral pool before <code>50M</code> workers are scheduled.</li><li>In <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt#L15058-L15062" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a> (<code>terran-scv-priority?</code>), <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt#L13481-L13494" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a> (<code>protoss-probe-priority?</code>), and <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt#L11965-L11973" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a> (<code>zerg-drone-priority?</code>), once <code>total-workers &gt;= 18</code>, Layer 2 forces workers behind cumulative scheduled combat/tech reserves <strong>and</strong> <code>l2-worker-army-curve-satisfied?</code> (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt#L4820-L4848" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a>) — directly causing the exact <strong><code>18</code>-SCV plateau</strong> seen in 5 of 10 post-deploy Terran games (<code>#5130626</code>, <code>#5131128</code>, <code>#5131270</code>, <code>#5131272</code>, <code>#5131274</code>).</li></ul></li><li><strong>Unbranched Build Orders &amp; Broken Step Ordering</strong>:<ul><li><a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/build-orders.rkt#L81-L123" target="_blank" rel="noopener noreferrer">build-orders.rkt</a> maps each matchup to <strong>one static linear list</strong> with zero branching on scouted pool/hatch/gas timings:<ul><li><a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/build-orders/pvz-1-gate-fe-stargate-oracle-archon.rkt#L27-L28" target="_blank" rel="noopener noreferrer">pvz-1-gate-fe-stargate-oracle-archon.rkt</a> unconditionally puts <code>19-Nexus</code> before <code>cybernetics-core</code> even against a <code>12-pool</code>, and mixes incompatible <code>stargate</code>, <code>templar-archive</code>, and <code>robotics-bay</code> unit benchmarks.</li><li><a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/build-orders/tvz-reaper-fe-1-1-1-hellion-banshee.rkt#L30-L40" target="_blank" rel="noopener noreferrer">tvz-reaper-fe-1-1-1-hellion-banshee.rkt</a> puts <code>barracks-techlab</code> (step 6) ahead of <code>factory</code> (step 7) and <code>barracks-reactor</code> (step 15), causing Terran to open TechLab + Concussive Shells (<code>0</code> Hellions) into <code>3:50</code> Speedling floods.</li><li><a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/build-orders/tvp-reaper-fe-3-rax-stim-medivac.rkt#L33" target="_blank" rel="noopener noreferrer">tvp-reaper-fe-3-rax-stim-medivac.rkt</a> takes a <strong>2nd Refinery at <code>0:53</code> (<code>22</code> supply)</strong> before natural saturation, starving SCV/Barracks minerals while floating <code>370–400G</code>.</li><li><a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/build-orders/zvt-16-hatch-macro-roach-ravager.rkt#L40-L47" target="_blank" rel="noopener noreferrer">zvt-16-hatch-macro-roach-ravager.rkt</a> and <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/build-orders/zvp-16-hatch-3-base-roach-hydra.rkt#L40-L47" target="_blank" rel="noopener noreferrer">zvp-16-hatch-3-base-roach-hydra.rkt</a> terminate their build-order steps at <code>68</code> supply (<code>grooved-spines</code>) with no <code>lurker-den</code>, <code>infestation-pit</code>, <code>hive</code>, <code>spire</code>, or <code>greater-spire</code> steps.</li></ul></li></ul></li></ol>
+<hr />
+<h2 id="2-empirical-findings-across-282-lotv-pro-replays-564-perspectives">2. Empirical Findings Across 282 LotV Pro Replays (<code>564</code> Perspectives)<a class="anchor" href="#2-empirical-findings-across-282-lotv-pro-replays-564-perspectives" aria-label="Link to section"></a></h2>
+<h3 id="21-when-amp-why-pros-actually-cut-workers-17342-undersaturated-14s-windows">2.1 When &amp; Why Pros Actually Cut Workers (<code>17,342</code> Undersaturated 14s Windows)<a class="anchor" href="#21-when-amp-why-pros-actually-cut-workers-17342-undersaturated-14s-windows" aria-label="Link to section"></a></h3>
+<p>Across all <code>14.3s</code> windows after <code>0:30</code> where <code>workers &lt; min(66, 21 * bases)</code>, <code>minerals &gt;= 50</code>, and <code>supply_left &gt;= 2</code>:</p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Race</th><th style="text-align:center">Total Windows</th><th style="text-align:center">Continuous Worker Production</th><th style="text-align:center">Cut Windows</th><th style="text-align:center"><strong>Planned Timing / All-In</strong></th><th style="text-align:center"><strong>Zerg Army Larva Wave</strong></th><th style="text-align:center"><strong>Active In-Base Crisis</strong> (<code>&lt;= 24</code> tiles)</th><th style="text-align:center"><strong>Prod/Tech Convergence</strong></th><th style="text-align:center"><strong>Brief Expand Save</strong> (<code>&lt; 16s</code>)</th></tr></thead><tbody><tr><td style="text-align:left"><strong>Terran</strong></td><td style="text-align:center"><code>3,650</code></td><td style="text-align:center"><strong><code>62.6%</code></strong></td><td style="text-align:center"><code>37.4%</code></td><td style="text-align:center"><strong><code>53.6%</code></strong> of cuts (<code>20.0%</code> all)</td><td style="text-align:center">—</td><td style="text-align:center"><strong><code>21.4%</code></strong> of cuts (<strong><code>8.0%</code> all</strong>)</td><td style="text-align:center"><code>15.8%</code> of cuts</td><td style="text-align:center"><code>5.3%</code> of cuts</td></tr><tr><td style="text-align:left"><strong>Protoss</strong></td><td style="text-align:center"><code>6,152</code></td><td style="text-align:center"><strong><code>60.4%</code></strong></td><td style="text-align:center"><code>39.6%</code></td><td style="text-align:center"><strong><code>43.8%</code></strong> of cuts (<code>17.4%</code> all)</td><td style="text-align:center">—</td><td style="text-align:center"><strong><code>28.0%</code></strong> of cuts (<strong><code>11.1%</code> all</strong>)</td><td style="text-align:center"><code>14.3%</code> of cuts</td><td style="text-align:center"><code>2.4%</code> of cuts</td></tr><tr><td style="text-align:left"><strong>Zerg</strong></td><td style="text-align:center"><code>7,540</code></td><td style="text-align:center"><code>46.7%</code></td><td style="text-align:center"><code>53.3%</code></td><td style="text-align:center"><code>26.8%</code> of cuts (<code>14.3%</code> all)</td><td style="text-align:center"><strong><code>29.4%</code></strong> of cuts (<code>15.7%</code> all)</td><td style="text-align:center"><code>25.5%</code> of cuts (<code>13.6%</code> all)</td><td style="text-align:center">—</td><td style="text-align:center"><code>1.4%</code> of cuts</td></tr></tbody></table></div>
+<ul><li><strong>Crucial Finding #1 (Defense Rarely Cuts Workers for T/P)</strong>: Pro Terrans and Protoss cut workers for defense in <strong>only <code>8.0%</code> and <code>11.1%</code> of undersaturated windows</strong> — specifically when enemy units are <strong>actively killing units/workers inside <code>24</code> tiles of an owned base</strong>, <em>never</em> merely because enemy units exist on the map. Over half of all T/P worker cuts are <strong>planned 1-base/2-base timing or all-in attacks</strong>.</li><li><strong>Crucial Finding #2 (Zerg Bimodal Wave Purity)</strong>: Across <code>4,654</code> Zerg 15s windows producing <code>&gt;= 3</code> units while undersaturated:<ul><li><strong><code>52.4%</code> are Pure Army Waves</strong> (<code>&lt;= 20%</code> Drones),</li><li><strong><code>26.4%</code> are Pure Drone Waves</strong> (<code>&gt;= 80%</code> Drones),</li><li><strong>Only <code>21.2%</code> mix Drones and Army</strong> (<code>78.8%</code> bimodal wave purity). Zerg holds pure Drone waves by default and flips <code>100%</code> of larvae into just-in-time army waves only when an attack moves out or a timing window arrives.</li></ul></li><li><strong>Crucial Finding #3 (Post-Harass Recovery)</strong>: Across <code>562</code> events where a pro lost <code>&gt;= 5</code> workers within <code>30s</code>, during the first <code>45s</code> <code>80%</code> of units produced clear/stabilize the active harasser inside the base, and <strong>the instant the mineral line is safe</strong>, worker production resumes continuously until returning to the target worker trajectory.</li></ul>
+<h3 id="22-relative-worker-targets-amp-matchup-asymmetry-winner-loser-workerdiff">2.2 Relative Worker Targets &amp; Matchup Asymmetry (<code>Winner - Loser WorkerDiff</code>)<a class="anchor" href="#22-relative-worker-targets-amp-matchup-asymmetry-winner-loser-workerdiff" aria-label="Link to section"></a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Matchup</th><th style="text-align:center">Macro <code>3B+</code> Median Workers (<code>3m -&gt; 5m -&gt; 7m</code>)</th><th style="text-align:center"><code>2-Base Timing</code> Median Workers (<code>3m -&gt; 5m -&gt; 7m</code>)</th><th style="text-align:center"><code>1-Base All-In</code> Median Workers (<code>3m -&gt; 5m</code>)</th><th style="text-align:center"><strong>Winner minus Loser Workers (<code>4m / 6m / 8m</code>)</strong></th><th style="text-align:left">Why Asymmetry Exists</th></tr></thead><tbody><tr><td style="text-align:left"><strong><code>ZvT</code></strong></td><td style="text-align:center"><code>25 -&gt; 46 -&gt; 64</code></td><td style="text-align:center"><code>24 -&gt; 31 -&gt; 41</code></td><td style="text-align:center"><code>19 -&gt; 20</code></td><td style="text-align:center"><strong><code>+7.0 / +10.0 / +11.0</code></strong></td><td style="text-align:left">Zerg has no MULEs and consumes Drones for structures; Zerg <strong>must</strong> lead by <code>+8..+12</code> workers to stay even.</td></tr><tr><td style="text-align:left"><strong><code>ZvP</code></strong></td><td style="text-align:center"><code>26 -&gt; 47 -&gt; 62</code></td><td style="text-align:center"><code>19 -&gt; 33 -&gt; 33</code></td><td style="text-align:center"><code>20 -&gt; 20</code></td><td style="text-align:center"><code>-1.0 / +3.0 / +5.0</code></td><td style="text-align:left">Zerg races to <code>62–66</code> Drones on 3–4 bases ahead of Chrono-boosted Protoss.</td></tr><tr><td style="text-align:left"><strong><code>ZvZ</code></strong></td><td style="text-align:center"><code>26 -&gt; 41 -&gt; 51</code></td><td style="text-align:center"><code>19 -&gt; 31 -&gt; 42</code></td><td style="text-align:center"><code>13 -&gt; 25</code></td><td style="text-align:center"><code>+1.0 / +1.0 / +1.0</code></td><td style="text-align:left">Symmetric mirror; razor-thin <code>+1</code> Drone edge without dying to Ling/Bane waves.</td></tr><tr><td style="text-align:left"><strong><code>TvZ</code></strong></td><td style="text-align:center"><code>24 -&gt; 38 -&gt; 57</code></td><td style="text-align:center"><code>23 -&gt; 29 -&gt; 39</code></td><td style="text-align:center"><code>20 -&gt; 20</code></td><td style="text-align:center"><code>-6.0 / -5.0 / -6.0</code></td><td style="text-align:left"><code>2–3</code> Orbitals (<code>+8..+11</code> MULE-equivalent workers) equalize <code>-6</code> raw worker count at <code>38 -&gt; 57</code> SCVs.</td></tr><tr><td style="text-align:left"><strong><code>TvP</code></strong></td><td style="text-align:center"><code>23 -&gt; 33 -&gt; 46</code></td><td style="text-align:center"><strong><code>24 -&gt; 36 -&gt; 46</code></strong> (<code>52%</code> of games!)</td><td style="text-align:center"><code>21 -&gt; 25</code></td><td style="text-align:center"><code>-6.0 / -5.0 / -8.0</code></td><td style="text-align:left">Most pro <code>TvP</code>s hit a crisp <code>36–46</code> SCV <code>2</code>-base Stim/Medivac/Tank timing before <code>3</code>rd CC + MULEs.</td></tr><tr><td style="text-align:left"><strong><code>TvT</code></strong></td><td style="text-align:center"><code>23 -&gt; 32 -&gt; 46</code></td><td style="text-align:center"><code>23 -&gt; 34 -&gt; 46</code></td><td style="text-align:center">—</td><td style="text-align:center"><strong><code>0.0 / +5.0 / +14.0</code></strong></td><td style="text-align:left">Pure mirror: falling behind on SCVs/Orbitals snowballs directly into losses.</td></tr><tr><td style="text-align:left"><strong><code>PvZ</code></strong></td><td style="text-align:center"><code>28 -&gt; 45 -&gt; 60</code></td><td style="text-align:center"><code>26 -&gt; 39 -&gt; 48</code></td><td style="text-align:center"><code>24 -&gt; 28</code></td><td style="text-align:center"><code>+1.0 / -3.0 / 0.0</code></td><td style="text-align:left">Protoss stays within <code>0..-3</code> workers of Zerg via Chrono Boost (<code>45w</code> at <code>5m</code>, <code>60w</code> at <code>7m</code>).</td></tr><tr><td style="text-align:left"><strong><code>PvT</code></strong></td><td style="text-align:center"><code>26 -&gt; 44 -&gt; 55</code></td><td style="text-align:center"><code>24 -&gt; 36 -&gt; 42</code></td><td style="text-align:center"><code>23 -&gt; 31</code></td><td style="text-align:center"><strong><code>+7.0 / +9.0 / +9.0</code></strong></td><td style="text-align:left">Protoss <strong>must</strong> lead Terran by <code>+7..+9</code> raw Probes (<code>44w</code> at <code>5m</code>) to offset Terran MULEs.</td></tr><tr><td style="text-align:left"><strong><code>PvP</code></strong></td><td style="text-align:center"><code>25 -&gt; 36 -&gt; 46</code></td><td style="text-align:center"><code>24 -&gt; 35 -&gt; 40</code></td><td style="text-align:center"><code>24 -&gt; 28</code></td><td style="text-align:center"><code>-1.0 / -1.0 / +2.0</code></td><td style="text-align:left">Mirror: heavy <code>1</code>-base/<code>2</code>-base aggression early, <code>+2..+3</code> worker lead decides <code>8m+</code> macro.</td></tr></tbody></table></div>
+<h3 id="23-scouted-zerg-opening-taxonomy-amp-pro-reactive-pivots-pvz-amp-tvz">2.3 Scouted Zerg Opening Taxonomy &amp; Pro Reactive Pivots (<code>PvZ</code> &amp; <code>TvZ</code>)<a class="anchor" href="#23-scouted-zerg-opening-taxonomy-amp-pro-reactive-pivots-pvz-amp-tvz" aria-label="Link to section"></a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Scouted Zerg Opening</th><th style="text-align:center"><code>PvZ</code>: <code>% Core-Before-Nexus</code></th><th style="text-align:center"><code>PvZ</code>: Median <code>Nexus2</code> / <code>Cyber</code></th><th style="text-align:center"><code>TvZ</code>: <code>% 1st Addon = Reactor</code></th><th style="text-align:center"><code>TvZ</code>: Median <code>CC2</code> &amp; Mean Hellions <code>&lt; 4:15</code></th></tr></thead><tbody><tr><td style="text-align:left"><strong><code>12-Pool</code> (<code>pool &lt; 36s</code>)</strong></td><td style="text-align:center"><strong><code>28.6%</code></strong> (full wall + Zealot)</td><td style="text-align:center"><code>86.2s</code> / <code>96.9s</code></td><td style="text-align:center"><strong><code>60.0%</code></strong></td><td style="text-align:center"><strong><code>144.0s</code> (high-ground CC!)</strong> / <code>1.6</code> Hellions</td></tr><tr><td style="text-align:left"><strong><code>Pool-First</code> (<code>36–62s</code>, <code>&lt; Hatch2</code>)</strong></td><td style="text-align:center"><strong><code>33.3%</code></strong></td><td style="text-align:center"><strong><code>92.4s</code></strong> / <code>100.3s</code></td><td style="text-align:center"><strong><code>92.3%</code></strong></td><td style="text-align:center"><code>103.8s</code> / <strong><code>2.8</code> Hellions</strong></td></tr><tr><td style="text-align:left"><strong><code>Hatch-First + Gas/Speed</code></strong></td><td style="text-align:center"><code>7.1%</code> (<code>92.9%</code> Nexus-first)</td><td style="text-align:center"><code>87.7s</code> / <code>96.9s</code></td><td style="text-align:center"><strong><code>70.0%</code></strong> (<code>30%</code> early Bunker)</td><td style="text-align:center"><code>98.8s</code> / <code>1.9</code> Hellions</td></tr><tr><td style="text-align:left"><strong><code>Hatch-First Gasless / Fast 3H</code></strong></td><td style="text-align:center"><code>7.5%</code> (<code>92.5%</code> Nexus-first)</td><td style="text-align:center"><code>86.2s</code> / <code>96.2s</code></td><td style="text-align:center"><strong><code>100.0%</code></strong></td><td style="text-align:center"><code>100.6s</code> / <strong><code>3.1</code> Hellions</strong></td></tr></tbody></table></div>
+<h3 id="24-the-universal-pro-geyser-law-gas-as-a-mineral-saturation-tax">2.4 The Universal Pro Geyser Law (<code>Gas</code> as a Mineral-Saturation Tax)<a class="anchor" href="#24-the-universal-pro-geyser-law-gas-as-a-mineral-saturation-tax" aria-label="Link to section"></a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Matchup Group</th><th style="text-align:center"><strong>Gas #1</strong> (Med Workers / Time)</th><th style="text-align:center"><strong>Gas #2</strong> (Med Workers / Bases / Time)</th><th style="text-align:center"><strong>Gas #3</strong> (Med Workers / Bases / Time)</th><th style="text-align:center"><strong>Gas #4</strong> (Med Workers / Bases / Time)</th><th style="text-align:center">Median Gas Float (<code>3m / 5m</code>)</th></tr></thead><tbody><tr><td style="text-align:left"><strong><code>ZvT</code> / <code>ZvP</code> / <code>ZvZ</code></strong></td><td style="text-align:center"><code>16–17w</code> (<code>45–65s</code>)</td><td style="text-align:center"><strong><code>29–33w</code> on <code>3</code> bases (<code>215–241s</code>)</strong></td><td style="text-align:center"><strong><code>38–42w</code> on <code>3</code> bases (<code>270–290s</code>)</strong></td><td style="text-align:center"><strong><code>45–51w</code> on <code>3</code> bases (<code>316–327s</code>)</strong></td><td style="text-align:center"><strong><code>52G / 133G</code></strong></td></tr><tr><td style="text-align:left"><strong><code>TvZ</code> / <code>TvP</code></strong></td><td style="text-align:center"><code>15w</code> (<code>43–44s</code>)</td><td style="text-align:center">**<code>20w</code> on <code>2</code> bases (<code>130–135s</code>, <em>after</em> CC2)**</td><td style="text-align:center"><strong><code>34–39w</code> on <code>2–3</code> bases (<code>286–304s</code>)</strong></td><td style="text-align:center"><strong><code>40–41w</code> on <code>2–3</code> bases (<code>335–348s</code>)</strong></td><td style="text-align:center"><strong><code>92G / 156G</code></strong></td></tr><tr><td style="text-align:left"><strong><code>PvZ</code> / <code>PvT</code></strong></td><td style="text-align:center"><code>16w</code> (<code>47–49s</code>)</td><td style="text-align:center">**<code>20w</code> on <code>2</code> bases (<code>107–110s</code>, <em>after</em> Nex2)**</td><td style="text-align:center"><strong><code>36–38w</code> on <code>2</code> bases (<code>244–263s</code>)</strong></td><td style="text-align:center"><strong><code>38–41w</code> on <code>2–3</code> bases (<code>249–331s</code>)</strong></td><td style="text-align:center"><strong><code>122G / 231G</code></strong></td></tr><tr><td style="text-align:left"><strong><code>PvP</code> (1-Base Tech)</strong></td><td style="text-align:center"><code>16w</code> (<code>50s</code>)</td><td style="text-align:center"><code>17w</code> on <code>1</code> base (<code>74s</code>)</td><td style="text-align:center"><strong><code>36w</code> on <code>2</code> bases (<code>336s</code>)</strong></td><td style="text-align:center"><strong><code>37w</code> on <code>2</code> bases (<code>352s</code>)</strong></td><td style="text-align:center"><code>122G / 231G</code></td></tr></tbody></table></div>
+<div class="callout callout-tip"><div class="callout-label">Highlight</div><div class="callout-body"><p><strong>Universal Pro Geyser Invariant</strong>: Beyond the <code>1–2</code> opening gases required to unlock Tier 1.5 tech, <strong>pros never start Gas #3/#4 until <code>2</code> full mineral lines (<code>32</code> mineral harvesters -&gt; <code>35–39</code> total workers) are saturated, and Zerg never starts Gas #2 until <code>~30–33</code> Drones + <code>3</code>rd Hatchery</strong>. That single rule keeps <code>5:00</code> gas float at <code>133–231G</code> instead of <code>400–686G</code>.</p></div></div>
+<hr />
+<h2 id="3-proposed-architecture-trajectory-first-macro-prioritization-engine">3. Proposed Architecture: Trajectory-First Macro Prioritization Engine<a class="anchor" href="#3-proposed-architecture-trajectory-first-macro-prioritization-engine" aria-label="Link to section"></a></h2>
+<p>To keep the engine clean, declarative, and completely free of tangled conditionals, we separate <strong>Strategy &amp; Trajectory</strong> -&gt; <strong>Regime Selection</strong> -&gt; <strong>Constrained Marginal-Value Allocation</strong> -&gt; <strong>Stateless Spatial Execution</strong>:</p>
+<div class="mermaid-wrap"><pre class="mermaid">flowchart TD
+    S[&quot;1. Scout &amp; Opponent State (Pool/Hatch/Gas Timings, Effective Worker/Tech/Upgrade Diff)&quot;] --&gt; T[&quot;2. Branching Build-Order Tree (Selects Active Branch &amp; Trajectory Targets W*, B*, G*, M*)&quot;]
+    T --&gt; R[&quot;3. Explicit 4-State Macro Regime Automaton&quot;]
+    S --&gt; R
+    R --&gt;|&quot;HAPPY_PATH_MACRO (Default)&quot;| A[&quot;4. Resource-Constrained Marginal-Value Allocator (Minerals, Gas, Supply, Facility Slots / Larva)&quot;]
+    R --&gt;|&quot;SURVIVAL_DEFENSE (Arrival Deficit &gt; 0)&quot;| A
+    R --&gt;|&quot;ECO_DISRUPTION_INVESTMENT (Capped Harass Unit)&quot;| A
+    R --&gt;|&quot;TIMING_OR_ALLIN_WINDOW (Planned Cut w/ Abort)&quot;| A
+    A --&gt;|&quot;Exact Feasible AllocationPlan&quot;| L2[&quot;5. Stateless Layer-2 Executor (Placement + Order-Ledger Only, 0 Policy Vetoes)&quot;]</pre></div>
+<h3 id="31-component-1-branching-pro-build-order-graphs-libbuild-orders">3.1 Component 1: Branching Pro Build-Order Graphs (<code>lib/build-orders/</code>)<a class="anchor" href="#31-component-1-branching-pro-build-order-graphs-libbuild-orders" aria-label="Link to section"></a></h3>
+<p>Replace each single static list with a small <strong>declarative Build-Order Graph</strong> (<code>2–4</code> branches per matchup) keyed on <strong>observable scouting predicates</strong>:</p>
+<ul><li><strong>Scouted Opponent Predicates</strong> (computed once per step in <code>mirror-mind</code> / <code>econ-ledger</code>):<ul><li><code>enemy-pool-started-est-sec</code> (inferred from building progress if scouted building, <code>12-pool</code> if ready <code>&lt; 75s</code> or Lings at our base <code>&lt; 125s</code>, <code>pool-first</code> if <code>&lt; 95s</code>),</li><li><code>enemy-natural-started-est-sec</code> (<code>#f</code> if scouted natural pad empty after <code>65s</code> vs Zerg or <code>105s</code> vs P/T),</li><li><code>enemy-gas-count-and-mined</code> (<code>gasless</code> vs <code>1-gas speed</code> vs <code>2-gas roach/ravager/stargate/factory all-in</code>).</li></ul></li><li><strong>Example <code>PvZ</code> Graph</strong>:<ul><li><strong>Root (<code>0:00–1:15</code>)</strong>: <code>14 Pylon</code> -&gt; <code>16 Gate</code> (Gate-scout!) -&gt; <code>17 Gas</code>.</li><li><strong>Branch A (<code>enemy_pool_est &lt; 48s</code> or <code>no_zerg_nat_by_68s</code>) -&gt; <code>Anti-Early-Pool Core-First</code></strong>: <code>18 CyberCore</code> -&gt; <code>19 Zealot (Chrono)</code> -&gt; <code>20 Pylon (complete wall)</code> -&gt; <code>ShieldBattery</code> + <code>Adept/Stalker</code> -&gt; <strong><code>Nexus</code> once natural choke is walled &amp; held</strong> -&gt; converge back to <code>3-Base Macro</code>.</li><li><strong>Branch B (Standard Hatch-First)</strong> -&gt; <code>20 Nexus</code> -&gt; <code>20 CyberCore</code> -&gt; <code>21 2nd Gas</code> -&gt; <code>22 Pylon</code> -&gt; coherent <code>Stargate Oracle -&gt; Twilight/Robo Charge-Immortal-Archon</code> <em>or</em> <code>Blink-Robo-Colossus</code> (never mixing incompatible T3 benchmarks in one branch!).</li></ul></li><li><strong>Example <code>TvZ</code> Graph</strong>:<ul><li>Fix step ordering: <code>14 Depot</code> -&gt; <code>16 Rax</code> -&gt; <code>16 Gas</code> -&gt; <code>19 Reaper + Orbital</code> -&gt; (<code>High-Ground CC</code> if <code>12-pool</code>, else <code>Low-Ground CC @ 20</code>) -&gt; <strong><code>BarracksReactor</code> + <code>Factory</code></strong> -&gt; swap <code>Factory</code> onto <code>Reactor</code> for <strong><code>4–6</code> Hellions</strong> (shutting down <code>3:50</code> Speedling floods!) -&gt; <code>Starport</code> -&gt; <code>3rd CC</code> -&gt; <code>2x Rax + Stim + Combat Shield + EBay</code>.</li></ul></li></ul>
+<h3 id="32-component-2-explicit-4-state-macro-regime-automaton">3.2 Component 2: Explicit 4-State Macro Regime Automaton<a class="anchor" href="#32-component-2-explicit-4-state-macro-regime-automaton" aria-label="Link to section"></a></h3>
+<p>Instead of <code>under-base-attack?</code> shutting off workers at <code>28</code> tiles, compute <strong>one explicit regime</strong> per step:</p>
+<ol><li><strong><code>HAPPY_PATH_MACRO</code> (Default)</strong>:<ul><li>Active whenever <code>SurvivalDeficit &lt;= 0</code> and the build branch is not inside an explicit <code>TimingCut</code> / <code>AllInCut</code> window.</li><li><strong>TownHall Worker Lease (T/P)</strong>: Reserve $50 \times \text{OpenTownHalls}$ minerals <strong>ahead of</strong> non-emergency structures and extra units whenever $W &lt; W^*(t)$.</li><li><strong>Zerg Drone-Wave Default</strong>: Allocate <code>100%</code> of larvae to <code>Drone</code>s whenever $W &lt; W^*(t)$ and $A_{\text{ours}} \ge A_{\text{safety}}(\hat{A}_{\text{opp}})$.</li></ul></li><li><strong><code>SURVIVAL_DEFENSE</code> (Opponent Not Macroing / Imminent Lethal Push)</strong>:<ul><li>Triggered <strong>only</strong> when: $$\Delta_{\text{survive}} = \hat{A}_{\text{advancing}}(\tau_{\text{arrive}}) - \big(A_{\text{ours}} + D_{\text{wall/static}} + P_{\text{open}}(\tau_{\text{arrive}})\big) &gt; 0$$ where $\hat{A}_{\text{advancing}}$ requires <strong>actual enemy combat force within <code>20</code> tiles of an owned base OR confirmed opponent worker/base deficit (<code>1-base/2-base all-in</code>)</strong>.</li><li><strong>Crucial T/P Rule</strong>: Even during <code>SURVIVAL_DEFENSE</code>, <strong>only</strong> pause a <code>50M</code> SCV/Probe if <code>Minerals - 50 &lt; OpenCombatFacilityMineralNeed</code> (i.e. making the worker would literally leave an open Barracks/Gateway/Robo idle this step!).</li><li><strong>Crucial Zerg Rule</strong>: Flip <code>100%</code> of larvae to <strong>Pure Army Wave</strong> (<code>zergling</code>/<code>baneling</code>/<code>roach</code>/<code>hydralisk</code>) until $\Delta_{\text{survive}} \le 0$, then snap straight back to <strong>Pure Drone Wave</strong>.</li></ul></li><li><strong><code>ECO_DISRUPTION_INVESTMENT</code> (Bounded Harass Tool)</strong>:<ul><li>Grants temporary priority to a <strong>strictly count-capped</strong> harass unit from the active branch (<code>1 Reaper</code>, <code>4 Hellions</code>, <code>1–2 Oracles</code>, <code>2 Adepts</code>, <code>1 Mine-Medivac drop</code>) without suppressing worker leases.</li></ul></li><li><strong><code>TIMING_OR_ALLIN_WINDOW</code> (Planned Worker Cut + Auto-Transition)</strong>:<ul><li>Holds $W$ at the branch&#x27;s timing cap ($W^<em>_{\text{cut}}$, e.g. <code>41</code> or <code>46</code> in <code>2-base TvP</code>, <code>32</code> in <code>2-base Roach/Ravager</code>) to surge production slots for the push, with an explicit <strong>Hold/Abort Condition</strong>: if the push fails to kill a base/workers within $\Delta t_{\text{window}}$ or trades into defender advantage, abort to <code>HAPPY_PATH_MACRO</code> ($W^</em> \to 66$, start next TownHall).</li></ul></li></ol>
+<h3 id="33-component-3-unified-economic-allocator-expansion-gas-tax-amp-tech-parity">3.3 Component 3: Unified Economic Allocator (Expansion, Gas Tax &amp; Tech Parity)<a class="anchor" href="#33-component-3-unified-economic-allocator-expansion-gas-tax-amp-tech-parity" aria-label="Link to section"></a></h3>
+<p>Every non-emergency decision follows four clean, composable economic laws rather than hardcoded booleans:</p>
+<ol><li><strong>Mineral-Driven Base Expansion (<code>B*</code>)</strong>:<ul><li>Start next TownHall when <code>mineral_harvesters &gt;= 14 * active_bases</code> (pre-building ~25s before full <code>16/base</code> mineral saturation so workers transfer seamlessly on completion), <code>pending_townhalls == 0</code>, and regime $\neq \text{ALLIN\_WINDOW}$.</li></ul></li><li><strong>Demand-Driven Geyser Controller (<code>G*</code>) &amp; Dynamic Gas Pull</strong>:<ul><li>Define <code>NetGas30s = GasBank + 30s * GasIncomeRate - 30s * PlannedDAGAndUnitGasDemand</code>.</li><li><strong>Build next Geyser</strong> iff:<ol><li>Opening step explicitly calls for Gas <code>#1</code>/<code>#2</code>, <strong>OR</strong></li><li><code>mineral_harvesters &gt;= 15 * min(2, active_bases)</code> (<code>&gt;= 30</code> mineral workers before Gas <code>#3/#4</code>, <code>&gt;= 26</code> mineral workers + <code>3</code> bases before Zerg Gas <code>#2</code>) <strong>AND</strong> <code>NetGas30s &lt; 50G</code> <strong>AND</strong> <code>GasBank &lt; 250G</code>.</li></ol></li><li><strong>Gas-to-Mineral Worker Rebalance</strong>: Whenever <code>GasBank &gt; 300G</code> and <code>Minerals &lt; 150M</code> while $W &lt; W^*$, pull <code>3</code> harvesters off gas onto minerals until <code>GasBank &lt; 175G</code>.</li></ul></li><li><strong>Monotonic Tech &amp; Upgrade Parity Escalator (Fixing Zerg T1 Lock &amp; Premature T3)</strong>:<ul><li>Score next unlocked DAG tech/upgrade node (<code>Lair -&gt; HydraDen/BaneNest -&gt; LurkerDen/Hive/Spire</code>, <code>Twilight/Robo -&gt; RoboBay/TemplarArchive</code>, <code>Factory -&gt; Starport -&gt; EBay/Armory</code>) as a smooth function of:<ul><li><strong>Economic Readiness</strong>: $\max(0, W - W_{\text{tier\_min}})$ (<code>Lair</code> at <code>W &gt;= 32</code>, <code>Hive</code>/<code>RoboBay</code>/<code>GhostAcademy</code> at <code>W &gt;= 44–50</code>),</li><li><strong>Parity Pressure</strong>: boosts utility when opponent tech/upgrade tier leads ours ($\hat{\text{Tier}}_{\text{opp}} &gt; \text{Tier}_{\text{ours}}$ or $\hat{\text{Upg}}_{\text{opp}} &gt; \text{Upg}_{\text{ours}}$),</li><li><strong>Gas Sink Relief</strong>: scales upward smoothly whenever <code>GasBank &gt;= 200G</code>.</li></ul></li></ul></li><li><strong>Stateless Layer-2 Execution (<code>Single Source of Policy Truth</code>)</strong>:<ul><li>Strip policy vetoes out of <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a> (<code>terran-scv-priority?</code>, <code>protoss-probe-priority?</code>, <code>zerg-drone-priority?</code>, <code>l2-worker-army-curve-satisfied?</code>, <code>(&gt;= total-workers 18)</code> worker reserve block): Phase 8 emits an exact feasible <code>AllocationPlan</code> per facility slot, and Layer 2 executes placement + <code>order-ledger</code> 1-for-1.</li></ul></li></ol>
+<hr />
+<h2 id="4-recommended-implementation-sequence-amp-decisions-needed">4. Recommended Implementation Sequence &amp; Decisions Needed<a class="anchor" href="#4-recommended-implementation-sequence-amp-decisions-needed" aria-label="Link to section"></a></h2>
+<h3 id="phased-rollout-plan">Phased Rollout Plan<a class="anchor" href="#phased-rollout-plan" aria-label="Link to section"></a></h3>
+<ol><li><strong>Phase A — Pro-Replay Divergence Benchmark (<code>tools/benchmark-pro-divergence.rkt</code>)</strong>:<ul><li>Promote our dual-perspective study (<code>282</code> LotV replays / <code>6,478</code> checkpoints / <code>1,368</code> spatial snapshots) into a permanent regression &amp; tuning benchmark tracking Worker Recall, Intentional-Cut Precision, Premature-Gas Rate, Reactive-Opening Match Rate, and T2/T3 Tech Recall.</li></ul></li><li><strong>Phase B — Trajectory-First Allocator &amp; Layer-2 De-Duplication</strong>:<ul><li>Replace the tangled worker/gas/expansion conditionals in <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/priority-macro-brain.rkt" target="_blank" rel="noopener noreferrer">priority-macro-brain.rkt</a> and <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a> with the <strong>4-State Macro Regime Automaton</strong>, <strong>TownHall Worker Leases / Zerg Wave Controller</strong>, <strong>Pro Geyser Controller + Gas Pull</strong>, and <strong>Tech Parity Escalator</strong>.</li></ul></li><li><strong>Phase C — Branching Pro Build-Order Graphs (<code>lib/build-orders/</code>)</strong>:<ul><li>Fix the broken step sequences (<code>TvZ</code> Reactor-Hellion before TechLab, <code>TvP</code> 2nd gas after CC2, coherent <code>PvZ</code> tech tree, full <code>ZvT</code>/<code>ZvP</code>/<code>ZvZ</code> Lair -&gt; Hydra/Lurker/Hive/Spire chains) and add reactive scouting branches (<code>vs 12-pool / pool-first</code>, <code>vs 1-base proxy/all-in</code>, <code>vs fast 3-base greed</code>).</li></ul></li></ol>
+<hr />
+<h2 id="5-end-to-end-implementation-amp-quantitative-post-fix-benchmark-results">5. End-to-End Implementation &amp; Quantitative Post-Fix Benchmark Results<a class="anchor" href="#5-end-to-end-implementation-amp-quantitative-post-fix-benchmark-results" aria-label="Link to section"></a></h2>
+<div class="callout callout-tip"><div class="callout-label">Highlight</div><div class="callout-body"><p>All three phases (<code>Phase A + Phase B + Phase C</code>) are now implemented across <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/build-orders.rkt" target="_blank" rel="noopener noreferrer">build-orders.rkt</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/tree/main/lib/build-orders" target="_blank" rel="noopener noreferrer">lib/build-orders/*.rkt</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/econ-ledger.rkt" target="_blank" rel="noopener noreferrer">econ-ledger.rkt</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/priority-macro-brain.rkt" target="_blank" rel="noopener noreferrer">priority-macro-brain.rkt</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/sc2-protobuf-ws.rkt" target="_blank" rel="noopener noreferrer">sc2-protobuf-ws.rkt</a>, and <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tools/benchmark-pro-divergence.rkt" target="_blank" rel="noopener noreferrer">benchmark-pro-divergence.rkt</a>.</p></div></div>
+<h3 id="what-changed-architecturally">What Changed Architecturally<a class="anchor" href="#what-changed-architecturally" aria-label="Link to section"></a></h3>
+<ol><li><strong>Full <code>4+</code> Base Macro Targets + Reactive &amp; Timing Variants (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/build-orders.rkt" target="_blank" rel="noopener noreferrer">build-orders.rkt</a>)</strong>:<ul><li>Upgraded all 9 matchup specs to full 10-minute <code>4+</code> base macro trajectories (<code>Zerg: 76 Drones</code>, <code>Protoss: 70 Probes</code>, <code>Terran: 66 SCVs + MULEs</code>), fixed <code>TvZ</code> (<code>factory</code> + <code>barracks-reactor</code> + <code>hellion</code> ahead of <code>barracks-techlab</code>) and <code>TvP</code> (<code>refinery #2</code> after <code>CC #2</code>), and added typed reactive/timing specs (<code>PvZ-ANTI-EARLY-POOL-BUILD-ORDER</code>, <code>TvZ-ANTI-EARLY-POOL-BUILD-ORDER</code>, <code>ZvX-ANTI-EARLY-RUSH-BUILD-ORDER</code>, <code>TvP-2BASE-STIM-TIMING-BUILD-ORDER</code>, <code>ZvP-2BASE-ROACH-RAVAGER-TIMING-BUILD-ORDER</code>) via <code>select-reactive-build-order-spec</code>.</li></ul></li><li><strong>Declarative 4-State Macro Regime &amp; Bimodal Zerg Wave Controller (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/priority-macro-brain.rkt" target="_blank" rel="noopener noreferrer">priority-macro-brain.rkt</a>)</strong>:<ul><li>Replaced overlapping worker/army gates with <code>macro-regime</code> (<code>&#x27;happy-path-macro</code> default, <code>&#x27;zerg-army-wave</code>, <code>&#x27;timing-cut</code>, <code>&#x27;survival-defense</code>), ranking undersaturated workers (<code>488.0</code>) ahead of optional <code>150M</code> scaling/tech buildings (<code>442..476</code>) and handing the baton smoothly to <code>3rd/4th/5th</code> base expansions (<code>484.0</code>) at <code>19+</code> workers/base.</li><li>Replaced static Zerg Drone-pause cliffs (<code>38-&gt;12</code>, <code>46-&gt;22</code>, <code>54-&gt;34</code> army supply) with <code>zerg-wave-safety-floor</code> so peaceful Zerg executes pure Drone waves up to <code>76</code> Drones and pure Army waves when threat appears, plus a proactive T2/T3 tech escalator (<code>lair -&gt; hydralisk-den/spire -&gt; lurker-den -&gt; infestation-pit -&gt; hive</code>).</li></ul></li><li><strong>Pro Geyser Law + Wire Hysteresis Gas Pull &amp; Auto-Resaturation (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/sc2-protobuf-ws.rkt" target="_blank" rel="noopener noreferrer">sc2-protobuf-ws.rkt</a>)</strong>:<ul><li>Unified geyser construction on <code>pro-min-workers-for-next-gas-bldg</code> (<code>Zerg: 14/28/38/46/54</code>, <code>Terran: 14/20(17 TvT)/34/40/48</code>, <code>Protoss: 15/20(17 PvP)/34/39/48</code>) + <code>&lt; 250G</code> bank gate.</li><li>Added <code>SC2-GAS-PULL-HYSTERESIS-LATCH</code> (<code>&gt;= 300G &amp; &lt; 160M</code> pull -&gt; <code>[200G..300G]</code> deadband -&gt; <code>&lt; 200G</code> or <code>&gt;= 300M</code> automatic re-saturation) plus Zerg post-Ling-Speed mineral surge (<code>&lt; 28</code> Drones -&gt; <code>1</code> gas harvester, auto-resaturating to <code>3/3</code> at <code>28</code> Drones).</li></ul></li><li><strong>Layer-2 De-Duplication &amp; Bug Eradication (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a>)</strong>:<ul><li>Calibrated <code>under-base-attack?</code> to genuine <code>&lt;= 20.0</code>-tile in-base attacks (eliminating map-wide threat false alarms that froze workers at <code>18</code> SCVs and blocked <code>Lair</code> morphs), reserved <code>50M</code> inside <code>l2-scheduled-combat-reserve</code> for higher-ranked scheduled workers, and counted uprooted <code>spore-crawler-uprooted</code> / <code>spine-crawler-uprooted</code> in <code>ally-units</code> against structure caps.</li></ul></li></ol>
+<h3 id="before-vs-after-pro-replay-divergence-benchmark-pro-divergencerkt">Before vs. After Pro-Replay Divergence (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tools/benchmark-pro-divergence.rkt" target="_blank" rel="noopener noreferrer">benchmark-pro-divergence.rkt</a>)<a class="anchor" href="#before-vs-after-pro-replay-divergence-benchmark-pro-divergencerkt" aria-label="Link to section"></a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Benchmark Metric</th><th style="text-align:center">Pre-Fix Baseline</th><th style="text-align:center">Post-Fix</th><th style="text-align:center">Improvement</th></tr></thead><tbody><tr><td style="text-align:left"><strong>Brain Peaceful Worker Recall (<code>Terran</code>, <code>n=779</code>)</strong></td><td style="text-align:center"><code>40.1%</code> (<code>Rank&lt;=3: 46.5%</code>)</td><td style="text-align:center"><strong><code>68.9%</code></strong> (<code>Rank&lt;=3: 81.4%</code>, <code>Util&lt;50: 0.0%</code>)</td><td style="text-align:center"><strong><code>+28.8 pp</code></strong> (<code>+34.9 pp</code> Top-3)</td></tr><tr><td style="text-align:left"><strong>Brain Peaceful Worker Recall (<code>Protoss</code>, <code>n=1,442</code>)</strong></td><td style="text-align:center"><code>25.6%</code> (<code>Rank&lt;=3: 43.2%</code>)</td><td style="text-align:center"><strong><code>43.4%</code></strong> (<code>Rank&lt;=3: 69.3%</code>, <code>Util&lt;50: 0.1%</code>)</td><td style="text-align:center"><strong><code>+17.8 pp</code></strong> (<code>+26.1 pp</code> Top-3)</td></tr><tr><td style="text-align:left"><strong>Brain Peaceful Worker Recall (<code>Zerg</code>, <code>n=1,366</code>)</strong></td><td style="text-align:center"><code>32.9%</code> (<code>Rank&lt;=3: 51.8%</code>)</td><td style="text-align:center"><strong><code>53.9%</code></strong> (<code>Rank&lt;=3: 86.0%</code>, <code>Util&lt;50: 0.4%</code>)</td><td style="text-align:center"><strong><code>+21.0 pp</code></strong> (<code>+34.2 pp</code> Top-3)</td></tr><tr><td style="text-align:left"><strong>Full Runtime Worker Emission (<code>Protoss</code>, <code>n=494</code>)</strong></td><td style="text-align:center"><code>19.6%</code> (<code>L2 Veto: 41.4%</code>)</td><td style="text-align:center"><strong><code>44.3%</code></strong> (<code>L2 Veto: 22.5%</code>)</td><td style="text-align:center"><strong><code>2.26x</code></strong> emission, <strong><code>-18.9 pp</code></strong> veto</td></tr><tr><td style="text-align:left"><strong>Full Runtime Worker Emission (<code>Terran</code>, <code>n=92</code>)</strong></td><td style="text-align:center"><code>32.6%</code> (<code>L2 Veto: 32.3%</code>)</td><td style="text-align:center"><strong><code>45.7%</code></strong> (<code>L2 Veto: 23.1%</code>)</td><td style="text-align:center"><strong><code>+13.1 pp</code></strong> emission, <strong><code>-9.2 pp</code></strong> veto</td></tr><tr><td style="text-align:left"><strong>Full Runtime Worker Emission (<code>Zerg</code>, <code>n=153</code>)</strong></td><td style="text-align:center"><code>5.2%</code> (<code>L2 Veto: 83.9%</code>)</td><td style="text-align:center"><strong><code>17.0%</code></strong> (<code>50.0%</code> w/ visible enemy)</td><td style="text-align:center"><strong><code>3.27x</code></strong> emission, <strong><code>-22.5 pp</code></strong> veto</td></tr><tr><td style="text-align:left"><strong>Layer-2 Premature Gas <code>&lt; 40w</code> (<code>T / P / Z</code>)</strong></td><td style="text-align:center"><code>3.4% / 7.7% / 8.3%</code></td><td style="text-align:center"><strong><code>2.5% / 4.4% / 2.8%</code></strong></td><td style="text-align:center"><strong><code>-26% to -66%</code></strong> premature gases</td></tr><tr><td style="text-align:left"><strong><code>PvZ</code> vs Scouted <code>12-Pool</code> (<code>Core + Zealot &lt; Nexus</code>)</strong></td><td style="text-align:center"><code>FAIL</code> (<code>0</code> Core, <code>0</code> Zealot)</td><td style="text-align:center"><strong><code>PASS</code></strong> (<code>Core + Zealot</code>)</td><td style="text-align:center">Fixed</td></tr><tr><td style="text-align:left"><strong><code>TvZ</code> Opening (<code>Factory / Reactor &lt; TechLab</code>)</strong></td><td style="text-align:center"><code>FAIL</code> (<code>barracks-techlab</code>)</td><td style="text-align:center"><strong><code>PASS</code></strong> (<code>factory + scv</code>)</td><td style="text-align:center">Fixed</td></tr></tbody></table></div>
+<h3 id="verification-summary">Verification Summary<a class="anchor" href="#verification-summary" aria-label="Link to section"></a></h3>
+<ul><li><strong>Formal State-Machine Verifier (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/state-machine-verifier.rkt" target="_blank" rel="noopener noreferrer">state-machine-verifier.rkt</a>)</strong>: <code>24/24</code> invariants (<code>P1–P5</code>, <code>M1–M5</code>, <code>E1–E5</code>, <code>PV1–PV9</code>, <code>117,220</code> states) PASS (<code>0</code> failed).</li><li><strong>Wire Protobuf &amp; Hysteresis Gas-Pull Suite (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tests/sc2-protobuf-ws-test.rkt" target="_blank" rel="noopener noreferrer">sc2-protobuf-ws-test.rkt</a>)</strong>: <code>334/334</code> checks PASS (<code>0</code> failed).</li><li><strong>Full Match &amp; Macro Simulation Suite (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tests/run-all-tests.rkt" target="_blank" rel="noopener noreferrer">run-all-tests.rkt</a>)</strong>: All <code>50</code> suites (<code>2,291</code> assertions, <code>12/12</code> mutation kill rate, including <code>Suite 50</code>) PASS (<code>0</code> failed).</li><li><strong>Pro-Replay Anti-Starvation &amp; Deadlock Audit (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tools/audit-pro-replay-starvation.rkt" target="_blank" rel="noopener noreferrer">audit-pro-replay-starvation.rkt</a>)</strong>: <code>5,575</code> checkpoints PASS (<code>0</code> expansion/worker/supply/hoarding failures).</li></ul></main></div>
+<footer class="site-footer">
+  <div>Mothman · StarCraft II bots on AI Arena</div>
+  <div>Updated 2026-11-28 04:04 UTC · <a href="https://github.com/sticklane/mothman-sc2-bot/releases" target="_blank" rel="noopener noreferrer">Replay Archives</a></div>
+</footer>
+
+<script>
+(function() {
+  // 1. Mobile menu toggle
+  const toggle = document.getElementById('nav-toggle');
+  const drawer = document.getElementById('mobile-drawer');
+  if (toggle && drawer) {
+    toggle.addEventListener('click', function() {
+      const open = drawer.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.textContent = open ? 'Close' : 'Menu';
+    });
+  }
+
+  // 2. Auto-pause other videos when one starts playing
+  document.addEventListener('play', function(e) {
+    if (e.target && e.target.tagName === 'VIDEO') {
+      document.querySelectorAll('video').forEach(function(v) {
+        if (v !== e.target && !v.paused) v.pause();
+      });
+    }
+  }, true);
+
+  // 3. Image Lightbox Modal
+  const imgs = Array.from(document.querySelectorAll('img.clip-img'));
+  if (imgs.length) {
+    const lb = document.createElement('div');
+    lb.className = 'modal-overlay';
+    lb.innerHTML =
+      '<div class="modal-controls">' +
+        '<button class="modal-btn" id="lb-prev">Prev</button>' +
+        '<button class="modal-btn" id="lb-next">Next</button>' +
+        '<a class="modal-btn" id="lb-raw" target="_blank" rel="noopener noreferrer">Open file</a>' +
+        '<button class="modal-btn" id="lb-close">Close</button>' +
+      '</div>' +
+      '<img id="lb-img" alt="" />' +
+      '<div class="modal-caption" id="lb-cap"></div>';
+    document.body.appendChild(lb);
+    const lbImg = document.getElementById('lb-img');
+    const lbCap = document.getElementById('lb-cap');
+    const lbRaw = document.getElementById('lb-raw');
+    let cur = 0;
+    function show(i) {
+      cur = (i + imgs.length) % imgs.length;
+      const src = imgs[cur].getAttribute('data-lightbox-src') || imgs[cur].src;
+      const alt = imgs[cur].getAttribute('data-lightbox-alt') || imgs[cur].alt || '';
+      lbImg.src = src;
+      lbImg.alt = alt;
+      lbRaw.href = src;
+      lbCap.textContent = (cur + 1) + ' of ' + imgs.length + (alt ? ' — ' + alt : '');
+      lb.classList.add('open');
+    }
+    function closeLb() { lb.classList.remove('open'); }
+    imgs.forEach(function(im, idx) { im.addEventListener('click', function() { show(idx); }); });
+    document.getElementById('lb-prev').addEventListener('click', function(e) { e.stopPropagation(); show(cur - 1); });
+    document.getElementById('lb-next').addEventListener('click', function(e) { e.stopPropagation(); show(cur + 1); });
+    document.getElementById('lb-close').addEventListener('click', function(e) { e.stopPropagation(); closeLb(); });
+    lb.addEventListener('click', function(e) { if (e.target === lb) closeLb(); });
+    document.addEventListener('keydown', function(e) {
+      if (!lb.classList.contains('open')) return;
+      if (e.key === 'Escape') closeLb();
+      else if (e.key === 'ArrowRight') show(cur + 1);
+      else if (e.key === 'ArrowLeft') show(cur - 1);
+    });
+  }
+
+  // 4. Video Theater Modal (delegated for both report videos and dynamic gallery cards)
+  const vm = document.createElement('div');
+  vm.className = 'modal-overlay';
+  vm.innerHTML =
+    '<div class="modal-controls">' +
+      '<a class="modal-btn" id="vm-raw" target="_blank" rel="noopener noreferrer">Download MP4</a>' +
+      '<button class="modal-btn" id="vm-close">Close</button>' +
+    '</div>' +
+    '<video id="vm-video" controls playsinline webkit-playsinline preload="metadata"></video>' +
+    '<div class="modal-caption" id="vm-cap"></div>';
+  document.body.appendChild(vm);
+  const vmVideo = document.getElementById('vm-video');
+  const vmCap = document.getElementById('vm-cap');
+  const vmRaw = document.getElementById('vm-raw');
+  function closeVm() {
+    vmVideo.pause();
+    vmVideo.innerHTML = '';
+    vmVideo.removeAttribute('src');
+    vmVideo.load();
+    vm.classList.remove('open');
+  }
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest('.video-theater-btn');
+    if (!btn) return;
+    const src = btn.getAttribute('data-video-src') || '';
+    const poster = btn.getAttribute('data-video-poster') || '';
+    const title = btn.getAttribute('data-video-title') || '';
+    if (!src) return;
+    document.querySelectorAll('video').forEach(function(v) { if (!v.paused) v.pause(); });
+    vmVideo.innerHTML = '';
+    const sourceEl = document.createElement('source');
+    sourceEl.src = src;
+    sourceEl.type = 'video/mp4';
+    vmVideo.appendChild(sourceEl);
+    if (poster) vmVideo.poster = poster; else vmVideo.removeAttribute('poster');
+    vmVideo.load();
+    vmRaw.href = src;
+    vmCap.textContent = title;
+    vm.classList.add('open');
+    vmVideo.play().catch(function() {});
+  });
+  document.getElementById('vm-close').addEventListener('click', function(e) { e.stopPropagation(); closeVm(); });
+  vm.addEventListener('click', function(e) { if (e.target === vm) closeVm(); });
+  document.addEventListener('keydown', function(e) {
+    if (vm.classList.contains('open') && e.key === 'Escape') closeVm();
+  });
+
+  // 5. Open ancestor <details> when jumping to an in-page hash anchor (e.g. archived Loops 29-40)
+  function openDetailsForHash(hash) {
+    if (!hash || hash.length < 2) return;
+    const el = document.getElementById(decodeURIComponent(hash.slice(1)));
+    if (!el) return;
+    let p = el.parentElement;
+    while (p) {
+      if (p.tagName === 'DETAILS') p.open = true;
+      p = p.parentElement;
+    }
+  }
+  window.addEventListener('hashchange', function() { openDetailsForHash(window.location.hash); });
+  if (window.location.hash) openDetailsForHash(window.location.hash);
+  document.addEventListener('click', function(e) {
+    const a = e.target.closest('a[href^="#"]');
+    if (a) openDetailsForHash(a.getAttribute('href'));
+  });
+})();
+</script>
+
+
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral', securityLevel: 'loose' });
+</script>
+
+</body>
+</html>

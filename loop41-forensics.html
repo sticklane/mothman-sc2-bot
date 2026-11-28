@@ -1,0 +1,2048 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Loop 41 &amp; Live Build 40 Notes — Mothman</title>
+  <style>
+:root {
+  --bg: #FAF9F5;
+  --surface: #F4F2EA;
+  --surface-alt: #EFECE3;
+  --surface-input: #FFFFFF;
+  --border: #E5E2D8;
+  --border-strong: #262522;
+  --ink: #141413;
+  --ink-2: #4A4945;
+  --muted: #7A7870;
+  --accent: #C4633E;
+  --accent-hover: #A34E2E;
+  --slate: #4A6B82;
+  --win: #2F6B48;
+  --loss: #A83E32;
+  --warn: #A35B1F;
+  --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16.5px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 3px;
+}
+a:hover {
+  color: var(--accent-hover);
+  text-decoration-color: var(--accent-hover);
+}
+.num, table { font-variant-numeric: tabular-nums; }
+
+/* Header — static document flow, minimal, never blocks mobile viewport */
+.site-header {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.header-inner {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.wordmark {
+  font-family: var(--serif);
+  font-size: 1.18rem;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.wordmark:hover { color: var(--ink); text-decoration: none; }
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+}
+.nav-link {
+  font-size: 0.9rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+  padding: 0.2rem 0;
+  border-bottom: 2px solid transparent;
+  text-decoration: none;
+}
+.nav-link:hover { color: var(--ink); text-decoration: none; }
+.nav-link.active {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.nav-toggle {
+  display: none;
+  background: transparent;
+  border: 0;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.35rem 0.25rem;
+  cursor: pointer;
+}
+.nav-toggle:hover { color: var(--ink); }
+
+.mobile-drawer {
+  display: none;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0.4rem 1.25rem 0.8rem;
+}
+.mobile-drawer.open { display: block; }
+.mobile-drawer a {
+  display: block;
+  padding: 0.6rem 0;
+  color: var(--ink);
+  font-size: 0.96rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.mobile-drawer a:last-child { border-bottom: 0; }
+.mobile-drawer a.active { color: var(--accent); font-weight: 600; }
+
+/* Page containers — centered editorial essay column with wider figure breakouts */
+.page-wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4.75rem;
+}
+.page-grid {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 2.25rem 1.25rem 4.75rem;
+  display: grid;
+  grid-template-columns: 215px minmax(0, 1fr);
+  gap: 2.75rem;
+}
+.content { min-width: 0; }
+.prose-col {
+  max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.wide-col {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.prose { max-width: 680px; }
+
+/* Sidebar TOC (Desktop) + Collapsible TOC (Mobile) */
+.toc-sidebar {
+  position: sticky;
+  top: 1.5rem;
+  align-self: start;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  padding-right: 0.85rem;
+  border-right: 1px solid var(--border);
+  font-size: 0.84rem;
+}
+.toc-heading {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin: 0 0 0.65rem;
+}
+.toc-list { list-style: none; padding: 0; margin: 0; }
+.toc-list li { margin: 0.44rem 0; line-height: 1.38; }
+.toc-list a { color: var(--ink-2); text-decoration: none; }
+.toc-list a:hover { color: var(--accent); }
+.toc-latest {
+  display: block;
+  font-weight: 600;
+  color: var(--accent);
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.latest-jump-bar {
+  font-size: 0.9rem;
+  margin: -0.2rem 0 1.25rem;
+}
+.toc-mobile { display: none; margin-bottom: 1.5rem; }
+
+/* Typography */
+h1, h2, h3 {
+  font-family: var(--serif);
+  color: var(--ink);
+  font-weight: 500;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+}
+h1 {
+  font-size: 2.3rem;
+  margin: 0 0 0.7rem;
+}
+h2 {
+  font-size: 1.5rem;
+  margin: 3.1rem 0 0.85rem;
+}
+.page-grid h2 {
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+h3 {
+  font-size: 1.16rem;
+  margin: 2rem 0 0.55rem;
+  font-weight: 600;
+}
+h4 {
+  font-family: var(--sans);
+  font-size: 0.98rem;
+  font-weight: 600;
+  margin: 0 0 0.45rem;
+  line-height: 1.38;
+  color: var(--ink);
+}
+p { margin: 0 0 1.1rem; color: var(--ink-2); }
+strong { color: var(--ink); font-weight: 600; }
+ul, ol { margin: 0.5rem 0 1.15rem; padding-left: 1.3rem; color: var(--ink-2); }
+li { margin: 0.4rem 0; }
+.content > p, .content > ul, .content > ol, .content > blockquote { max-width: 680px; }
+.anchor {
+  color: var(--muted);
+  opacity: 0;
+  font-family: var(--sans);
+  font-size: 0.76em;
+  margin-left: 0.35rem;
+  font-weight: 400;
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+.anchor::after { content: "#"; }
+h1:hover .anchor, h2:hover .anchor, h3:hover .anchor, h4:hover .anchor, .anchor:focus { opacity: 0.55; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+
+/* Editorial Opening (Front Page & Subpages) */
+.eyebrow {
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+.masthead {
+  margin-bottom: 2.2rem;
+}
+.masthead h1 {
+  font-size: 2.55rem;
+  margin: 0 0 0.65rem;
+}
+.lead {
+  color: var(--ink-2);
+  font-size: 1.08rem;
+  line-height: 1.62;
+  margin: 0;
+}
+.section-rule {
+  border-top: 1px solid var(--border);
+  padding-top: 2.4rem;
+  margin-top: 2.8rem;
+}
+.section-kicker {
+  font-family: var(--serif);
+  font-size: 1.48rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0 0 0.75rem;
+}
+
+/* Inline code & code blocks */
+code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--surface);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  color: var(--ink);
+}
+.callout code, .clip-card code, details code {
+  background: #EAE6DA;
+  padding: 0.08rem 0.3rem;
+  box-shadow: inset 0 0 0 1px rgba(38, 37, 34, 0.11);
+}
+.code-block {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 1.1rem 0;
+  overflow-x: auto;
+}
+.code-block pre { margin: 0; padding: 0.95rem 1.1rem; }
+.code-block code { background: none; padding: 0; box-shadow: none; font-size: 0.84rem; }
+.code-lang {
+  position: absolute; top: 6px; right: 10px;
+  font-size: 0.7rem; text-transform: uppercase; color: var(--muted);
+}
+.mermaid-wrap {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 1.1rem;
+  margin: 1.25rem 0;
+  overflow-x: auto;
+}
+
+/* Editorial Callouts */
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  border-radius: 0 6px 6px 0;
+  padding: 0.95rem 1.2rem;
+  margin: 1.35rem 0;
+  max-width: 680px;
+}
+.callout-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+.callout-warning, .callout-caution { border-left-color: var(--warn); }
+.callout-warning .callout-label, .callout-caution .callout-label { color: var(--warn); }
+.callout-body > p:first-child { margin-top: 0; }
+.callout-body > p:last-child { margin-bottom: 0; }
+
+blockquote {
+  margin: 1.25rem 0;
+  padding: 0.25rem 0 0.25rem 1.15rem;
+  border-left: 2px solid var(--accent);
+  color: var(--ink-2);
+}
+
+/* Collapsible Sections (<details>) */
+details {
+  margin: 1.4rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 0;
+}
+summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--ink);
+  font-size: 0.95rem;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: "+";
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-weight: 400;
+}
+details[open] > summary::before { content: "−"; }
+details[open] > summary { margin-bottom: 0.85rem; }
+
+/* Tufte Horizontal-Rule Tables */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0.9rem 0 1.1rem;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+}
+thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 0.65rem 0.7rem;
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+  background: transparent;
+}
+td {
+  padding: 0.68rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--ink-2);
+}
+tbody tr:last-child td { border-bottom: 0; }
+.table-note {
+  font-size: 0.87rem;
+  color: var(--muted);
+  margin: 0.6rem 0 0;
+  line-height: 1.55;
+}
+.t-win { color: var(--win); font-weight: 600; }
+.t-loss { color: var(--loss); font-weight: 600; }
+.t-muted { color: var(--muted); }
+.nw { white-space: nowrap; }
+.table-flywheel table { font-size: 0.75rem; }
+.table-flywheel thead th {
+  font-size: 0.72rem;
+  line-height: 1.2;
+  padding: 0.36rem 0.26rem;
+  white-space: normal;
+  vertical-align: bottom;
+}
+.table-flywheel td {
+  padding: 0.36rem 0.26rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.36;
+}
+.table-flywheel td:first-child { white-space: nowrap; }
+
+/* Responsive Stacked Mobile Standings (< 700px) */
+.standings-mobile {
+  display: none;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+  margin: 0.75rem 0 0.85rem;
+}
+.standing-row { padding: 0.78rem 0; border-bottom: 1px solid var(--border); }
+.standing-row:last-child { border-bottom: 0; }
+.standing-top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
+.standing-bot { font-weight: 600; color: var(--ink); font-size: 0.98rem; }
+.standing-race { color: var(--muted); font-weight: 400; font-size: 0.88rem; }
+.standing-elo { font-weight: 600; font-size: 1rem; font-variant-numeric: tabular-nums; color: var(--ink); }
+.standing-stats { font-size: 0.87rem; color: var(--ink-2); margin-top: 0.16rem; font-variant-numeric: tabular-nums; }
+.standing-note { font-size: 0.87rem; color: var(--muted); margin: 0.28rem 0 0; line-height: 1.46; }
+
+/* Anthropic-Style Warm Sand Figures */
+.figure-block {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.35rem 1.45rem 1.15rem;
+  margin: 1.5rem auto 1.75rem;
+  max-width: 780px;
+}
+.figure-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 0.25rem;
+}
+.figure-title {
+  font-family: var(--serif);
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin: 0 0 0.75rem;
+  color: var(--ink);
+}
+.chart-svg { width: 100%; height: auto; display: block; }
+.figure-caption {
+  font-size: 0.86rem;
+  color: var(--ink-2);
+  margin: 0.75rem 0 0;
+  line-height: 1.52;
+}
+
+/* Clean Typographic Reading Lists */
+.doc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.65rem 0 1.85rem;
+  border-top: 1px solid var(--border);
+}
+.doc-item {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 0.25rem 1.75rem;
+  align-items: baseline;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border);
+  margin: 0;
+}
+.doc-item-title {
+  font-family: var(--serif);
+  font-size: 1.02rem;
+  font-weight: 500;
+  display: inline-block;
+}
+.doc-item-desc {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.52;
+}
+
+/* Replays & Video Figures */
+.clip-gallery { margin: 1.25rem 0 2rem; }
+.clip-gallery-grid, .featured-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.35rem;
+}
+.clip-card {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1rem 1.05rem;
+  display: flex;
+  flex-direction: column;
+}
+.clip-index {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+.clip-figure { margin: 0.4rem 0 0; }
+.clip-img, .clip-video {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 6px;
+  background: #141413;
+}
+.clip-img { cursor: zoom-in; min-height: 150px; }
+.clip-figure figcaption {
+  font-size: 0.85rem;
+  color: var(--ink-2);
+  margin-top: 0.55rem;
+  line-height: 1.48;
+}
+.video-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.84rem;
+}
+.text-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 2px;
+}
+.text-btn:hover { color: var(--accent-hover); text-decoration-color: var(--accent-hover); }
+.media-link {
+  font-size: 0.86rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Video Gallery Filter Controls */
+.gallery-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+  padding: 1rem 0 1.25rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin: 1.25rem 0 1.5rem;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.filter-group label {
+  font-size: 0.74rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.filter-select, .filter-input {
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--surface-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.44rem 0.65rem;
+  min-width: 135px;
+}
+.filter-input { min-width: 210px; }
+.gallery-count {
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin: 0 0 1rem;
+}
+.gallery-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+.show-more-wrap { text-align: center; margin-top: 1.75rem; }
+.editorial-btn {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 1.2rem;
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.editorial-btn:hover { background: var(--surface-alt); }
+
+/* Lightbox & Video Theater Modals */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(20, 20, 19, 0.92);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 1.25rem;
+}
+.modal-overlay.open { display: flex; }
+.modal-overlay img, .modal-overlay video {
+  max-width: 94vw;
+  max-height: 80vh;
+  border-radius: 6px;
+  background: #000;
+}
+.modal-caption {
+  color: #F4F2EA;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  text-align: center;
+  max-width: 820px;
+}
+.modal-controls {
+  position: fixed;
+  top: 1rem;
+  right: 1.25rem;
+  display: flex;
+  gap: 0.5rem;
+}
+.modal-btn {
+  background: #262522;
+  color: #FAF9F5;
+  border: 1px solid #44423C;
+  border-radius: 6px;
+  padding: 0.4rem 0.78rem;
+  cursor: pointer;
+  font-size: 0.86rem;
+  text-decoration: none;
+}
+.modal-btn:hover { background: #3B3934; color: #FFFFFF; text-decoration: none; }
+
+/* Footer */
+.site-footer {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1.6rem 1.25rem 3.25rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.84rem;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+
+@media (max-width: 1020px) {
+  .page-grid { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .toc-sidebar { display: none; }
+  .toc-mobile { display: block; }
+}
+@media (max-width: 820px) {
+  .clip-gallery-grid, .featured-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 799px) {
+  body { font-size: 15.5px; }
+  .header-inner { height: 50px; }
+  .nav-links { display: none; }
+  .nav-toggle { display: inline-block; }
+  .page-wrap, .page-grid { padding: 1.35rem 1rem 3.5rem; }
+  .masthead { margin-bottom: 1.45rem; }
+  .masthead h1 { font-size: 1.85rem; margin-bottom: 0.45rem; }
+  .lead { font-size: 0.98rem; line-height: 1.56; }
+  h1 { font-size: 1.7rem; }
+  h2, .section-kicker { font-size: 1.3rem; }
+  .section-rule { padding-top: 1.85rem; margin-top: 2.1rem; }
+  .figure-block { padding: 1.05rem 0.95rem 0.95rem; border-radius: 8px; }
+  .doc-item { grid-template-columns: minmax(0, 1fr); gap: 0.2rem; }
+  .filter-input { min-width: 0; width: 100%; }
+  .filter-group { flex: 1 1 140px; }
+}
+@media (max-width: 699px) {
+  .standings-desktop { display: none; }
+  .standings-mobile { display: block; }
+}
+
+/* Structured Section Headers */
+.section-head { max-width: 720px; margin-bottom: 1.35rem; }
+.section-num {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin: 0 0 0.25rem;
+}
+.section-intro { font-size: 0.98rem; color: var(--ink-2); margin: 0; line-height: 1.58; }
+.prose-tight { max-width: 700px; font-size: 0.95rem; margin: 0 0 0.9rem; line-height: 1.58; }
+
+/* Quick Section Jump Bar */
+.jump-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.95rem;
+  margin-top: 0.95rem;
+  font-size: 0.88rem;
+}
+.jump-bar a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--border); padding-bottom: 1px; }
+.jump-bar a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Interactive Panels & Detail Drawers */
+.interactive-panel {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin-bottom: 1.4rem;
+}
+/* Interactive SVG Diagrams & Walkthroughs */
+.diagram-stage {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem 0.65rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.diagram-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  font-family: var(--sans);
+}
+.svg-node { cursor: pointer; outline: none; transition: opacity 0.18s ease; }
+.svg-node .node-bg {
+  fill: #FAF9F5;
+  stroke: #D6D2C6;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, fill 0.15s, stroke-width 0.15s;
+}
+.svg-node .node-bg-accent {
+  fill: #FDF4F0;
+  stroke: #DFB5A5;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, fill 0.15s, stroke-width 0.15s;
+}
+.svg-node .node-bg-fw {
+  fill: #FDF4F0;
+  stroke: #C4633E;
+  stroke-width: 1.8;
+  stroke-dasharray: 5,3;
+  transition: stroke 0.15s, fill 0.15s;
+}
+.svg-node .node-bg-dark {
+  fill: #262522;
+  stroke: #262522;
+  stroke-width: 1.5;
+  transition: stroke 0.15s, stroke-width 0.15s;
+}
+.svg-node:hover .node-bg,
+.svg-node:hover .node-bg-accent,
+.svg-node:hover .node-bg-fw { stroke: #C4633E; }
+.svg-node.is-active .node-bg,
+.svg-node.is-active .node-bg-accent,
+.svg-node.is-active .node-bg-fw {
+  fill: #FFFFFF;
+  stroke: #C4633E;
+  stroke-width: 2.6;
+}
+.svg-node.is-active .node-bg-dark {
+  stroke: #C4633E;
+  stroke-width: 2.8;
+}
+.svg-node.is-dim { opacity: 0.34; }
+.node-title { fill: #141413; font-size: 13px; font-weight: 600; }
+.node-sub { fill: #5E5D59; font-size: 11px; }
+.node-kicker-fw { fill: #C4633E; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
+
+.walk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+  margin-bottom: 0.8rem;
+}
+.walk-steps {
+  margin: 0.45rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.56;
+}
+.walk-steps li { margin: 0.45rem 0; }
+.detail-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: #FDF4F0;
+  border: 1px solid #EBD1C6;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  white-space: nowrap;
+}
+.explain-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.detail-drawer {
+  margin-top: 0.95rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.15rem;
+}
+.detail-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.45rem;
+}
+.detail-title { font-family: var(--serif); font-size: 1.08rem; font-weight: 600; color: var(--ink); }
+.detail-file { font-family: var(--mono); font-size: 0.76rem; color: var(--muted); }
+.detail-body { font-size: 0.92rem; color: var(--ink-2); margin: 0 0 0.65rem; line-height: 1.56; }
+.detail-metric {
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--surface);
+  padding: 0.45rem 0.7rem;
+  border-radius: 6px;
+  border-left: 3px solid var(--accent);
+}
+.compact-list { margin: 0.35rem 0 0.75rem; padding-left: 1.2rem; font-size: 0.89rem; color: var(--ink-2); }
+.compact-list li { margin: 0.25rem 0; line-height: 1.48; }
+
+.subsys-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.15rem;
+}
+.subsys-card {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+}
+.subsys-card h3 { margin: 0 0 0.4rem; font-size: 1.02rem; }
+.subsys-card p { font-size: 0.89rem; margin: 0 0 0.65rem; line-height: 1.52; }
+.mini-stat {
+  font-size: 0.82rem;
+  color: var(--ink-2);
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+
+/* Interactive Category & Matchup Pills */
+.cat-pills, .race-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+.race-toggle { margin-bottom: 0.85rem; }
+.cat-pill {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.36rem 0.68rem;
+  font-family: var(--sans);
+  font-size: 0.83rem;
+  font-weight: 500;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.cat-pill:hover { border-color: var(--accent); color: var(--ink); }
+.cat-pill.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+}
+.cat-pill .pill-n { font-size: 0.76rem; opacity: 0.75; margin-left: 0.2rem; }
+
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0.55rem 0 0.85rem;
+}
+.metric-strip-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.m-chip {
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+.m-lbl { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.m-chip strong { font-size: 0.9rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.mu-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1.25rem;
+}
+.mini-kicker {
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.eval-subsection { margin-top: 2rem; }
+.eval-subsection h3 { margin: 0 0 0.45rem; font-size: 1.12rem; }
+.charts-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.15rem;
+}
+
+/* Opening Build Order & Histograms + Base Layout Photos */
+.bo-box {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  margin: 0.75rem 0;
+}
+.bo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.75rem;
+  margin-bottom: 0.55rem;
+}
+.style-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.style-chip {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.14rem 0.55rem;
+}
+.bo-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 0.45rem;
+}
+.bo-step {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.42rem 0.52rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+}
+.bo-time { font-family: var(--mono); font-size: 0.7rem; color: var(--accent); font-weight: 600; }
+.bo-step strong { font-size: 0.84rem; color: var(--ink); line-height: 1.25; }
+.bo-pct { font-size: 0.71rem; color: var(--muted); }
+.hist-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-top: 0.65rem;
+}
+.hist-card {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem 0.6rem;
+}
+.hist-foot {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
+  font-variant-numeric: tabular-nums;
+}
+.base-layout-photo {
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Case Study Cards */
+.case-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.15rem;
+}
+.case-card {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.1rem 1.2rem;
+}
+.case-wide { grid-column: 1 / -1; }
+.case-tag {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.25rem;
+}
+.case-card h3 { margin: 0 0 0.5rem; font-size: 1.06rem; }
+.case-card p { font-size: 0.9rem; margin: 0 0 0.55rem; line-height: 1.54; }
+.case-card p:last-child { margin-bottom: 0; }
+.case-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);
+  gap: 1.2rem;
+  align-items: start;
+}
+
+/* Current-State Cohort Strip, Arena Filters & Open Gaps */
+.cohort-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.65rem;
+  margin: 0.75rem 0 1.25rem;
+}
+.cohort-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.16rem;
+}
+.cohort-card strong {
+  font-size: 1.12rem;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.cohort-sub {
+  font-size: 0.76rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.arena-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.9rem;
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+.arena-filter-group {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
+  gap: 0.35rem;
+}
+.arena-search-input {
+  flex: 1 1 220px;
+  min-width: 190px;
+  padding: 0.36rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #FFFFFF;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+}
+.arena-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.meta-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.spell-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 0.08rem 0.48rem;
+  white-space: nowrap;
+}
+.spell-ok {
+  color: #1F6E43;
+  background: #E9F6EE;
+  border: 1px solid #BFE3CD;
+}
+.spell-miss {
+  color: #9A3426;
+  background: #FCECE9;
+  border: 1px solid #EBC4BE;
+}
+.sid-pill {
+  font-family: var(--mono);
+  font-size: 0.71rem;
+  color: var(--muted);
+  margin: -0.15rem 0 0.42rem;
+  word-break: break-all;
+}
+.gaps-list {
+  margin: 0.45rem 0 0;
+  padding-left: 1.2rem;
+  max-width: 780px;
+  font-size: 0.94rem;
+  color: var(--ink-2);
+  line-height: 1.58;
+}
+.gaps-list li { margin: 0.48rem 0; }
+.cohort-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
+  margin: 1.15rem 0 0.45rem;
+}
+.cohort-heading h3 { margin: 0; font-size: 1.06rem; }
+.cohort-tag {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.history-cta {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+}
+.history-cta p { margin: 0; font-size: 0.94rem; color: var(--ink-2); }
+.history-cta a {
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent);
+  padding-bottom: 1px;
+  white-space: nowrap;
+}
+
+/* Section 2.4 Performance Curves & Timings vs. Opponents & Pros */
+.table-wrap.table-compact table { font-size: 0.82rem; }
+.table-wrap.table-compact th, .table-wrap.table-compact td { padding: 0.42rem 0.48rem; white-space: nowrap; }
+.site-curves-panel { padding: 1.05rem 1.15rem; max-width: 100%; min-width: 0; overflow-x: clip; }
+.site-curves-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.9rem;
+}
+.site-curves-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 1.1rem;
+  margin: 0.65rem 0 0.85rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.83rem;
+  color: var(--ink-2);
+}
+.sc-leg-item { display: inline-flex; align-items: center; gap: 0.42rem; white-space: nowrap; }
+.sc-leg-line { display: inline-block; width: 20px; height: 0; border-top: 2.6px solid #C4633E; }
+.sc-leg-line.m { border-top-color: #C4633E; }
+.sc-leg-line.p { border-top: 2.2px dashed #3B6E9C; }
+.sc-leg-line.o { border-top: 2.2px solid #7A5A8E; }
+.sc-leg-band { margin-left: auto; font-size: 0.78rem; }
+.site-curves-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.site-curve-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.78rem 0.9rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+}
+.site-curve-card.site-curve-span-2 { grid-column: 1 / -1; }
+.site-curve-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.site-curve-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.site-curve-badge {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.site-curve-meds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  color: var(--ink-2);
+}
+.sc-mpill { display: inline-flex; align-items: center; gap: 0.32rem; }
+.sc-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.sc-dot.m { background: #C4633E; }
+.sc-dot.p { background: #3B6E9C; }
+.sc-dot.o { background: #7A5A8E; }
+.site-curve-svg { width: 100%; height: auto; display: block; overflow: visible; user-select: none; touch-action: pan-y; }
+.site-timings-box {
+  margin-top: 1.05rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 0.95rem 0.75rem;
+  max-width: 100%;
+  min-width: 0;
+}
+.site-timings-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.55rem 0.9rem;
+}
+.site-timings-sub { font-size: 0.82rem; color: var(--muted); margin-top: 0.12rem; }
+.site-timings-wrap { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.st-row-hit { fill: transparent; cursor: crosshair; }
+.st-row-hit:hover { fill: rgba(196, 99, 62, 0.06); }
+.site-curve-tooltip {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  background: #1C1B18;
+  color: #FAF9F5;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.78rem;
+  line-height: 1.42;
+  box-shadow: 0 10px 26px rgba(20, 20, 19, 0.32);
+  max-width: 285px;
+}
+.site-curve-tooltip strong { color: #FFFFFF; font-weight: 700; }
+.sct-head {
+  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  padding-bottom: 0.22rem;
+  margin-bottom: 0.28rem;
+}
+.sct-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+.sct-lbl { display: inline-flex; align-items: center; gap: 0.36rem; font-family: var(--sans); }
+.sct-sub { font-size: 0.7rem; opacity: 0.76; margin-top: 0.2rem; }
+
+/* 5-Tab 22-Graph Pro Comparison Observatory (Warm Editorial Light Theme) */
+.obs-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.obs-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.35rem;
+}
+.obs-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  font-weight: 500;
+  padding: 0.42rem 0.78rem;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.obs-tab:hover { background: var(--surface); color: var(--ink); }
+.obs-tab.is-active {
+  background: rgba(196, 99, 62, 0.12);
+  color: #A84A27;
+  border-color: rgba(196, 99, 62, 0.36);
+  font-weight: 600;
+}
+.obs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.45rem 0.85rem;
+}
+.obs-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.32rem;
+}
+.obs-pill {
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 0.22rem 0.68rem;
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.obs-pill:hover { border-color: var(--accent); color: var(--ink); }
+.obs-pill.is-active {
+  background: var(--ink);
+  color: #FAF9F5;
+  border-color: var(--ink);
+  font-weight: 600;
+}
+.obs-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 1.05rem;
+  padding: 0.5rem 0.75rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.81rem;
+  color: var(--ink-2);
+}
+.obs-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+.obs-line {
+  display: inline-block;
+  width: 18px;
+  height: 2.6px;
+  border-radius: 2px;
+}
+.obs-line.obs-dash {
+  height: 0;
+  background: transparent !important;
+  border-top: 2.2px dashed;
+}
+.obs-leg-note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.76rem;
+  white-space: normal !important;
+}
+.obs-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+.obs-kpi {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.62rem 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.obs-kpi-primary {
+  border-color: rgba(196, 99, 62, 0.42);
+  background: linear-gradient(180deg, rgba(196, 99, 62, 0.06), #FFFFFF);
+}
+.obs-kpi-lbl {
+  font-size: 0.63rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obs-kpi strong {
+  font-family: var(--mono);
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.obs-kpi-sub {
+  font-size: 0.73rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.obs-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.82rem 0.95rem 0.72rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow: hidden;
+}
+.obs-card.obs-span-2 { grid-column: 1 / -1; }
+.obs-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+}
+.obs-card-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.obs-card-sub {
+  font-size: 0.79rem;
+  color: var(--muted);
+  margin-top: 0.12rem;
+  line-height: 1.38;
+}
+.obs-badge {
+  font-family: var(--mono);
+  font-size: 0.73rem;
+  padding: 0.12rem 0.48rem;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.obs-meds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  color: var(--ink-2);
+}
+.obs-meds > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  white-space: nowrap;
+}
+.obs-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.obs-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+  user-select: none;
+  touch-action: pan-y;
+}
+.obs-split-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.obs-mini-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 0.25rem;
+}
+.obs-empty {
+  padding: 1.2rem 0.75rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+.obs-missing-box {
+  margin-top: 0.55rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 7px;
+  background: rgba(180, 60, 46, 0.06);
+  border: 1px solid rgba(180, 60, 46, 0.22);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.79rem;
+}
+.obs-missing-lbl {
+  font-weight: 600;
+  color: #B43C2E;
+  margin-right: 0.2rem;
+}
+.obs-missing-pill {
+  display: inline-block;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.73rem;
+}
+.obs-creep-strip {
+  margin-top: 0.45rem;
+  padding: 0.62rem 0.8rem;
+  border-radius: 7px;
+  background: var(--surface);
+  border-left: 3px solid #B43C2E;
+  font-size: 0.83rem;
+  color: var(--ink);
+}
+.obs-tip-head {
+  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  padding-bottom: 0.22rem;
+  margin-bottom: 0.28rem;
+}
+.obs-tip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+.obs-tip-row > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+  font-family: var(--sans);
+}
+.obs-tip-sub {
+  font-size: 0.7rem;
+  opacity: 0.76;
+  margin-top: 0.2rem;
+}
+
+/* Editorial Visual Explainers, Annotated Stills, Release Highlights & Base Control Strip */
+.release-highlights {
+  background: #FAF6F1;
+  border: 1px solid #E8D9CF;
+  border-left: 3.5px solid var(--accent);
+  border-radius: 9px;
+  padding: 0.9rem 1.15rem;
+  margin: 0.55rem 0 0.85rem;
+}
+.rh-kicker {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.45rem;
+}
+.rh-list {
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 0.91rem;
+  line-height: 1.56;
+  color: var(--ink);
+}
+.rh-list li { margin: 0.34rem 0; }
+
+.visual-explainer-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 1.1rem 1.2rem;
+  margin-bottom: 1.2rem;
+}
+.ve-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.9rem;
+  margin-bottom: 0.8rem;
+}
+.ve-header h4 {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.ve-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.ve-col { min-width: 0; }
+.ve-svg-wrap {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.45rem;
+}
+.ve-cap {
+  margin: 0.5rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.48;
+  color: var(--ink-2);
+}
+
+.still-tabs {
+  display: inline-flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.still-tab {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.28rem 0.68rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.still-tab:hover { border-color: var(--accent); color: var(--accent); }
+.still-tab.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+  font-weight: 600;
+}
+.still-annotated {
+  position: relative;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #141413;
+}
+.still-annotated .clip-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: none;
+  border-radius: 0;
+}
+.still-compact { margin-top: 0.55rem; }
+.still-callout {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(20, 20, 19, 0.84);
+  color: #FAF9F5;
+  border: 1px solid rgba(250, 249, 245, 0.28);
+  border-left: 3px solid #E58158;
+  border-radius: 6px;
+  padding: 0.2rem 0.52rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+  max-width: 58%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.still-callout-muted {
+  border-left-color: #8BA4B8;
+  color: #E7E5DE;
+}
+.still-callout-good {
+  border-left-color: #54B882;
+}
+
+.tech-drawer {
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.65rem;
+}
+.tech-drawer summary {
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  list-style-position: outside;
+}
+.tech-drawer summary:hover { color: var(--accent); }
+
+.base-control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 0.9rem;
+  margin-top: 0.85rem;
+  align-items: stretch;
+}
+.base-control-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.base-control-stack .base-control-card {
+  flex: 1;
+  justify-content: center;
+}
+.base-control-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+}
+.base-control-card p {
+  margin: 0.35rem 0 0;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.bc-kicker {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.wall-bp-sub {
+  font-size: 0.82rem;
+  color: var(--ink-2);
+}
+.wall-blueprint-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.95rem;
+  align-items: start;
+}
+.wall-bp-card { min-width: 0; }
+.wall-clips-group { margin: 1.25rem 0 1.35rem; }
+.wall-row-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.02rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.wall-row-desc {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  line-height: 1.48;
+  color: var(--ink-2);
+}
+.wall-clips-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.95rem;
+  align-items: stretch;
+}
+.wall-clips-grid .clip-card {
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+.wall-clips-grid .clip-card h5 {
+  margin: 0.25rem 0 0.35rem;
+  font-size: 0.96rem;
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.arena-more-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+.arena-more-wrap .cat-pill {
+  font-weight: 600;
+  padding: 0.45rem 1.15rem;
+}
+
+@media (max-width: 1060px) {
+  .wall-blueprint-grid, .wall-clips-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .subsys-grid, .charts-pair, .case-grid, .case-split, .mu-two-col, .explain-grid, .hist-pair, .site-curves-grid, .obs-grid, .obs-split-2, .ve-grid, .base-control-grid, .wall-blueprint-grid, .wall-clips-grid { grid-template-columns: minmax(0, 1fr); }
+  .site-curve-card.site-curve-span-2, .obs-card.obs-span-2 { grid-column: auto; }
+  .obs-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 699px) {
+  .still-callout { font-size: 0.66rem; padding: 0.16rem 0.42rem; max-width: 66%; }
+  .visual-explainer-card { padding: 0.85rem; }
+  .interactive-panel { padding: 0.9rem 0.75rem; }
+  .detail-drawer { padding: 0.85rem; }
+  .diagram-stage { padding: 0.5rem 0.35rem; }
+  .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cohort-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .obs-tab { font-size: 0.78rem; padding: 0.36rem 0.58rem; }
+  .obs-leg-note { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+<header class="site-header"><div class="header-inner"><a class="wordmark" href="./index.html">Mothman</a><nav class="nav-links" aria-label="Primary"><a class="nav-link" href="./index.html">Current State</a><a class="nav-link active" href="./history.html">History &amp; Fixes</a><a class="nav-link" href="./video-gallery.html">Replays</a><a class="nav-link" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav><button type="button" class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="mobile-drawer">Menu</button></div><nav class="mobile-drawer" id="mobile-drawer" aria-label="Mobile menu"><a class="" href="./index.html">Current State</a><a class="active" href="./history.html">History &amp; Fixes</a><a class="" href="./video-gallery.html">Replays</a><a class="" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav></header>
+<div class="page-grid"><aside class="toc-sidebar" aria-label="Table of contents"><div class="toc-heading">Contents</div><ul class="toc-list"><li><a href="#1-live-production-ai-arena-audit-sync-prod-limit-40-run-44888224818">1. Live Production AI Arena Audit (sy…</a></li><li><a href="#2-loop-41-local-forensics-iter41baselineh2h-iter41wave41full-943-arena-20">2. Loop 41 Local Forensics (iter41_ba…</a></li><li><a href="#3-strictly-disjoint-loop-42-blueprint-zero-file-overlap">3. Strictly Disjoint Loop 42 Blueprin…</a></li><li><a href="#4-loop-42-ship-5-acceptance-gates">4. Loop 42 Ship #5 Acceptance Gates</a></li></ul></aside><main class="content"><details class="toc-mobile"><summary>Contents</summary><ul class="toc-list"><li><a href="#1-live-production-ai-arena-audit-sync-prod-limit-40-run-44888224818">1. Live Production AI Arena Audit (sy…</a></li><li><a href="#2-loop-41-local-forensics-iter41baselineh2h-iter41wave41full-943-arena-20">2. Loop 41 Local Forensics (iter41_ba…</a></li><li><a href="#3-strictly-disjoint-loop-42-blueprint-zero-file-overlap">3. Strictly Disjoint Loop 42 Blueprin…</a></li><li><a href="#4-loop-42-ship-5-acceptance-gates">4. Loop 42 Ship #5 Acceptance Gates</a></li></ul></details><div class="callout callout-note"><div class="callout-label">Note</div><div class="callout-body"><p>Internal engineering notes and task breakdown recorded during Loop 41.</p></div></div>
+<h1 id="loop-41-forensics-live-ai-arena-ship-4-loop-40-debut-audit-amp-loop-42-blueprint">Loop 41 Forensics, Live AI Arena Ship <code>#4</code> (Loop 40) Debut Audit &amp; Loop 42 Blueprint<a class="anchor" href="#loop-41-forensics-live-ai-arena-ship-4-loop-40-debut-audit-amp-loop-42-blueprint" aria-label="Link to section"></a></h1>
+<div class="callout callout-important"><div class="callout-label">Key Takeaway</div><div class="callout-body"><p><strong>Executive Verdict: <code>HOLD-ZIP</code> on Loop 41 (<code>@ = ukptktor</code>) -&gt; Commit L41 &amp; Combine L41 + L42 into Live Ship <code>#5</code>!</strong></p>
+<ol><li><strong>Live Production Ship <code>#4</code> (<code>mwskxoml_ffb8aaf1</code>, Loop 40)</strong> just posted the <strong>strongest live debut in Mothman&#x27;s history (<code>n=9</code> External, <code>0</code> SP):</strong> <strong><code>5W-4L-0T (55.6% WR)</code></strong>, <strong><code>1.33x</code> ALL-TIME HIGH PROD TRADE RATIO</strong> <em>(first prod build ever <code>&gt; 1.00x</code>, crushing L37&#x27;s <code>0.82x</code> by <code>+62%</code>!)</em>, <strong><code>2.93ms</code> ALL-TIME FASTEST MODERN STEP TIME</strong>, <strong><code>0%</code> <code>own_base_retreat</code> / <code>gas_rich</code> / <code>prod_stall</code> / <code>siege0dps</code> / <code>tvt0tank</code></strong>, AND <strong>ALL 4 LIVE BOTS HIT BRAND-NEW ALL-TIME HIGH ELOs (<code>Mothman-P 1286</code>, <code>Mothman-X 1272</code>, <code>Mothman-T 1266</code>, <code>Mothman-Z 1239</code>)</strong> — highlighted by <strong><code>Mothman-T (1266)</code> CRUSHING <code>Thssprtssbt (1631 ELO)</code> <code>7.35x</code> (previously <code>0W-12L</code>!!)</strong> and <strong><code>Mothman-P (1286)</code> SHUTTING OUT <code>FastBC (1441 ELO)</code> <code>43.50x</code> (<code>0</code> losses!!)</strong>.</li><li><strong>Local Loop 41 (<code>90/90</code> clean)</strong> delivered massive real breakthroughs — <strong>SHATTERED <code>UNSEEN12</code> WIN RECORD (<code>7W-26L-3T = 19.4% WR ATH</code>, <code>SB 3.6% ATL</code>, Protoss <code>UNSEEN12</code> <code>1-10-1 -&gt; 4-6-2</code>!)</strong>, <strong>SHATTERED <code>ALL_84</code> TRADE ATH (<code>0.68x</code>, <code>EXT_78 0.65x</code>, <code>CORE14 0.96x</code>, <code>CORE14 Siege0DPS 8 -&gt; 2</code>)</strong>, <strong>NEW <code>CORE14 max_step_ms</code> ATL (<code>185.9ms</code>)</strong>, <strong>VAPORIZED the Planetary Fortress in <code>p15</code> (Dummy)</strong>, and <strong>SHATTERED <code>econ-harass</code> ATHs (<code>e01</code> + <code>e02</code> BOTH <code>2/2</code> PASS, <code>e02</code> Dummy <code>785M</code>!)</strong> — <strong>HOWEVER</strong>, <code>iter41_baseline_h2h</code> scored <strong><code>2W-4L-0T (0.67x)</code></strong> against the brand-new L40 ZIPs, <code>CloakLoss</code> (<code>1 -&gt; 3</code>), <code>TvT0Tank</code> (<code>3 -&gt; 4</code>), <code>ProdStall</code> (<code>1 -&gt; 5</code>), and <code>1BaseLock</code> (<code>0 -&gt; 4</code>) ticked up, AND <strong>two of L40&#x27;s four live losses (<code>#5140048</code> ZvP &amp; <code>#5140055</code> PvP) were free <code>K=0.0</code> <code>rush_probe</code> defeats against <code>Creepy_strategies</code> (<code>0W-6L</code> across L36+L37+L40)</strong>.</li><li><strong>Action:</strong> Commit Loop 41 cleanly (preserving all <code>UNSEEN12</code> / <code>0.68x</code> / <code>p15</code> / <code>econ-harass</code> gains), let Ship <code>#4</code> (<code>mwskxoml_ffb8aaf1</code>) keep climbing live AI Arena, and execute the strictly disjoint <strong>Loop 42 Blueprint</strong> below to turn <code>r02</code>/<code>r05</code>/<code>r06</code> (<code>rush_probe</code> ALL 3 RACES), <code>p15</code>, <code>z16</code>, <code>CloakLoss</code>, <code>TvT0Tank</code>, <code>ProdStall</code>, and <code>H2H &gt;= 4W-2L</code> green for <strong>Combined Ship <code>#5</code></strong>.</li></ol>
+<p><strong>SQLite Status:</strong> <code>sync-prod --limit 40</code> (GH run <code>44888224818</code>) exited <code>0</code> cleanly (<code>25</code> matches ingested, <code>10/10</code> raw-extracted, <code>0</code> errors). <strong><code>arena_replays.sqlite</code> is 100% IDLE</strong> for <code>@loop-architect</code> Phase 2!</p></div></div>
+<hr />
+<h2 id="1-live-production-ai-arena-audit-sync-prod-limit-40-run-44888224818">1. Live Production AI Arena Audit (<code>sync-prod --limit 40</code>, Run <code>44888224818</code>)<a class="anchor" href="#1-live-production-ai-arena-audit-sync-prod-limit-40-run-44888224818" aria-label="Link to section"></a></h2>
+<h3 id="11-version-comparison-amp-live-bot-elos-livestatustxt-2026-11-21t0912z">1.1 Version Comparison &amp; Live Bot ELOs (<code>live_status.txt</code>, <code>2026-11-21T09:12Z</code>)<a class="anchor" href="#11-version-comparison-amp-live-bot-elos-livestatustxt-2026-11-21t0912z" aria-label="Link to section"></a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Build</th><th style="text-align:left">External W-L-T</th><th style="text-align:left">Real Non-Crash WR</th><th style="text-align:left">Trade Ratio</th><th style="text-align:left">SB %</th><th style="text-align:left">Avg / Max Step</th><th style="text-align:left">Notes</th></tr></thead><tbody><tr><td style="text-align:left"><strong>Loop 40 (<code>mwskxoml_ffb8aaf1</code>, Ship <code>#4</code>)</strong></td><td style="text-align:left"><strong><code>5W-4L-0T</code> (<code>55.6%</code>)</strong></td><td style="text-align:left"><strong><code>5W-4L</code> (<code>55.6%</code>)</strong></td><td style="text-align:left"><strong><code>1.33x</code> ALL-TIME HIGH!</strong></td><td style="text-align:left"><code>6.14%</code></td><td style="text-align:left"><strong><code>2.93ms</code> ATL</strong> / <code>317.0ms</code></td><td style="text-align:left">Deployed <code>08:09Z</code>; <code>0%</code> <code>own_base_retreat</code>, <code>gas_rich</code>, <code>prod_stall</code>, <code>siege0dps</code>, <code>tvt0tank</code>; beat <code>#1</code> titan <code>Thssprtssbt (1631)</code> &amp; <code>FastBC (1441)</code>!</td></tr><tr><td style="text-align:left"><strong>Loop 37 (<code>ltxmxpzu_e45b61eb</code>, Final)</strong></td><td style="text-align:left"><strong><code>23W-11L-0T</code> (<code>67.6%</code>)</strong></td><td style="text-align:left"><strong><code>20W-11L</code> (<code>64.5%</code>)</strong></td><td style="text-align:left"><code>0.82x</code></td><td style="text-align:left"><strong><code>2.94%</code></strong></td><td style="text-align:left"><code>3.47ms</code> (real) / <code>377.5ms</code></td><td style="text-align:left">Closed with final win <code>#5139537</code> <code>Mothman-T vs FastBC (TvT NW) 1.84x</code> (<code>K=23.3k/L=12.6k</code>)!</td></tr></tbody></table></div>
+<ul><li><strong>All 4 Active Live Bots at Brand-New All-Time High ELOs (<code>div=9</code>):</strong><ul><li><strong><code>Mothman-P (#1460)</code>:</strong> <strong><code>1286</code></strong> (<code>+6</code>) — <code>md5=eab3713cb5a3c85fecb5b056542ac83d</code></li><li><strong><code>Mothman-X (#1461)</code>:</strong> <strong><code>1272</code></strong> (<code>+6</code>) — <code>md5=d12b9edbad8d2387ed9034989ea9394e</code></li><li><strong><code>Mothman-T (#1459)</code>:</strong> <strong><code>1266</code></strong> (<code>+6</code>) — <code>md5=07aaae88629e1d32e0d089a886f627a8</code></li><li><strong><code>Mothman-Z (#1458)</code>:</strong> <strong><code>1239</code></strong> (<code>+3</code>) — <code>md5=e40f1a4ada3ac234c1b46464710ff7be</code> <em>(note: <code>#5140052</code> was an AI Arena host <code>initialization_failure</code>, <code>0.0ms</code>, <code>0</code> ELO impact)</em></li></ul></li></ul>
+<h3 id="12-every-single-live-loop-40-mwskxomlffb8aaf1-match-n-9">1.2 Every Single Live Loop 40 (<code>mwskxoml_ffb8aaf1</code>) Match (<code>n = 9</code>)<a class="anchor" href="#12-every-single-live-loop-40-mwskxomlffb8aaf1-match-n-9" aria-label="Link to section"></a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Match</th><th style="text-align:left">Bot / MU / Map [Spawn]</th><th style="text-align:left">Result</th><th style="text-align:left">Dur</th><th style="text-align:left">Trade (K / L)</th><th style="text-align:left">SB%</th><th style="text-align:left">Step (avg/max)</th><th style="text-align:left">Forensic Summary</th></tr></thead><tbody><tr><td style="text-align:left"><strong><code>#5140049</code></strong></td><td style="text-align:left"><strong><code>Mothman-T</code> vs <code>Thssprtssbt (1631)</code></strong> <code>TvP</code> <code>Pylon [NW]</code></td><td style="text-align:left"><strong>WIN!!</strong></td><td style="text-align:left"><code>11:09</code></td><td style="text-align:left"><strong><code>7.35x</code></strong> (<code>16.8k/2.2k</code>)</td><td style="text-align:left"><code>1.1%</code></td><td style="text-align:left"><code>3.45 / 313.0ms</code></td><td style="text-align:left"><strong>HISTORIC TITAN SLAY (was <code>0W-12L</code>!!):</strong> <code>48</code> Marines (<code>-12</code>), <code>13</code> Marauders, <code>7</code> Medivacs (<code>-1</code>) wiped <code>90/90</code> Probes + <code>7/7</code> Immortals + <code>4/4</code> Nexuses!</td></tr><tr><td style="text-align:left"><strong><code>#5139538</code></strong></td><td style="text-align:left"><strong><code>Mothman-P</code> vs <code>FastBC (1441)</code></strong> <code>PvT</code> <code>Magannatha [NW]</code></td><td style="text-align:left"><strong>WIN!!</strong></td><td style="text-align:left"><code>8:28</code></td><td style="text-align:left"><strong><code>43.50x</code></strong> (<code>4.25k/0.0</code>)</td><td style="text-align:left"><code>5.5%</code></td><td style="text-align:left"><code>2.96 / 85.5ms</code></td><td style="text-align:left"><strong>FLAWLESS ZERO-LOSS SHUTOUT:</strong> <code>68/68</code> Probes, <code>22/22</code> Stalkers, <code>4/4</code> Phoenixes, <code>2</code> Observers — <strong><code>0</code> units lost</strong>, killed <code>31/31</code> SCVs!</td></tr><tr><td style="text-align:left"><strong><code>#5139842</code></strong></td><td style="text-align:left"><code>Mothman-X(T)</code> vs <code>MetaScoreCritic</code> <code>TvP</code> <code>Incorporeal [SE]</code></td><td style="text-align:left"><strong>WIN</strong></td><td style="text-align:left"><code>11:25</code></td><td style="text-align:left"><strong><code>2.86x</code></strong> (<code>13.1k/4.5k</code>)</td><td style="text-align:left"><code>1.0%</code></td><td style="text-align:left"><code>3.16 / 317.0ms</code></td><td style="text-align:left">Textbook Bio-Tank-Viking (<code>10</code> Tanks <code>-1</code>, <code>15</code> Vikings, <code>79</code> Marines, <code>70</code> SCVs) crushed <code>71/71</code> Probes + <code>2</code> Fleet Beacons.</td></tr><tr><td style="text-align:left"><strong><code>#5140054</code></strong></td><td style="text-align:left"><code>Mothman-P</code> vs <code>who</code> <code>PvP</code> <code>Ultralove [NE]</code></td><td style="text-align:left"><strong>WIN</strong></td><td style="text-align:left"><code>14:25</code></td><td style="text-align:left"><strong><code>2.22x</code></strong> (<code>14.7k/6.6k</code>)</td><td style="text-align:left"><code>4.1%</code></td><td style="text-align:left"><code>4.06 / 58.3ms</code></td><td style="text-align:left"><strong>Anti-DT + Anti-Tempest clinic:</strong> <code>38</code> Stalkers, <code>7</code> Phoenixes, <code>3</code> Cannons killed <strong><code>10/10</code> DTs</strong> + <strong><code>7/7</code> Tempests</strong> + <code>79/79</code> Probes!</td></tr><tr><td style="text-align:left"><strong><code>#5138608</code></strong></td><td style="text-align:left"><code>Mothman-Z</code> vs <code>Kazham</code> <code>ZvZ</code> <code>Pylon [SE]</code></td><td style="text-align:left"><strong>WIN</strong></td><td style="text-align:left"><code>15:09</code></td><td style="text-align:left"><strong><code>1.65x</code></strong> (<code>14.3k/8.7k</code>)</td><td style="text-align:left"><code>2.3%</code></td><td style="text-align:left"><code>4.05 / 70.4ms</code></td><td style="text-align:left"><code>5</code>-base Roach/Hydra/<strong><code>21</code> Lurkers</strong> overwhelmed <code>2</code>-base Roach (<code>85/85</code> killed).</td></tr><tr><td style="text-align:left"><strong><code>#5140050</code></strong></td><td style="text-align:left"><code>Mothman-P</code> vs <code>sludgement2-revived (1623)</code> <code>PvZ</code> <code>Magannatha [NW]</code></td><td style="text-align:left"><strong>LOSS</strong></td><td style="text-align:left"><code>8:19</code></td><td style="text-align:left"><code>0.07x</code> (<code>0.65k/10.4k</code>)</td><td style="text-align:left"><code>4.4%</code></td><td style="text-align:left"><code>2.24 / 69.4ms</code></td><td style="text-align:left">Titan Roach flood (<code>48</code> Roaches <code>-1</code> + <code>28</code> Lings); Cyber Core lost &amp; rebuilt (<code>CyberneticsCore:2(-2,@141s)</code>), only <code>5</code> Stalkers + <code>5</code> Adepts.</td></tr><tr><td style="text-align:left"><strong><code>#5140051</code></strong></td><td style="text-align:left"><code>Mothman-X(Z)</code> vs <code>mini-puck (1573)</code> <code>ZvP</code> <code>Ley Lines [NE]</code></td><td style="text-align:left"><strong>LOSS</strong></td><td style="text-align:left"><code>10:13</code></td><td style="text-align:left"><code>0.11x</code> (<code>1.38k/13.9k</code>)</td><td style="text-align:left"><code>16.7%</code></td><td style="text-align:left"><code>3.09 / 124.7ms</code></td><td style="text-align:left">Titan <code>56</code> Stalkers (<code>-3</code>) + <code>6</code> Phoenixes sniped <code>10/18</code> Overlords -&gt; <code>16.7%</code> SB &amp; <code>m08</code> base loss (<code>B=1/3</code>).</td></tr><tr><td style="text-align:left"><strong><code>#5140048</code></strong></td><td style="text-align:left"><strong><code>Mothman-Z</code> vs <code>Creepy_strategies</code></strong> <code>ZvP</code> <code>Magannatha [SE]</code></td><td style="text-align:left"><strong>LOSS</strong></td><td style="text-align:left"><code>3:00</code></td><td style="text-align:left"><strong><code>0.07x</code> (<code>K=0.0/1.43k</code>)</strong></td><td style="text-align:left"><code>11.1%</code></td><td style="text-align:left"><code>1.60 / 132.4ms</code></td><td style="text-align:left"><strong><code>Tag: rush_probe</code> (FREE LOSS #1!):</strong> <code>18/18</code> Drones died vs <code>15/15</code> Probes (<code>0</code> killed!).</td></tr><tr><td style="text-align:left"><strong><code>#5140055</code></strong></td><td style="text-align:left"><strong><code>Mothman-X(P)</code> vs <code>Creepy_strategies</code></strong> <code>PvP</code> <code>Magannatha [SE]</code></td><td style="text-align:left"><strong>LOSS</strong></td><td style="text-align:left"><code>3:55</code></td><td style="text-align:left"><strong><code>0.06x</code> (<code>K=0.0/1.60k</code>)</strong></td><td style="text-align:left"><code>9.1%</code></td><td style="text-align:left"><code>1.75 / 63.7ms</code></td><td style="text-align:left"><strong><code>Tag: rush_probe</code> (FREE LOSS #2!):</strong> <code>19/19</code> Probes died vs <code>16/16</code> Probes (<code>0</code> killed!).</td></tr></tbody></table></div>
+<h3 id="13-live-s2protocol-dissection-of-5140048-amp-5140055-rushprobe-0w-6l-plague">1.3 Live <code>s2protocol</code> Dissection of <code>#5140048</code> &amp; <code>#5140055</code> (<code>rush_probe</code> <code>0W-6L</code> Plague!)<a class="anchor" href="#13-live-s2protocol-dissection-of-5140048-amp-5140055-rushprobe-0w-6l-plague" aria-label="Link to section"></a></h3>
+<p>Extracting exact per-minute <code>game.events</code> command distributions from the two live Loop 40 <code>Creepy_strategies</code> losses exposes the <strong>exact 50/50 gather-vs-attack tug-of-war</strong>:</p>
+<ul><li><strong><code>#5140048</code> (<code>Mothman-Z</code> vs <code>Creepy_strategies</code>, <code>3:00</code>):</strong><ul><li>Min 1 (combat peak): <strong>Mothman-Z issued <code>28</code> Attack (<code>45:0</code>) vs <code>28</code> Gather (<code>184:0</code>)</strong> — an <strong>exact <code>50/50</code> split</strong> (<code>190 APM</code>) — while <code>Creepy_strategies</code> issued <code>637</code> Attack (<code>45:0</code>) + <code>633</code> Mineral-Walk (<code>120:0</code>) (<code>3,641 APM</code>).</li></ul></li><li><strong><code>#5140055</code> (<code>Mothman-X(P)</code> vs <code>Creepy_strategies</code>, <code>3:55</code>):</strong><ul><li>Min 1: <strong>Mothman-P issued <code>41</code> Gather (<code>120:0</code>) vs <code>39</code> Attack (<code>45:0</code>)</strong> (<code>253 APM</code>).</li><li>Min 2: <strong>Mothman-P issued <code>20</code> Attack (<code>45:0</code>) vs <code>20</code> Gather (<code>120:0</code>)</strong> (<code>118 APM</code>, <strong>exact <code>50/50</code> split again!!</strong>).</li><li>Result: <strong>ZERO opponent Probes killed across both matches (<code>0/31</code>)</strong>, bringing Mothman to <strong><code>0W-6L</code> (<code>K=0.0</code>)</strong> against <code>rush_probe</code> across L36+L37+L40!</li></ul></li><li><strong>Why this is the #1 Free-ELO ROI for Loop 42:</strong> Loop 40 did <strong>not</strong> yet include Loop 41&#x27;s <code>sc2-protobuf-ws.rkt:9333</code> auto-saturate guard (which halved <code>3666</code> from <code>73/146 -&gt; 30/29</code> and zeroed <code>3685</code> Repair in L41 Arena!). Eliminating the <strong>last <code>13–23</code> <code>3666</code> wounded-worker disengage pulls</strong> + raising focus-fire caps + adding <strong><code>r06</code> (<code>PvP</code>, <code>prod-5140055</code>)</strong> turns ALL 3 RACES from <code>0W-6L</code> into instant free wins!</li></ul>
+<hr />
+<h2 id="2-loop-41-local-forensics-iter41baselineh2h-iter41wave41full-943-arena-20">2. Loop 41 Local Forensics (<code>iter41_baseline_h2h</code>, <code>iter41_wave41_full</code>, <code>#943</code> Arena 2.0)<a class="anchor" href="#2-loop-41-local-forensics-iter41baselineh2h-iter41wave41full-943-arena-20" aria-label="Link to section"></a></h2>
+<h3 id="21-why-iter41baselineh2h-scored-2w-4l-067x-vs-new-l40-zips">2.1 Why <code>iter41_baseline_h2h</code> Scored <code>2W-4L</code> (<code>0.67x</code>) vs New L40 ZIPs<a class="anchor" href="#21-why-iter41baselineh2h-scored-2w-4l-067x-vs-new-l40-zips" aria-label="Link to section"></a></h3>
+<p>Loop 41 beat L40 ZIPs on <code>W@4m</code> (<code>30.2 vs 29.2</code>), <code>SB</code> (<code>2.6% vs 3.4%</code>), <code>EscrowLock</code> (<code>1 vs 4</code>), <code>max_step_ms</code> (<code>162.9ms vs 258.4ms</code>), and smashed <code>#05 PvZ (4.52x)</code> &amp; <code>#06 TvZ (4.24x)</code> with <code>0</code> anomalies. Every one of the <code>4</code> losses has a crisp root cause:</p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Match</th><th style="text-align:left">Result &amp; Trade</th><th style="text-align:left">Early Atk <code>2–6m</code> (L41 vs L40)</th><th style="text-align:left"><code>saving_for</code> Top Bottlenecks (L41 log)</th><th style="text-align:left">Exact Root Cause</th></tr></thead><tbody><tr><td style="text-align:left"><strong><code>#01 ZvZ</code></strong> (<code>Magannatha SE</code>)</td><td style="text-align:left"><strong>L <code>0.14x</code></strong> (<code>DripFeed</code>, <code>EscrowLock(baneling)</code>)</td><td style="text-align:left"><code>6.5%</code> vs <code>0.0%</code></td><td style="text-align:left"><code>roach(38), overlord(30), zergling(23), ravager(23)</code></td><td style="text-align:left">Led <code>m06</code> (<code>W=54/49</code>, <code>A=1725/1300</code>), committed to <code>47</code> Roaches/<code>23</code> Ravagers with <strong><code>0</code> Zerglings until <code>479s</code></strong> while L40 flooded <code>175</code> Speedlings <code>@186s</code>!</td></tr><tr><td style="text-align:left"><strong><code>#02 TvT</code></strong> (<code>Ultralove SW</code>)</td><td style="text-align:left"><strong>L <code>0.50x</code></strong> (<code>GasRich</code>)</td><td style="text-align:left"><code>16.6%</code> vs <code>29.9%</code></td><td style="text-align:left"><strong><code>siege-tank(130)</code></strong>, <code>cc(47)</code>, <strong><code>viking-fighter(43)</code></strong></td><td style="text-align:left">Even <code>m08</code> (<code>A=2025/1825</code>), built only <strong><code>9</code> Siege Tanks vs L40&#x27;s <code>20</code> Siege Tanks</strong> while spending <code>43</code> saving ticks on <code>viking-fighter</code> (<code>15</code> Vikings) &amp; <code>17</code> on <code>liberator</code>!</td></tr><tr><td style="text-align:left"><strong><code>#03 PvP</code></strong> (<code>LeyLines NE</code>)</td><td style="text-align:left"><strong>L <code>0.36x</code></strong> (<code>GasRich</code>, <code>DripFeed</code>)</td><td style="text-align:left"><code>67.2%</code> vs <code>68.3%</code></td><td style="text-align:left"><strong><code>stalker(82)</code></strong>, <code>nexus(59)</code>, <strong><code>immortal(42)</code></strong></td><td style="text-align:left">Only <strong><code>17</code> Stalkers + <code>3</code> Immortals</strong> vs L40&#x27;s <strong><code>30</code> Stalkers + <code>12</code> Immortals</strong>; <code>GasRich</code> mineral starvation + continuous <code>2–6m</code> attacks bled army before Immortal mass hit critical mass.</td></tr><tr><td style="text-align:left"><strong><code>#04 PvT</code></strong> (<code>Torches NE</code>)</td><td style="text-align:left"><strong>L <code>0.25x</code></strong> (<code>DripFeed</code>, <strong><code>0</code> Siege0DPS!</strong>)</td><td style="text-align:left"><strong><code>60.6%</code> vs <code>31.8%</code> (<code>+28.8pp</code>!!)</strong></td><td style="text-align:left"><strong><code>stalker(83)</code></strong>, <code>nexus(35)</code>, <code>immortal(31)</code>, <strong><code>stargate(26)</code></strong>, <strong><code>colossus(26)</code></strong></td><td style="text-align:left"><strong>SMOKING GUN:</strong> Led <code>m06</code> (<code>W=50/44</code>, <code>A=1575/1400</code>) &amp; <code>m08</code> (<code>W=67/57</code>, <code>3</code> bases!), built <code>RoboticsBay</code> (<code>L41</code> fix worked!), <strong>YET</strong> <code>stalker(83) + immortal(31) + stargate(26)</code> starved <strong>Colossus <code>#1</code> (<code>0</code> spawned!)</strong> while Protoss attacked <strong><code>60.6%</code></strong> of <code>m2–m6</code> (nearly <code>2x</code> L40&#x27;s <code>31.8%</code>!) directly into Bio-Tank!</td></tr></tbody></table></div>
+<div class="callout callout-note"><div class="callout-label">Note</div><div class="callout-body"><p><strong>Protoss <code>Atk2-6</code> (<code>27.6% -&gt; 53.5%</code>):</strong> Driven directly by <code>#03 PvP (67.2%)</code> and <code>#04 PvT (60.6% vs L40&#x27;s 31.8%)</code>. In <code>#04 PvT</code>, attacking <code>60.6%</code> of <code>2–6m</code> <em>while</em> saving <code>26</code> ticks for Colossus <code>#1</code> and <code>26</code> ticks for <code>stargate</code> threw away Protoss&#x27;s <code>m06</code> (<code>+6</code> workers, <code>3</code> bases) lead via <code>drip_feed_collapse</code>. Locking <strong>Colossus <code>#1–2</code> strictly ahead of <code>stargate</code>/<code>stalker</code> once <code>RoboticsBay</code> is ready</strong> + holding <code>PvT</code> early attack posture until Colossus <code>#1</code> (or <code>&gt;= 14</code> combat supply) fixes BOTH <code>#04 PvT</code> and <code>Atk2-6</code>!</p></div></div>
+<h3 id="22-full-84-match-watch-items-iter41wave41full">2.2 Full <code>84</code>-Match Watch-Items (<code>iter41_wave41_full</code>)<a class="anchor" href="#22-full-84-match-watch-items-iter41wave41full" aria-label="Link to section"></a></h3>
+<ol><li><strong><code>CloakLoss (1 -&gt; 3)</code> — 100% CAUSED BY <code>who</code> MASS BANSHEE (<code>8–10</code> Banshees <code>@210s</code>), ZERO DT LOSSES:</strong><ul><li><code>#73 ZvT vs who (0.02x)</code>: <code>Queen:4(-4)</code>, <code>SporeCrawler:2@247s</code>, <code>Overseer:2(-2,@281s)</code>, <strong><code>0</code> Hydralisks</strong> vs <code>10</code> Banshees (<code>0</code> killed!).</li><li><code>#74 TvT vs who (0.02x)</code>: <code>Marine:8(-8)</code>, <code>Bunker:3</code>, <strong><code>0</code> <code>MissileTurret</code>s, <code>0</code> <code>Viking</code>s</strong> vs <code>8</code> Banshees (<code>0</code> killed!).</li><li><code>#75 PvT vs who (0.06x)</code>: <code>Observer:2@255s</code> (<code>0</code> died — L41 home Observer leash WORKED!!), <strong>YET only <code>Stalker:3</code> + <code>Phoenix:1</code></strong> vs <code>10</code> Banshees (<code>1</code> killed!).</li><li><strong>Root Cause:</strong> Detection was mostly fine (Z had 2 Spores + 2 Overseers; P had 2 surviving Observers!) — <strong>anti-air DPS + Terran home Turrets failed!</strong></li></ul></li><li><strong><code>TvT0Tank (3 -&gt; 4)</code> — <code>#62 SmoothBrain</code> (<code>0</code> vs <code>6</code> Tanks), <code>#53</code> (<code>zig-reapers</code>), <code>#74</code> (<code>who</code>), <code>#77</code> (<code>VeTerran</code>):</strong><ul><li><strong>Exact <code>#62 SmoothBrain</code> timeline:</strong> <code>Factory@156s</code> -&gt; <strong><code>Hellion:2@178s</code></strong> (triggered by just <code>1</code> enemy Reaper <code>@112s</code>, delaying <code>FactoryTechLab</code> by <code>81s</code> until <code>@237s</code>!!) -&gt; <code>Starport@195s</code> -&gt; <strong><code>VikingFighter:6@295s</code> (<code>450G</code> drained!)</strong> -&gt; gas bank stuck at <code>8G / 78G / 60G</code> (<code>&lt; 125G</code>) -&gt; <strong><code>0</code> Tanks all game</strong> while <code>SmoothBrain</code> snowballed to <code>33</code> Tanks (<code>@236s</code>)!</li><li><strong>Exact <code>#77 VeTerran</code> timeline:</strong> <code>Factory@164s</code> -&gt; <code>FactoryTechLab@208s</code> -&gt; <code>Hellion:1@273s</code> -&gt; only <code>1</code> Tank <code>@305s</code> vs opponent <code>9</code> Tanks <code>@197s</code> + <code>8</code> Widow Mines!</li><li><strong>Root Cause:</strong> L41 protected <code>FactoryTechLab #1</code> from Factory <code>#2–4</code>, <strong>NOT</strong> from <code>1</code>-Reaper <code>Hellion</code> preemption or <code>Starport</code> <code>VikingFighter</code> (<code>75G</code>) draining gas below the <code>125G</code> Tank threshold!</li></ul></li><li><strong><code>ProdStall (1 -&gt; 5)</code> (<code>#32 barracks:50</code>, <code>#33 gateway:59 [streak=33]</code>, <code>#35 barracks:75 [streak=31]</code>, <code>#44 barracks:51</code>, <code>#48 gateway:35</code>):</strong><ul><li>All <code>5</code> occurred exclusively on <strong><code>barracks</code> (Terran)</strong> and <strong><code>gateway</code> (Protoss)</strong> when main/natural build footprints saturated and <code>placement</code> retried the same blocked anchor (<code>10–33</code> consecutive ticks) instead of widening search radius to natural/3rd base or fallback open tiles.</li></ul></li><li><strong><code>1BaseLock (0 -&gt; 4)</code> (<code>#20 W</code>, <code>#51 PvP vs Thssprtssbt</code>, <code>#59 TvP vs Creepy_strategies</code>, <code>#68 TvP vs ModBotNewBuilds</code>):</strong><ul><li>All <code>4</code> show identical telemetry: <code>exp_saving_ticks = 43–78</code>, <strong><code>exp_sched_ticks = 0</code></strong>, <code>our_bases = 1</code> vs <code>opp_bases = 3–5</code>. The brain <em>wanted</em> to expand (<code>saving_for=command-center/nexus</code>), but low-HP pressure/bunkers/units kept spending minerals before <code>400M</code> completed or blocked expansion scheduling.</li></ul></li><li><strong><code>SpireDrop (4 -&gt; 4)</code> (<code>#31</code>, <code>#46</code>, <code>#49</code>, <code>#58</code>) &amp; <code>#72 PvZ vs 12PoolBot (L, 3:28)</code>:</strong><ul><li><code>#31</code>/<code>#49</code> (<code>Tempest:13</code> / <code>Tempest:2</code>): <code>#31</code> got <code>Lair@304s</code> -&gt; <code>Spire@499s</code> (too late vs <code>Tempest@267s</code>!); <code>#49</code> had <code>Lair@186s</code> + <code>Hydra:17@392s</code> but lost Lair before Spire completed.</li><li><code>#72 PvZ vs 12PoolBot</code>: At <code>m02</code>, Mothman banked <strong><code>240M/88G</code></strong> with only <strong><code>Zealot:2@127s</code></strong> vs <code>34</code> Zerglings (<code>@78s</code>) — early 12-Pool detection must immediately cancel/defer <code>Assimilator</code>/<code>Nexus</code> and chronoboost nonstop Zealots + 2nd Gateway + wall Shield Battery!</li></ul></li></ol>
+<h3 id="23-943-arena-20-final-red-gt-green-diagnostics-4-targets">2.3 <code>#943</code> Arena 2.0 Final Red -&gt; Green Diagnostics (4 Targets)<a class="anchor" href="#23-943-arena-20-final-red-gt-green-diagnostics-4-targets" aria-label="Link to section"></a></h3>
+<ol><li><strong><code>p15</code> (DT Blink PF 1-Shot — PF ALREADY VAPORIZED IN DUMMY!):</strong><ul><li><strong>Dummy (<code>0.19x</code>, <code>p2_lost=1,612.5</code>, <code>2700</code>:16):</strong> Final frame proves <strong>PF is 100% destroyed AND South Missile Turret is exploding</strong> — ONLY the <strong>North Missile Turret</strong> (next to the 3 north Tanks) survived! Because <code>pro-spellcaster-micro.rkt:4828</code> targets PF until <code>0</code> HP and only scans detectors within <code>11.0t</code>, surviving DTs didn&#x27;t blink/snipe the North Turret immediately after PF pop (if BOTH Turrets die, surviving DTs become <strong>100% permanently cloaked vs zero-scan Terran</strong> and sweep the remaining Bio/Tanks!).</li><li><strong>Self-Play (<code>0.06x</code>, PF left at <code>~30%</code> HP):</strong> <code>Mothman-T</code> rushed Bio west at <code>1.4s</code>, catching staging DTs while <code>dt-pf-sync-stage</code> (<code>pro-spellcaster-micro.rkt:4931</code>) waited for <code>&gt;= 70%</code> staged or <code>&gt;= 4</code> damaged DTs. Lowering the early-under-fire blink trigger to <code>&gt;= 2</code> damaged DTs lets the DT squad blink past the intercepting Bio directly onto the PF!</li></ul></li><li><strong><code>r02</code> (<code>#5138248</code> ZvP) &amp; <code>r05</code> (<code>#5140013</code> TvP) + NEW <code>r06</code> (<code>#5140055</code> PvP):</strong><ul><li>L41 zeroed <code>3685</code> Repair (<code>0/0</code>) and halved <code>3666</code> (<code>73/146 -&gt; 30/29</code>), leaving <strong><code>13–23</code> wounded-worker <code>3666</code> pulls</strong> (subtracting the <code>16</code> frame-0 gather orders).</li><li><strong>Exact code cause:</strong> In <code>lib/bot-runtime.rkt:7651</code>, <code>max-total-dis-heavy-rush</code> still permits wounded workers to disengage via <code>3666</code> mineral-walk during <code>heavy-pure-worker-allin?</code>, AND <code>effective-melee-cap</code> (<code>lib/bot-runtime.rkt:8039</code>) caps melee attackers per enemy Probe below full focus-fire saturation — so P1&#x27;s 16 workers spread damage and pull off DPS while P2&#x27;s 15 Probes stack <code>23</code> focus-fire (<code>1,393–1,443</code> cmds) to 1-shot workers one by one!</li></ul></li><li><strong><code>z16</code> (Muta Magic-Box vs Thors — <code>0.88x</code> KO WIN -&gt; <code>0.49x</code> <code>no_damage_stalemate</code>):</strong><ul><li>L40 had <code>16</code>:111, <strong><code>18</code> (Hold Position): 28</strong> (<code>6/16</code> alive, <code>0.88x</code> KO WIN).</li><li>L41 dropped to <code>16</code>:153, <code>23</code>:5, <strong><code>18</code>: 2</strong> (<code>3/16</code> alive vs <code>1/11</code> Thor, <code>no_damage_stalemate</code>)!</li><li><strong>Exact code cause:</strong> (a) <code>pro-spellcaster-micro.rkt:366,4962</code> sets <strong><code>MUTA-MAGIC-BOX-MIN-COUNT = 6</code></strong>, so once Mutas drop below <code>6</code> (e.g. final <code>3</code> vs <code>1</code> Thor!), Magic-Box <strong>shuts off completely</strong> and the remaining <code>3</code> Mutas stall! (b) While Thors move, <code>slots-r2</code> (<code>pro-spellcaster-micro.rkt:4991</code>, radius <code>3.05t</code>) shifts every tick, triggering continuous <code>MOVE (16)</code> (<code>153x</code>) instead of letting Mutas sit inside the <code>HOLD_POSITION (18)</code> attack band!</li></ul></li><li><strong><code>e03</code> (<code>3</code>-Adept Dummy <code>wlost=16</code>) &amp; <code>e04</code> (<code>6</code>-Ling SP <code>wlost=14</code>):</strong><ul><li><code>e01</code> &amp; <code>e02</code> are BOTH <strong><code>2/2</code> PASS</strong> (<code>e02</code> Dummy <strong><code>785M</code> ATH!!</strong>, <code>e03</code> SP <code>93.3%</code> up / <code>wlost=1</code>).</li><li><code>e03</code> Dummy needs earlier Adept-kite + Marine focus-fire on the lead Adept (<code>wlost 16 -&gt; &lt;= 3</code>); <code>e04</code> SP needs a cleaner <code>6</code>-Probe surround as soon as Lings cross the natural ramp (<code>wlost 14 -&gt; &lt;= 4</code>).</li></ul></li></ol>
+<hr />
+<h2 id="3-strictly-disjoint-loop-42-blueprint-zero-file-overlap">3. Strictly Disjoint Loop 42 Blueprint (ZERO File Overlap!)<a class="anchor" href="#3-strictly-disjoint-loop-42-blueprint-zero-file-overlap" aria-label="Link to section"></a></h2>
+<p>Every fix is <strong>100% generalizable SC2 mechanics</strong> (zero opponent-name, map-name, replay-ID, or speed-mining hacks). File ownership is strictly partitioned across the 3 authors:</p>
+<h3 id="track-a-runtime-author">Track A — <code>@runtime-author</code><a class="anchor" href="#track-a-runtime-author" aria-label="Link to section"></a></h3>
+<ul><li><strong>Exclusive Files:</strong> <code>lib/bot-runtime.rkt</code>, <code>lib/tactics/pro-spellcaster-micro.rkt</code>, <code>tests/l42-tactics-runtime-test.rkt</code></li><li><strong><code>L42-P0-1a</code> (<code>r02</code> / <code>r05</code> / <code>r06</code> &amp; Live <code>#5140048</code>/<code>#5140055</code> <code>rush_probe</code> 3-Race Killer):</strong><ol><li>In <code>lib/bot-runtime.rkt:7651</code>, under <code>heavy-pure-worker-allin?</code> when <code>healthy-workers &lt;= enemy-workers + 2</code>, set <strong><code>max-total-dis-heavy-rush = 0</code></strong> (eliminating the final <code>13–23</code> wounded <code>3666</code> DPS-dropping pulls completely — fight to win the DPS race instead of fleeing into <code>0</code> kills!).</li><li>In <code>lib/bot-runtime.rkt:8039–8110</code>, under <code>heavy-pure-worker-allin?</code>, raise <strong><code>effective-melee-cap = 8</code></strong> and <strong><code>effective-chaser-cap = 6</code></strong> unconditionally on <code>primary-focus-id</code> (lowest-HP / closest invading worker) so our <code>16</code> defending workers focus-delete enemy Probes every <code>~0.8s</code> (matching P2&#x27;s <code>23</code> focus-fire lethality!).</li><li>Confirm identical protection across <strong>Zerg Drones (<code>r02</code>), Terran SCVs (<code>r05</code>), AND Protoss Probes (<code>r06</code>, <code>#5140055</code>)</strong>!</li></ol></li><li><strong><code>L42-P0-1b</code> (<code>p15</code> DT Blink PF -&gt; Post-PF North Turret Snipe + SP Early Bio Intercept):</strong><ol><li>In <code>lib/tactics/pro-spellcaster-micro.rkt:4828</code>, widen detector acquisition search radius from <code>11.0t -&gt; 16.0t</code> and immediately switch DTs to <strong><code>dt-detector-focus-fire</code></strong> (blink if off CD, else focus-fire) the instant PF HP <code>&lt;= 0</code> (or split <code>4</code> DTs onto nearest intact <code>missile-turret</code> once PF HP <code>&lt; 350</code>) so <strong>BOTH South &amp; North Missile Turrets die</strong> and surviving DTs go permanently invisible vs zero-scan Terran!</li><li>In <code>lib/tactics/pro-spellcaster-micro.rkt:4931</code> (<code>dt-pf-sync-stage</code>), lower the early-under-fire blink release threshold from <code>&gt;= 4</code> damaged DTs to <strong><code>&gt;= 2</code> damaged DTs</strong> so SP <code>Mothman-T</code> Bio intercept cannot chew through staging DTs before the synchronized PF blink fires.</li></ol></li><li><strong><code>L42-P0-1c</code> (<code>z16</code> Muta Magic-Box Restoration -&gt; <code>0.88x+</code> KO WIN):</strong><ol><li>In <code>lib/tactics/pro-spellcaster-micro.rkt:366,4962</code>, lower <strong><code>MUTA-MAGIC-BOX-MIN-COUNT</code> from <code>6 -&gt; 2</code></strong> so the final <code>2–5</code> Mutas never stall against the last surviving Thor.</li><li>In <code>lib/tactics/pro-spellcaster-micro.rkt:4991–5035</code>, tighten <code>slots-r2</code> radius <code>3.05t -&gt; 2.65t</code> and emit <strong><code>HOLD_POSITION (18)</code></strong> whenever a Muta is <code>&lt;= 3.3t</code> of <code>best-thor</code> AND <code>&gt;= 1.35t</code> from its nearest ally Muta (restoring <code>18</code> Hold commands <code>2 -&gt; 25+</code> and stopping moving-Thor <code>MOVE 16</code> jitter!).</li></ol></li><li><strong><code>L42-P0-1d</code> (<code>e03</code>/<code>e04</code> Mineral Defense + <code>#04 PvT</code> Early <code>Atk2-6</code> Guard):</strong><ol><li>Tighten <code>e03</code> Dummy Adept dodge &amp; Marine focus-fire on lead Adept; trigger <code>e04</code> SP <code>6</code>-Probe surround when <code>&gt;= 4</code> Lings cross the mineral-line/natural radius.</li><li>In <code>lib/bot-runtime.rkt</code>, guard <code>PvT</code> <code>2–6m</code> attack posture so Protoss does <strong>not</strong> drip-feed Stalkers into Terran bio/siege ramps (<code>60.6% -&gt; ~30%</code>) while <code>RoboticsBay</code> / Colossus <code>#1</code> is queued and combat supply <code>&lt; 14</code>.</li></ol></li></ul>
+<h3 id="track-b-belief-author">Track B — <code>@belief-author</code><a class="anchor" href="#track-b-belief-author" aria-label="Link to section"></a></h3>
+<ul><li><strong>Exclusive Files:</strong> <code>lib/priority-macro-brain.rkt</code>, <code>tests/run-all-tests.rkt</code>, <code>verify_wave42_belief.rkt</code></li><li><strong><code>L42-P0-2a</code> (Unified 3-Race Anti-Banshee Response — <code>CloakLoss 3 -&gt; 0</code> on <code>#73/#74/#75</code>):</strong><ul><li>Trigger on <strong><code>&gt;= 1</code> observed <code>banshee</code></strong> OR <strong><code>starport-techlab</code> + <code>&lt;= 6m</code></strong> (100% generalizable SC2 scouting!):<ul><li><strong>Terran (<code>#74</code>):</strong> Schedule <code>1</code> <code>missile-turret</code> per saturated mineral line (<code>u &gt;= 650</code>, <code>@210s</code>) + <code>engineering-bay</code> if missing + <strong><code>&gt;= 4</code> <code>viking-fighter</code></strong> ahead of extra Barracks/Hellions.</li><li><strong>Zerg (<code>#73</code>):</strong> Maintain <strong><code>&gt;= 6</code> Queens</strong> + <code>1</code> <code>spore-crawler</code> per mineral line (<code>@220s</code>) + prioritize <strong><code>hydralisk-den</code> + <code>&gt;= 8</code> Hydralisks</strong> ahead of Roach spam.</li><li><strong>Protoss (<code>#75</code>):</strong> Keep L41&#x27;s working Observer home-leash, AND immediately boost <strong><code>stalker</code> (floor <code>&gt;= 8</code>) + <code>phoenix</code> (<code>&gt;= 3</code> if Stargate)</strong> strictly ahead of 3rd Nexus/tech when Banshees are confirmed!</li></ul></li></ul></li><li><strong><code>L42-P0-2b</code> (<code>TvT0Tank 4 -&gt; 0</code> on <code>#62 SmoothBrain</code> / <code>#77 VeTerran</code> &amp; <code>H2H #02 TvT</code> <code>9 vs 20</code> Tanks):</strong><ol><li>Require <strong><code>&gt;= 3</code> observed Reapers</strong> (not <code>1</code>!) before early <code>hellion</code> can preempt <strong><code>terran-factory-techlab-due?</code></strong> (<code>lib/priority-macro-brain.rkt:7406</code>).</li><li>In TvT, once <code>factory-techlab &gt;= 1</code> and <code>siege-tank &lt; 4</code>, lock <strong><code>siege-tank</code> (<code>125G</code> gas-floor, <code>u &gt;= 660</code>) strictly ahead of <code>viking-fighter</code> &amp; <code>liberator</code></strong> (unless <code>&gt;= 2</code> enemy combat air units — Banshee/BC/Liberator/Viking — are actually confirmed!). Fixes BOTH <code>#62</code> (<code>6</code> Vikings starved Tank <code>#1</code>!) and <code>H2H #02</code> (<code>43</code> ticks saving <code>viking-fighter</code> -&gt; <code>9 vs 20</code> Tanks!).</li></ol></li><li><strong><code>L42-P0-2c</code> (<code>H2H #04 PvT</code> Colossus <code>#1</code> Escrow + <code>H2H #03 PvP</code> Immortal Cadence + <code>1BaseLock</code> + <code>#72</code> 12-Pool + <code>SpireDrop</code>):</strong><ol><li>Once <code>robotics-bay &gt;= 1</code> (<code>lib/priority-macro-brain.rkt:7857,14666</code>) and <code>colossus &lt; 2</code>, reserve <strong><code>300M/200G</code> escrow for <code>colossus</code> (<code>u &gt;= 655</code>) strictly ahead of <code>stargate</code> and extra <code>stalker</code>s</strong> so Colossus <code>#1</code> actually spawns in <code>#04 PvT</code>!</li><li>In <code>PvP</code> (<code>#03</code>), keep <code>immortal</code> cadence (<code>&gt;= 6</code> before extra tech) protected against <code>GasRich</code> mineral starvation.</li><li><strong><code>1BaseLock (4 -&gt; 0)</code> (<code>#51/#59/#68</code>):</strong> When <code>our_bases == 1</code>, <code>t &gt;= 270s</code>, and <code>exp_saving_ticks &gt;= 25</code> with <code>exp_sched_ticks == 0</code> while not under active main-base invasion (<code>enemy-near-main == 0</code>), force natural expansion commit (<code>u &gt;= 680</code>) ahead of extra Barracks/Bunkers/Gateways.</li><li><strong><code>#72</code> 12-Pool (<code>240M</code> idle @ <code>2m</code>):</strong> On <code>&gt;= 6</code> Zerglings before <code>135s</code>, immediately defer <code>assimilator #2</code> / <code>nexus</code> and prioritize <code>zealot</code> + 2nd <code>gateway</code> + <code>shield-battery</code> to spend the <code>240M</code> bank immediately.</li><li><strong><code>SpireDrop (4 -&gt; 0)</code> (<code>#31/#49</code>):</strong> On observed <code>stargate</code> / <code>tempest</code> / <code>fleet-beacon</code> in ZvP, protect <code>lair -&gt; spire</code> chain (<code>u &gt;= 650</code>) and re-trigger immediately if Lair falls.</li></ol></li></ul>
+<h3 id="track-c-wire-author">Track C — <code>@wire-author</code><a class="anchor" href="#track-c-wire-author" aria-label="Link to section"></a></h3>
+<ul><li><strong>Exclusive Files:</strong> <code>lib/sc2-protobuf-ws.rkt</code>, <code>tests/sc2-protobuf-ws-test.rkt</code>, <code>tools/arena-scenarios.json</code>, <code>tools/sc2-tactics-arena.py</code></li><li><strong><code>L42-P0-3a</code> (Add <code>r06</code> PvP <code>rush_probe</code> Regression Scenario from Live <code>#5140055</code> + Verify Zero <code>3666</code> Auto-Saturate Leak Across All 3 Races):</strong><ol><li>Add <strong><code>sc2-reg-r06-prod5140055-pvp-probe-hold-vs-15probe-rush</code></strong> (<code>16</code> Probes vs <code>15</code> Probes on <code>mineral-line-harass</code>, <code>use_main_base: true</code>, <code>tier: &quot;regression&quot;</code>) to <code>tools/arena-scenarios.json</code> (<code>57 -&gt; 58</code> Arena scenarios!), regression-gating ALL 3 races (<code>r02</code> Zerg, <code>r05</code> Terran, <code>r06</code> Protoss) against live <code>rush_probe</code>!</li><li>Verify <code>lib/sc2-protobuf-ws.rkt:9333</code> (<code>L41-P0-3a</code> auto-saturate guard) suppresses auto-gather (<code>3666</code> / <code>120:0</code> / <code>184:0</code>) cleanly for <strong>Protoss Probes</strong>, <strong>Zerg Drones</strong>, and <strong>Terran SCVs</strong> whenever <code>&gt;= 6</code> enemy workers invade within <code>&lt;= 14t</code> of any townhall (with unit tests in <code>tests/sc2-protobuf-ws-test.rkt</code>).</li></ol></li><li><strong><code>L42-P0-3b</code> (<code>ProdStall 5 -&gt; 0</code> — Widened Fallback Placement for <code>barracks</code> &amp; <code>gateway</code>):</strong><ul><li>In <code>lib/sc2-protobuf-ws.rkt</code>, when <code>barracks</code> or <code>gateway</code> placement fails <code>&gt;= 3</code> consecutive times at the primary anchor (<code>#32/#33/#35/#44/#48</code> streaks of <code>10–33</code> ticks!), progressively expand spiral search radius &amp; fall back to secondary townhall (natural/3rd base) build grid (with Pylon power check for Gateway, add-on clearance check for Barracks) instead of retrying the same blocked footprint.</li></ul></li></ul>
+<hr />
+<h2 id="4-loop-42-ship-5-acceptance-gates">4. Loop 42 Ship <code>#5</code> Acceptance Gates<a class="anchor" href="#4-loop-42-ship-5-acceptance-gates" aria-label="Link to section"></a></h2>
+<ol><li><strong>Live <code>rush_probe</code> 3-Race Sweep:</strong> <strong><code>r02</code> (Z), <code>r05</code> (T), AND <code>r06</code> (P)</strong> ALL <strong><code>2/2</code> KO WIN</strong> (Dummy &amp; SP) with <code>3666 &lt;= 16</code> (frame-0 gather only!) and <code>3685 = 0</code>!</li><li><strong>Arena 2.0 (<code>58</code> scenarios, <code>116</code> duels):</strong> <strong><code>p15</code></strong> destroys PF <strong>+ BOTH Turrets</strong> (Dummy WIN!), <strong><code>z16</code></strong> restored to <strong><code>&gt;= 0.85x</code> KO WIN</strong> (<code>18</code> Hold <code>&gt;= 20</code>), <strong><code>econ-harass</code></strong> <code>&gt;= 3/4</code> PASS in Dummy &amp; SP (<code>e01</code>+<code>e02</code> stay <code>2/2</code> PASS, <code>e03</code>/<code>e04</code> improved).</li><li><strong><code>baseline_h2h</code> vs L40 (<code>mwskxoml_ffb8aaf1</code>) ZIPs:</strong> <strong><code>&gt;= 4W-2L</code></strong> and <strong><code>&gt;= 1.05x</code> trade</strong> (fixing <code>#02 TvT</code>, <code>#03 PvP</code>, <code>#04 PvT</code> Colossus <code>#1</code> + <code>Atk2-6</code>!).</li><li><strong><code>ALL_84</code> Roster:</strong> Preserve L41&#x27;s <strong><code>UNSEEN12 &gt;= 7W</code> / <code>ALL_84 Trade &gt;= 0.68x</code> / <code>max_step_ms &lt; 200ms</code></strong> while slashing <strong><code>CloakLoss 3 -&gt; 0</code></strong>, <strong><code>TvT0Tank 4 -&gt; 0</code></strong>, <strong><code>ProdStall 5 -&gt; &lt;= 1</code></strong>, and <strong><code>1BaseLock 4 -&gt; 0</code></strong>!</li></ol></main></div>
+<footer class="site-footer">
+  <div>Mothman · StarCraft II bots on AI Arena</div>
+  <div>Updated 2026-11-28 04:04 UTC · <a href="https://github.com/sticklane/mothman-sc2-bot/releases" target="_blank" rel="noopener noreferrer">Replay Archives</a></div>
+</footer>
+
+<script>
+(function() {
+  // 1. Mobile menu toggle
+  const toggle = document.getElementById('nav-toggle');
+  const drawer = document.getElementById('mobile-drawer');
+  if (toggle && drawer) {
+    toggle.addEventListener('click', function() {
+      const open = drawer.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.textContent = open ? 'Close' : 'Menu';
+    });
+  }
+
+  // 2. Auto-pause other videos when one starts playing
+  document.addEventListener('play', function(e) {
+    if (e.target && e.target.tagName === 'VIDEO') {
+      document.querySelectorAll('video').forEach(function(v) {
+        if (v !== e.target && !v.paused) v.pause();
+      });
+    }
+  }, true);
+
+  // 3. Image Lightbox Modal
+  const imgs = Array.from(document.querySelectorAll('img.clip-img'));
+  if (imgs.length) {
+    const lb = document.createElement('div');
+    lb.className = 'modal-overlay';
+    lb.innerHTML =
+      '<div class="modal-controls">' +
+        '<button class="modal-btn" id="lb-prev">Prev</button>' +
+        '<button class="modal-btn" id="lb-next">Next</button>' +
+        '<a class="modal-btn" id="lb-raw" target="_blank" rel="noopener noreferrer">Open file</a>' +
+        '<button class="modal-btn" id="lb-close">Close</button>' +
+      '</div>' +
+      '<img id="lb-img" alt="" />' +
+      '<div class="modal-caption" id="lb-cap"></div>';
+    document.body.appendChild(lb);
+    const lbImg = document.getElementById('lb-img');
+    const lbCap = document.getElementById('lb-cap');
+    const lbRaw = document.getElementById('lb-raw');
+    let cur = 0;
+    function show(i) {
+      cur = (i + imgs.length) % imgs.length;
+      const src = imgs[cur].getAttribute('data-lightbox-src') || imgs[cur].src;
+      const alt = imgs[cur].getAttribute('data-lightbox-alt') || imgs[cur].alt || '';
+      lbImg.src = src;
+      lbImg.alt = alt;
+      lbRaw.href = src;
+      lbCap.textContent = (cur + 1) + ' of ' + imgs.length + (alt ? ' — ' + alt : '');
+      lb.classList.add('open');
+    }
+    function closeLb() { lb.classList.remove('open'); }
+    imgs.forEach(function(im, idx) { im.addEventListener('click', function() { show(idx); }); });
+    document.getElementById('lb-prev').addEventListener('click', function(e) { e.stopPropagation(); show(cur - 1); });
+    document.getElementById('lb-next').addEventListener('click', function(e) { e.stopPropagation(); show(cur + 1); });
+    document.getElementById('lb-close').addEventListener('click', function(e) { e.stopPropagation(); closeLb(); });
+    lb.addEventListener('click', function(e) { if (e.target === lb) closeLb(); });
+    document.addEventListener('keydown', function(e) {
+      if (!lb.classList.contains('open')) return;
+      if (e.key === 'Escape') closeLb();
+      else if (e.key === 'ArrowRight') show(cur + 1);
+      else if (e.key === 'ArrowLeft') show(cur - 1);
+    });
+  }
+
+  // 4. Video Theater Modal (delegated for both report videos and dynamic gallery cards)
+  const vm = document.createElement('div');
+  vm.className = 'modal-overlay';
+  vm.innerHTML =
+    '<div class="modal-controls">' +
+      '<a class="modal-btn" id="vm-raw" target="_blank" rel="noopener noreferrer">Download MP4</a>' +
+      '<button class="modal-btn" id="vm-close">Close</button>' +
+    '</div>' +
+    '<video id="vm-video" controls playsinline webkit-playsinline preload="metadata"></video>' +
+    '<div class="modal-caption" id="vm-cap"></div>';
+  document.body.appendChild(vm);
+  const vmVideo = document.getElementById('vm-video');
+  const vmCap = document.getElementById('vm-cap');
+  const vmRaw = document.getElementById('vm-raw');
+  function closeVm() {
+    vmVideo.pause();
+    vmVideo.innerHTML = '';
+    vmVideo.removeAttribute('src');
+    vmVideo.load();
+    vm.classList.remove('open');
+  }
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest('.video-theater-btn');
+    if (!btn) return;
+    const src = btn.getAttribute('data-video-src') || '';
+    const poster = btn.getAttribute('data-video-poster') || '';
+    const title = btn.getAttribute('data-video-title') || '';
+    if (!src) return;
+    document.querySelectorAll('video').forEach(function(v) { if (!v.paused) v.pause(); });
+    vmVideo.innerHTML = '';
+    const sourceEl = document.createElement('source');
+    sourceEl.src = src;
+    sourceEl.type = 'video/mp4';
+    vmVideo.appendChild(sourceEl);
+    if (poster) vmVideo.poster = poster; else vmVideo.removeAttribute('poster');
+    vmVideo.load();
+    vmRaw.href = src;
+    vmCap.textContent = title;
+    vm.classList.add('open');
+    vmVideo.play().catch(function() {});
+  });
+  document.getElementById('vm-close').addEventListener('click', function(e) { e.stopPropagation(); closeVm(); });
+  vm.addEventListener('click', function(e) { if (e.target === vm) closeVm(); });
+  document.addEventListener('keydown', function(e) {
+    if (vm.classList.contains('open') && e.key === 'Escape') closeVm();
+  });
+
+  // 5. Open ancestor <details> when jumping to an in-page hash anchor (e.g. archived Loops 29-40)
+  function openDetailsForHash(hash) {
+    if (!hash || hash.length < 2) return;
+    const el = document.getElementById(decodeURIComponent(hash.slice(1)));
+    if (!el) return;
+    let p = el.parentElement;
+    while (p) {
+      if (p.tagName === 'DETAILS') p.open = true;
+      p = p.parentElement;
+    }
+  }
+  window.addEventListener('hashchange', function() { openDetailsForHash(window.location.hash); });
+  if (window.location.hash) openDetailsForHash(window.location.hash);
+  document.addEventListener('click', function(e) {
+    const a = e.target.closest('a[href^="#"]');
+    if (a) openDetailsForHash(a.getAttribute('href'));
+  });
+})();
+</script>
+
+
+
+</body>
+</html>
