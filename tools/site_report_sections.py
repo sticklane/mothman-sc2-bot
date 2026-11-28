@@ -376,18 +376,18 @@ def load_rich_report_telemetry(
                 if "SHIP" in st and "HOLD" not in st and "FAIL" not in st:
                     iid = str(it.get("id") or "")
                     shipped_ids.add(iid)
-                    m_li = re.search(r"iter(\d+)([a-z]?)_ship(\d+)_full", iid, flags=re.I)
+                    m_li = re.search(r"iter(\d+)([a-z]?)(?:_([a-z0-9]+))?_ship(\d+)_full", iid, flags=re.I)
                     if m_li:
-                        li_n, ls_n = int(m_li.group(1)), int(m_li.group(3))
+                        li_n, ls_n = int(m_li.group(1)), int(m_li.group(4))
                         if (li_n, ls_n) > (live_ship_iter, live_ship_num):
                             live_ship_iter, live_ship_num = li_n, ls_n
         except Exception:
             pass
 
-    def _is_shipped_build(it_n: int, suf: str, sh_n: int) -> bool:
-        canon_id = f"iter{it_n}{suf.lower()}_ship{sh_n}_full"
+    def _is_shipped_build(it_n: int, suf: str, sh_n: int, canon_id: str = "") -> bool:
+        cid = (canon_id or f"iter{it_n}{suf.lower()}_ship{sh_n}_full").lower()
         return (
-            (canon_id in shipped_ids)
+            (cid in shipped_ids)
             or (it_n == 57 and not suf and sh_n == 10)
             or (it_n == 59 and suf.lower() == "c" and sh_n == 11)
             or (it_n == 60 and suf.lower() == "b" and sh_n == 12)
@@ -406,6 +406,7 @@ def load_rich_report_telemetry(
             or (it_n == 85 and suf.lower() == "c" and sh_n == 25)
             or (it_n == 86 and suf.lower() == "e" and sh_n == 26)
             or (it_n == 87 and suf.lower() == "g" and sh_n == 27)
+            or (it_n == 88 and suf.lower() == "e" and sh_n == 28 and cid == "iter88e_clean_ship28_full")
         )
 
     # A2. Load Combat Positioning (Section 5) & Army-Group Positioning (Section 6) vs. Pro
@@ -414,15 +415,16 @@ def load_rich_report_telemetry(
     latest_pro_deep: Optional[Tuple[Tuple[int, int, int, str, int, float], str, Path]] = None
     if loop_scratch_a.is_dir():
         for pdp in loop_scratch_a.glob("iter*_ship*_full/pro_deep.json"):
-            m_pd = re.fullmatch(r"iter(\d+)([a-z]?)_ship(\d+)_full", pdp.parent.name, flags=re.I)
+            m_pd = re.fullmatch(r"iter(\d+)([a-z]?)(?:_([a-z0-9]+))?_ship(\d+)_full", pdp.parent.name, flags=re.I)
             if not m_pd or not pdp.is_file():
                 continue
             it_n = int(m_pd.group(1))
             suf = m_pd.group(2).upper()
-            sh_n = int(m_pd.group(3))
-            canon_pd = f"iter{it_n}{suf.lower()}_ship{sh_n}_full"
+            mid = (m_pd.group(3) or "").lower()
+            sh_n = int(m_pd.group(4))
+            canon_pd = f"iter{it_n}{suf.lower()}{('_' + mid) if mid else ''}_ship{sh_n}_full"
             is_anchor = 1 if (active_wave_id and canon_pd == active_wave_id) else 0
-            is_sh = 1 if _is_shipped_build(it_n, suf, sh_n) else 0
+            is_sh = 1 if _is_shipped_build(it_n, suf, sh_n, canon_pd) else 0
             rk = (is_anchor, is_sh, it_n, suf, sh_n, pdp.stat().st_mtime)
             if latest_pro_deep is None or rk > latest_pro_deep[0]:
                 latest_pro_deep = (rk, f"Build {it_n}{suf}", pdp)
@@ -1029,15 +1031,16 @@ def load_rich_report_telemetry(
         latest_is_shipped = False
         best_ship_key: Tuple[int, int, int, str, int, str] = (-1, -1, -1, "", -1, "")
         for rid, _cnt in ship_cands:
-            m_sh = re.search(r"iter(\d+)([a-z]?)_ship(\d+)_full", str(rid), flags=re.I)
+            m_sh = re.search(r"iter(\d+)([a-z]?)(?:_([a-z0-9]+))?_ship(\d+)_full", str(rid), flags=re.I)
             if not m_sh:
                 continue
             it_n = int(m_sh.group(1))
             suf = m_sh.group(2).upper()
-            sh_n = int(m_sh.group(3))
-            canon_sh = f"iter{it_n}{suf.lower()}_ship{sh_n}_full"
+            mid = (m_sh.group(3) or "").lower()
+            sh_n = int(m_sh.group(4))
+            canon_sh = f"iter{it_n}{suf.lower()}{('_' + mid) if mid else ''}_ship{sh_n}_full"
             is_anchor = 1 if (active_wave_id and canon_sh == active_wave_id) else 0
-            cand_shipped = _is_shipped_build(it_n, suf, sh_n)
+            cand_shipped = _is_shipped_build(it_n, suf, sh_n, canon_sh)
             cand_key = (is_anchor, 1 if cand_shipped else 0, it_n, suf, sh_n, str(rid))
             if cand_key > best_ship_key:
                 best_ship_key = cand_key
@@ -1345,7 +1348,8 @@ def load_rich_report_telemetry(
                  OR m.run_id LIKE '%iter67b_ship19_full%' OR m.run_id LIKE '%iter68c_ship20_full%'
                  OR m.run_id LIKE '%iter73_ship21_full%' OR m.run_id LIKE '%iter81c_ship23_full%'
                  OR m.run_id LIKE '%iter82b_ship24_full%' OR m.run_id LIKE '%iter85c_ship25_full%'
-                 OR m.run_id LIKE '%iter86e_ship26_full%' OR m.run_id LIKE '%iter87g_ship27_full%')
+                 OR m.run_id LIKE '%iter86e_ship26_full%' OR m.run_id LIKE '%iter87g_ship27_full%'
+                 OR m.run_id LIKE '%iter88e_clean_ship28_full%')
         """
 
         # Per-matchup Local stats (All 26 external opponents)
@@ -3379,7 +3383,7 @@ def render_matchup_evaluation_section(
         elif (co.get("selfplay") or {}).get("n"):
             sp = co["selfplay"]
             rid_low = str(cb.get("run_id") or "").lower()
-            if "iter81c_" in rid_low or "iter82b_" in rid_low or "iter85c_" in rid_low or "iter86e_" in rid_low or "iter87g_" in rid_low:
+            if "iter81c_" in rid_low or "iter82b_" in rid_low or "iter85c_" in rid_low or "iter86e_" in rid_low or "iter87g_" in rid_low or "iter88e_" in rid_low:
                 chips.append(
                     (f"Head-to-Head ({sp['n']}g)", f"{_fmt_wlt(sp)}", f"{sp['wr']:.1f}% vs. prev live · {sp['tr']:.2f}×")
                 )
@@ -4091,7 +4095,26 @@ def render_matchup_evaluation_section(
         run_id_low = str(pro_curves.get("run_id") or "").lower()
         live_ship_n = int(cb.get("live_ship_num") or cb.get("ship_num") or 0)
         live_loop_n = int(cb.get("live_loop_num") or cb.get("loop_num") or 0)
-        if live_ship_n >= 27 or "iter87g_" in run_id_low:
+        if live_ship_n >= 28 or "iter88e_" in run_id_low:
+            r_mech_para = f"""
+    <div class="release-highlights">
+      <div class="rh-kicker">What Changed in Release #{live_ship_n} ({html.escape(build_lbl)})</div>
+      <ul class="rh-list">
+        <li><strong>Declarative Pro-backed macro plan &amp; slack escrow engine:</strong> Replaced 23 escrow overrides, 9 duplicate gas valves, and 470 lines of brittle macro logic with a compiled Grandmaster curve plan connected to all seven enemy-belief dimensions and a time-horizon slack escrow engine.</li>
+        <li><strong>Zero-hardcoded-APM governor &amp; unified tactical operations:</strong> Deleted all hardcoded APM percentage ceilings in favor of continuous priority-driven allocation under a single 500-APM cap plus per-unit repair deduplication, which cut urgent macro command drops 93.7% while unifying army posture and home-perimeter defense.</li>
+        <li><strong>Head-to-head surge, Protoss &amp; enemy-belief highs:</strong> Beat Release #27 4–2–0 head-to-head (1.10× trade, 1.47% supply-blocked), lifted Protoss to a 9–15–2 external high with just 4 gas-starved games, and pushed enemy upgrade belief F1 to 0.88 (387 army-value error) with zero real crashes, wire rejects, or self-cancels.</li>
+      </ul>
+      <details style="margin-top:0.65rem;">
+        <summary>Release #{live_ship_n} benchmark, architecture &amp; trade-off audit</summary>
+        <ul class="compact-list" style="margin-top:0.5rem;">
+          <li><strong>Full 84-match benchmark &amp; cohort gains:</strong> Finished 31–45–8 overall (36.9% wins, 0.70× trade, 2.20% supply-blocked, 18.63 ms average step time, zero real crashes, wire rejects, or self-cancels), beat Release #27 4–2–0 head-to-head (66.7% wins, 1.10× trade, 1.47% supply-blocked), held Core-14 at 18–21–3 (42.9% wins, 0.84× trade), and lifted Protoss to a 9–15–2 external record (34.6% wins, 0.59× trade, 1.73% supply-blocked, only 4 gas-rich mineral-starved games).</li>
+          <li><strong>Honest external trade-offs to address next:</strong> External play finished 27–43–8 (34.6% wins, 0.65× trade; 77 contested games in the Pro comparison charts below after one 0:00 opponent timeout against Mulebot), with the 12 held-out bots at 9–22–5 (25.0% wins), Zerg at 11–12–3 (42.3% wins, 0.79× trade, down from 14–10–2 in Release #27), and Terran at 7–16–3 (26.9% wins, 0.58× trade after peaking at 13–13–0 and 1.02× in an earlier Loop 88 run) amid seven wall-clock ties and four host-load step timeouts.</li>
+          <li><strong>Record 7-dimension enemy belief accuracy (83 logged matches, 653 checkpoints):</strong> Upgrade precision/recall/F1 reached 89.2%/86.1%/87.6% (Terran 90%, Zerg 87%, Protoss 86%), army-value error fell to a record 387, worker error held at 7.3, base error at 0.64, and gas error at 1.15. Early main-gas scouting recall at 2:00 and 3:00 reached 63.0%/63.0% for Protoss, 36.0%/50.0% for Terran, and 4.3%/70.8% for Zerg.</li>
+          <li><strong>Clean-architecture audit, continuous eval &amp; standalone smoke:</strong> Added a permanent pre-release generality and layering audit enforcing zero opponent-specific hacks, zero hardcoded APM tiers, and all seven enemy-belief dimensions wired into live control loops, alongside a continuous background evaluation daemon and sharded tactics-drill streaming. All five compiled standalone binaries (Mothman-Z, Mothman-T, Mothman-P, Mothman-X, and Mothman-XC) passed standalone smoke cleanly in 42.77 s at 12.2 ms average step time with zero crashes or wire rejects.</li>
+        </ul>
+      </details>
+    </div>"""
+        elif live_ship_n >= 27 or "iter87g_" in run_id_low:
             r_mech_para = f"""
     <div class="release-highlights">
       <div class="rh-kicker">What Changed in Release #{live_ship_n} ({html.escape(build_lbl)})</div>

@@ -4460,8 +4460,8 @@ def _render_standings_tables(
         note_html = (
             '<p class="table-note">'
             f"AI Arena ratings start at 1600. All {acct_word} active ladder accounts run "
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/46062304891" target="_blank" rel="noopener noreferrer"><strong>Release #27 (Build 87G)</strong></a>, '
-            "which ships 7-dimension fog-of-war enemy belief tracking (0.86 upgrade F1), a tiered APM-500 fairness governor, uninterrupted Nexus and Command Center worker training, Pro-tuned Version C playbooks, and our highest external win rate locally (31–42–5, 39.7%). "
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/46104426775" target="_blank" rel="noopener noreferrer"><strong>Release #28 (Build 88E)</strong></a>, '
+            "which replaces hardcoded APM tiers and 23 legacy escrow overrides with a declarative Pro-backed macro plan, continuous single-cap priority allocation, unified tactical operations, record enemy belief tracking (0.88 upgrade F1), and a 4–2–0 head-to-head win over Release #27. "
             f"Current-season accounts hold {html.escape(crash_phrase)}{html.escape(vc_note_tail)}. "
             "Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
@@ -4911,8 +4911,8 @@ def build_history_page(
         f"The first deployed build went 0–10 on AI Arena. Recent v1 builds win roughly 55–61% of their games: "
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
         f"and Release #9 (Build 51) climbed to 19–9–3 (61.3% wins). Release #21 (Build 73) went 40–19–1 (66.7%, 31–7–1 in Division 9) "
-        f"and promoted both Mothman-P and Mothman-T, followed by Releases #22 through #26 and "
-        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/46062304891" target="_blank" rel="noopener noreferrer">Release #27 (Build 87G)</a> '
+        f"and promoted both Mothman-P and Mothman-T, followed by Releases #22 through #27 and "
+        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/46104426775" target="_blank" rel="noopener noreferrer">Release #28 (Build 88E)</a> '
         f"across all 12 active ladder bots (8 macro accounts plus 4 early-pressure Version C accounts)."
     )
 
@@ -4990,6 +4990,7 @@ def build_history_page(
         "iter85c_ship25_full": 25,
         "iter86e_ship26_full": 26,
         "iter87g_ship27_full": 27,
+        "iter88e_clean_ship28_full": 28,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:
@@ -5237,8 +5238,9 @@ def build_history_page(
     </p>
   </div>
   <div class="release-highlights" style="margin-bottom:1.15rem;">
-    <div class="rh-kicker">Recent Campaign &amp; Release Arc (Loops 69–87)</div>
+    <div class="rh-kicker">Recent Campaign &amp; Release Arc (Loops 69–88)</div>
     <ul class="rh-list">
+      <li><strong>Loops 88A–88E (Shipped as Release #28):</strong> Replaced 23 escrow overrides, 9 duplicate gas valves, and 470 lines of brittle macro rules with a compiled Grandmaster curve game plan wired to all seven enemy-belief dimensions plus a time-horizon slack escrow engine; deleted all hardcoded APM percentage tiers for continuous single-cap 500-APM priority allocation and repair deduplication (-93.7% urgent macro drops); unified army posture and home-perimeter defense; and added a permanent generality and layering audit gate plus a continuous background evaluation daemon. Beat Release #27 4–2–0 head-to-head (66.7% wins, 1.10× trade, 1.47% supply-blocked), lifted Protoss to a 9–15–2 external high (4 gas-starved games), set enemy-belief highs at 0.88 upgrade F1 (387 army-value error), and finished 31–45–8 overall (2.20% supply-blocked, zero real crashes, wire rejects, or self-cancels) with 5-for-5 standalone binary smoke (12.2 ms step time); external trade-offs to address next are 27–43–8 external (77 contested games after one 0:00 opponent timeout against Mulebot), 9–22–5 against the 12 held-out bots, Zerg 11–12–3, and Terran 7–16–3 amid seven wall-clock ties and four host-load step timeouts.</li>
       <li><strong>Loops 87A–87G (Shipped as Release #27):</strong> Built and calibrated 7-dimension fog-of-war enemy belief tracking across all 84 local matches (upgrade F1 climbed from 0.51 to 0.86 at 89.3% precision and 83.5% recall; worker error fell to 7.0 workers, base error to 0.60, and gas error to 1.08), shipped a strict tiered APM-500 fairness governor that cut external urgent macro drops 66% (84% for Zerg) and burst-bucket drops 94%, decoupled idle Nexus and Command Center worker slots from combat savings, cleared a non-cloak ZvT Overseer deadlock, and upgraded Version C with 18 follow-up transitions plus a ground-pathing 3-Pylon Cannon Rush wall solver (Mothman-TC 10–9–7 at 0.83× trade, Mothman-ZC 8–11–7 at 0.35% supply-blocked, Cannon Rush test trade 0.72× to 1.16×). Set all-time local external highs at 31–42–5 (39.7% wins; 30–42–5 across 77 contested games after one early opponent crash against Chance), 13–21–2 against the 12 held-out bots (36.1% wins), and 14–10–2 for Zerg (53.8% wins, 1.01× trade) at exact 50.0% North/South spawn balance (32–47–5 overall, zero crashes or wire rejects), while Terran dipped to 9–16–1 (0.79× trade) and head-to-head finished 1–5 against Release #26 (300-APM baseline) due to SCV repair command floods hitting the fixed 390-APM routine-micro ceiling; cleared all 5 standalone compiled binaries in 29.42 s (7.14 ms step time).</li>
       <li><strong>Loops 86–86E (Shipped as Release #26):</strong> Added fog-of-war enemy base and gas deduplication with live enemy-economy tracking (0.15-base error at 2:00 and 0.75 at 6:00 across 84 games; scout Overlord losses held to 3.7%), anti-greed 4th-to-6th base scaling with gas-balance worker pullbacks (cutting external gas-rich mineral starvation 68%, 22 to 7, and halving zero-kill and economic efficiency collapses), and anti-turtle outer-base targeting with rear mobile detector escorts while holding Protoss live walling at 82.8% (zero self-traps) and Terran at 96.4%. Set overall highs at 34–43–7 (40.5% wins, 0.89× trade) and 30–41–7 external (0.83× trade), lifted 12 Held-Out Bots from 16.7% to 30.6% wins (0.68× trade), pushed Zerg to 13–11–2 (50.0% wins, 0.84× trade) and Terran to 1.04× external trade, beat Release #25 4–2 (1.49×) head-to-head, and went 3–0–2 unbeaten in standalone 5-bot smoke (10.05 ms step time).</li>
       <li><strong>Loops 83–85C (Shipped as Release #25):</strong> Upgraded the combat drill harness to real Fog-of-War with macro actions disabled (zero macro leaks across 133 checks, 55–54–6 core pass at 1.11× trade, 9–0 creep Transfusion checks, 12–2–1 self-play at 1.76× and 97.0% active firing share); built and deployed four Version C early-pressure bots (Mothman-PC, Mothman-TC, Mothman-ZC, Mothman-XC) with 18 pre-6:00 playbooks across all 9 matchups (Mothman-TC went 12–11–3 locally, combined coverage reached 19 of 26 opponents, and the four accounts opened 6–2 on AI Arena); and overhauled main macro walling and rush defense so Protoss reached 82.8% live walls (PvZ 77.8%, PvT 90.0%, zero self-traps), Terran sealed 100.0% at 4:30 with zero Barracks lifts, rush detection hit 100% true-positive precision (13 of 13), and Terran plus Zerg went 8–0–4 unbeaten against all 12 pro cheeses. Lifted overall trade to 0.78× (30–45–9, 2.4% supply-blocked), held-out trade from 0.37× to 0.55×, beat Release #24 4–2 (1.20×) head-to-head, and swept 5–0 in standalone smoke (9.77× trade).</li>
@@ -5253,7 +5255,7 @@ def build_history_page(
   </div>
   {shipped_table_html}
   <p class="table-note" style="margin:-0.65rem 0 1.05rem;">
-    Release #27 (Build 87G) set local external highs at 31–42–5 (39.7% wins, 0.74× trade; 30–42–5 across 77 contested games after one early opponent crash), 13–21–2 (36.1% wins) against the 12 held-out bots, and 14–10–2 (53.8% wins, 1.01× trade) for Zerg under a strict APM-500 fairness cap with exact 42 North / 42 South spawn balance (32–47–5 across all 84 matches, 0.86 enemy upgrade belief F1, zero crashes or wire rejects; Terran dipped to 9–16–1 and head-to-head finished 1–5 vs. Release #26's 300-APM baseline from SCV repair floods hitting the fixed 390-APM micro ceiling) alongside a 5-for-5 crash-free standalone binary smoke across all macro and Version C builds. Release #22 (Build 79B) kept Release #21's macro code untouched and cleared deployment via 12–1 live drill verification against Carriers, Swarm Hosts, and Liberators rarely fielded by the local bot pool.
+    Release #28 (Build 88E) beat Release #27 4–2–0 head-to-head (66.7% wins, 1.10× trade, 1.47% supply-blocked), lifted Protoss to a 9–15–2 external high, pushed enemy upgrade belief F1 to 0.88 (387 army-value error), cut urgent macro drops 93.7% with zero hardcoded APM tiers, and finished 31–45–8 across all 84 local matches (zero real crashes, wire rejects, or self-cancels) plus 5-for-5 standalone binary smoke; external play finished 27–43–8 (77 contested games after one 0:00 opponent timeout against Mulebot, with 12 held-out bots at 9–22–5, Zerg 11–12–3, and Terran 7–16–3 amid seven wall-clock ties and four host-load step timeouts). Release #22 (Build 79B) kept Release #21's macro code untouched and cleared deployment via 12–1 live drill verification against Carriers, Swarm Hosts, and Liberators rarely fielded by the local bot pool.
   </p>
   {ledger_section}
   {hist_faults}
@@ -5528,7 +5530,7 @@ def _sanitize_flywheel_retro_md(md: str, repo_dir: Optional[Path] = None) -> str
             if in_6b and ss.startswith("|") and not ss.startswith("| Loop") and not ss.startswith("|---"):
                 scells = [c.strip().strip("`") for c in ss.strip("|").split("|")]
                 if len(scells) >= 6:
-                    m_sub = re.fullmatch(r"(L\d+)([A-Z]*)", scells[0])
+                    m_sub = re.fullmatch(r"(L\d+)([A-Z_]*)", scells[0])
                     if m_sub:
                         sub_by_wall.setdefault((m_sub.group(1), scells[5]), []).append(scells[0])
                     if scells[1] in ("18", "24"):
@@ -5551,6 +5553,11 @@ def _sanitize_flywheel_retro_md(md: str, repo_dir: Optional[Path] = None) -> str
                 "L87D": ("Version C 78g", "YES", "Version C playbook gate", "Tested 18 early-pressure follow-up transitions across 78 Version C games (18–38–22, 1.39% supply-blocked), held to fix Protoss cannon walling"),
                 "L87E": ("Version C 78g", "YES", "Version C playbook gate", "Lifted Mothman-TC to 10–9–7 and Mothman-ZC to 8–11–7 (0.35% supply-blocked) across 78 games, held for Protoss Ground-BFS cannon solver"),
                 "L87F": ("4–2", "YES", "Gas pull & APM-500 drops", "Beat Release #26 4–2 head-to-head with Terran at 11–13–2, but aggressive gas-worker floors tripled mineral starvation (11 to 34) and routine micro crowded urgent macro (fixed in L87G)"),
+                "L88A": ("Canary-18", "YES", "Flow-gas & hold tuning", "Cleared Zerg Spire bank freezes (2.53× win), then stopped at the 18-match canary gate (6–12) to refine early gas demand and stacked operation holds"),
+                "L88B": ("Canary-18", "YES", "Tech Lab cancel & horizon", "Lifted canary play to 9–8–1 with Terran flipping oberon (2.46×), then held to remove Factory Tech Lab cancels and double-counted gas horizons"),
+                "L88C": ("Full-84", "YES", "Zerg cohesion & gas pull", "Cleared all self-cancels (0) and pushed Protoss to 9–14–3, then held after multi-hatchery Zerg cohesion double-penalties and mineral starvation"),
+                "L88D": ("Full-84", "YES", "Zerg pullback & escrow cap", "Cut urgent command drops 94% and pushed Terran to 13–13 (50.0% wins, 1.02× trade), then held to fix Zerg Queen retention and additive escrow floors"),
+                "L88E": ("2–3–1", "YES", "Host-load rerun", "Beat Release #27 overall and hit 0.87 upgrade belief F1, then reran cleanly as L88E Clean after concurrent host load caused seven step timeouts"),
             }
 
             def _disambig_3a_row(m: re.Match[str]) -> str:
@@ -5725,6 +5732,7 @@ def _sanitize_flywheel_retro_md(md: str, repo_dir: Optional[Path] = None) -> str
     text = re.sub(r"\b(\d+)W-(\d+)L\b", r"\1–\2", text)
     text = re.sub(r"\bgoes (\d+)-(\d+)\b", r"goes \1–\2", text)
     text = re.sub(r"\bL(\d+)[–-]L(\d+)\b", r"Loops \1–\2", text)
+    text = re.sub(r"\b(L\d+[A-Z])_CLEAN\b", r"\1 Clean", text)
     text = re.sub(
         r"Across (Loops \d+–\d+), Engineering changes \(([^)]+)\) and 84-match benchmark \(([^)]+)\) account for most wall time, while Head-to-head gate averages \*\*([^*]+)\*\* and catches most held regressions early\.",
         r"Across \1, engineering changes (\2) and the 84-match benchmark (\3) are the two largest active phases, while the head-to-head gate averages **\4** when run and catches most held regressions early.",
